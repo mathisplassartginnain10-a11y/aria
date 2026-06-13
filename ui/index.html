@@ -1,0 +1,1787 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ARIA</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #1C1C1E;
+      --surface: #2C2C2E;
+      --card: #3A3A3C;
+      --hover: #3A3A3C;
+      --border: rgba(255,255,255,0.08);
+      --border2: rgba(255,255,255,0.12);
+      --accent: #FF6B35;
+      --accent-bg: rgba(255,107,53,0.1);
+      --text: #ECECEC;
+      --text2: #98989E;
+      --text3: #636366;
+      --success: #4ADE80;
+      --warning: #FBBF24;
+      --error: #F87171;
+      --user-bg: #3A3A3C;
+      --user-radius: 18px;
+      --user-font: 15px;
+      --aria-font: 15px;
+    }
+
+    body.theme-warm { --accent:#F59E0B; --accent-bg:rgba(245,158,11,0.12); }
+    body.theme-forest { --accent:#4ADE80; --accent-bg:rgba(74,222,128,0.12); }
+    body.theme-rose { --accent:#F472B6; --accent-bg:rgba(244,114,182,0.12); }
+    body.theme-mono { --accent:#ECECEC; --accent-bg:rgba(255,255,255,0.08); }
+    body.theme-contrast { --accent:#fff; --accent-bg:rgba(255,255,255,0.15); --text:#fff; --text2:#ccc; --border:rgba(255,255,255,0.2); }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+    }
+
+    body.reduced-motion * { animation: none !important; transition: none !important; }
+
+    /* ── Sidebar ── */
+    #sidebar {
+      width: 260px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+
+    .sidebar-brand {
+      padding: 20px 18px 12px;
+    }
+
+    .sidebar-brand #assistant-name {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: -0.02em;
+    }
+
+    .sidebar-sub {
+      font-size: 12px;
+      color: var(--text3);
+      margin-top: 2px;
+    }
+
+    #orb-canvas {
+      display: block;
+      margin: 4px auto 0;
+      opacity: 0.85;
+    }
+
+    #status-text {
+      text-align: center;
+      font-size: 11px;
+      color: var(--text3);
+      padding: 4px 12px 12px;
+    }
+
+    .sidebar-sep {
+      height: 1px;
+      background: var(--border);
+      margin: 0 12px 8px;
+    }
+
+    .sidebar-nav {
+      padding: 0 8px;
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .nav-item {
+      padding: 9px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      color: var(--text2);
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 2px;
+    }
+
+    .nav-item:hover, .nav-item.active {
+      background: var(--hover);
+      color: var(--text);
+    }
+
+    .nav-item.active { background: var(--accent-bg); color: var(--accent); }
+
+    .conv-item { padding:8px 10px;border-radius:6px;cursor:pointer;margin-bottom:2px;transition:background 0.15s; }
+    .conv-item:hover { background:var(--hover); }
+    .conv-title { font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+    .conv-meta { font-size:10px;color:var(--text3);margin-top:2px; }
+
+    .stat-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      text-align: center;
+    }
+    .stat-val { font-size: 16px; font-weight: 600; color: var(--accent); }
+    .stat-label { font-size: 10px; color: var(--text3); margin-top: 2px; }
+
+    .sidebar-section-label {
+      font-size: 10px;
+      color: var(--text3);
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      padding: 8px 12px 4px;
+    }
+
+    .preset-row {
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      color: var(--text2);
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      margin-bottom: 2px;
+    }
+
+    .preset-row:hover { background: var(--hover); color: var(--text); }
+    .preset-row.active { background: var(--accent-bg); color: var(--accent); }
+
+    .sidebar-footer {
+      padding: 12px 16px 16px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .sidebar-footer button {
+      background: transparent;
+      border: none;
+      color: var(--text2);
+      cursor: pointer;
+      font-size: 18px;
+      padding: 6px;
+      border-radius: 8px;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .sidebar-footer button:hover { background: var(--hover); color: var(--text); }
+
+    .sidebar-version {
+      font-size: 11px;
+      color: var(--text3);
+    }
+
+    /* ── Main ── */
+    #main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      min-width: 0;
+    }
+
+    #header {
+      height: 52px;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      padding: 0 24px;
+      flex-shrink: 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    #header-title {
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--text2);
+      text-align: center;
+      letter-spacing: -0.01em;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      justify-self: end;
+    }
+
+    .hbtn {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text2);
+      cursor: pointer;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+      padding: 0;
+    }
+
+    .hbtn:hover { background: var(--hover); border-color: var(--border2); color: var(--text); }
+    .hbtn.active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+
+    #stop-btn {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(248,113,113,0.15);
+      border: 1px solid var(--error);
+      color: var(--error);
+      padding: 6px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 12px;
+      font-family: inherit;
+    }
+
+    #chat-column {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      max-width: 720px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    #chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 32px 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    #empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      color: var(--text3);
+      margin: auto;
+      padding: 40px 0;
+    }
+
+    #empty-state.hidden { display: none !important; }
+
+    #empty-state .empty-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: var(--accent-bg);
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    #empty-state .empty-title {
+      font-size: 15px;
+      color: var(--text2);
+      font-weight: 500;
+    }
+
+    #empty-state .empty-sub {
+      font-size: 13px;
+      color: var(--text3);
+    }
+
+    /* ── Bubbles ── */
+    .bubble-user {
+      align-self: flex-end;
+      max-width: 85%;
+      background: var(--user-bg);
+      border-radius: var(--user-radius) var(--user-radius) 4px var(--user-radius);
+      padding: 14px 18px;
+      font-size: var(--user-font);
+      line-height: 1.75;
+      animation: fadeIn 0.2s ease-out;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--text);
+    }
+
+    .bubble-user.center { align-self: center; }
+
+    .bubble-aria-wrap {
+      align-self: flex-start;
+      max-width: 100%;
+      display: flex;
+      gap: 14px;
+      animation: fadeIn 0.2s ease-out;
+    }
+
+    .bubble-aria-wrap.center { align-self: center; }
+    .bubble-aria-wrap.no-avatar .bubble-avatar { display: none; }
+
+    .bubble-avatar {
+      width: 26px;
+      height: 26px;
+      border-radius: 7px;
+      background: var(--accent-bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      flex-shrink: 0;
+      color: var(--accent);
+      margin-top: 3px;
+      font-weight: 600;
+    }
+
+    .bubble-body { flex: 1; min-width: 0; }
+
+    .bubble-content {
+      font-size: var(--aria-font);
+      line-height: 1.75;
+      color: var(--text);
+      padding-top: 2px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .bubble-content code {
+      background: #1A1A1C;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-family: 'Consolas', 'SF Mono', monospace;
+      font-size: 13px;
+    }
+
+    .bubble-content pre {
+      background: #1A1A1C;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+      overflow-x: auto;
+      margin: 12px 0;
+      font-family: 'Consolas', 'SF Mono', monospace;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .bubble-time {
+      font-size: 10px;
+      color: var(--text3);
+      margin-top: 8px;
+    }
+
+    .copy-btn {
+      opacity: 0;
+      transition: opacity 0.15s;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 11px;
+      color: var(--text3);
+      cursor: pointer;
+      margin-top: 8px;
+      display: inline-block;
+      font-family: inherit;
+    }
+
+    .bubble-aria-wrap:hover .copy-btn { opacity: 1; }
+    .copy-btn:hover { color: var(--text); background: var(--hover); }
+
+    .cursor-blink {
+      display: inline-block;
+      width: 2px;
+      height: 16px;
+      background: var(--accent);
+      margin-left: 2px;
+      vertical-align: text-bottom;
+      animation: blink 1s step-end infinite;
+    }
+
+    /* ── Input bar ── */
+    #input-bar {
+      position: sticky;
+      bottom: 0;
+      background: var(--bg);
+      padding: 16px 20px 24px;
+      max-width: 720px;
+      margin: 0 auto;
+      width: 100%;
+      flex-shrink: 0;
+    }
+
+    .input-wrapper {
+      position: relative;
+      width: 100%;
+    }
+
+    #text-input {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 14px 92px 14px 46px;
+      font-size: 15px;
+      color: var(--text);
+      font-family: inherit;
+      outline: none;
+      resize: none;
+      min-height: 52px;
+      max-height: 200px;
+      line-height: 1.5;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    #text-input:focus {
+      border-color: var(--border2);
+      box-shadow: 0 0 0 3px rgba(255,107,53,0.08);
+    }
+
+    #text-input::placeholder { color: var(--text3); }
+
+    #input-mic-btn {
+      position: absolute;
+      left: 10px;
+      bottom: 10px;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: transparent;
+      border: none;
+      color: var(--text3);
+      cursor: pointer;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 0.15s, background 0.15s;
+    }
+
+    #input-mic-btn:hover { color: var(--text); background: var(--hover); }
+    #input-mic-btn.active { color: var(--accent); background: var(--accent-bg); }
+
+    #send-btn {
+      position: absolute;
+      right: 10px;
+      bottom: 10px;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: var(--accent);
+      border: none;
+      color: #fff;
+      cursor: pointer;
+      font-size: 15px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+
+    #send-btn:hover { opacity: 0.9; }
+    #send-btn:active { transform: scale(0.96); }
+
+    #file-btn {
+      position: absolute;
+      right: 48px;
+      bottom: 10px;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--text2);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+      transition: all 0.15s;
+    }
+
+    #file-btn:hover { color: var(--text); background: var(--hover); }
+
+    /* ── Settings panel ── */
+    #settings-panel {
+      position: fixed;
+      top: 0;
+      right: -440px;
+      width: 440px;
+      height: 100vh;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      z-index: 1000;
+      transition: right 0.3s;
+      overflow-y: auto;
+      padding: 20px;
+    }
+
+    #settings-panel.open { right: 0 !important; }
+
+    .settings-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .settings-head h2 { font-size: 16px; font-weight: 600; }
+    .settings-section { margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+    .settings-section:last-child { border-bottom: none; }
+    .settings-title { font-size: 11px; font-weight: 600; color: var(--text3); letter-spacing: 0.8px; text-transform: uppercase; margin-bottom: 12px; }
+    .setting-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; font-size: 13px; color: var(--text2); }
+    .setting-row input[type=range] { width: 120px; accent-color: var(--accent); }
+    .setting-row select, .setting-row input[type=text], .setting-row input[type=color] {
+      background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px;
+      color: var(--text); font-family: inherit; font-size: 12px; max-width: 160px;
+    }
+    .setting-row input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; }
+    .theme-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+    .theme-swatch { height: 32px; border-radius: 8px; border: 2px solid transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 500; color: #fff; }
+    .theme-swatch.active, .theme-swatch:hover { border-color: var(--text); }
+    .settings-btn { width: 100%; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; color: var(--text); font-family: inherit; font-size: 12px; cursor: pointer; margin-bottom: 6px; text-align: left; }
+    .settings-btn:hover { background: var(--hover); }
+    .preset-editor { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+    .preset-editor-title { font-size: 13px; font-weight: 600; margin-bottom: 10px; color: var(--text); }
+    .preset-field { margin-bottom: 8px; }
+    .preset-field label { display: block; font-size: 11px; color: var(--text3); margin-bottom: 3px; }
+    .preset-field input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; color: var(--text); font-family: inherit; font-size: 12px; }
+    .preset-save { width: 100%; margin-top: 6px; padding: 8px; border-radius: 8px; border: 1px solid rgba(255,107,53,0.3); background: var(--accent-bg); color: var(--accent); font-family: inherit; font-size: 12px; cursor: pointer; font-weight: 500; }
+    .radio-group { display: flex; gap: 8px; flex-wrap: wrap; }
+    .radio-group label { font-size: 12px; display: flex; align-items: center; gap: 4px; cursor: pointer; }
+
+    /* ── Modals & toasts ── */
+    #quit-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 9999;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(4px);
+    }
+
+    #quit-modal.open { display: flex !important; }
+
+    .modal-box {
+      background: var(--surface);
+      border: 1px solid var(--border2);
+      border-radius: 14px;
+      padding: 28px;
+      text-align: center;
+      max-width: 300px;
+    }
+
+    .toast {
+      background: var(--surface);
+      border: 1px solid var(--border2);
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 12px;
+      color: var(--text);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      animation: toastIn 0.25s ease-out;
+      max-width: 320px;
+    }
+
+    .toast.success { border-left: 3px solid var(--success); }
+    .toast.error { border-left: 3px solid var(--error); }
+    .toast.warning { border-left: 3px solid var(--warning); }
+    .toast.info { border-left: 3px solid var(--accent); }
+
+    #toast-container {
+      position: fixed;
+      bottom: 24px;
+      left: 280px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 2000;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0,0,0,0);
+      border: 0;
+    }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+    @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+  </style>
+</head>
+<body class="theme-slate">
+
+<!-- Sidebar -->
+<aside id="sidebar">
+  <div class="sidebar-brand">
+    <div id="assistant-name">ARIA</div>
+    <div class="sidebar-sub">Assistant local</div>
+  </div>
+
+  <canvas id="orb-canvas" width="200" height="80"></canvas>
+  <div id="status-text">En veille</div>
+
+  <div class="sidebar-sep"></div>
+
+  <div class="sidebar-nav">
+    <button type="button" onclick="aria.startNewConversation()" style="margin:8px;width:calc(100% - 16px);padding:8px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:8px;color:var(--accent);cursor:pointer;font-family:inherit;font-size:13px">
+      ✏️ Nouvelle conversation
+    </button>
+    <div style="padding:0 8px;font-size:10px;color:var(--text3);letter-spacing:1px;margin:8px 0 4px">HISTORIQUE</div>
+    <div id="conv-list" style="overflow-y:auto;max-height:180px;padding:0 8px"></div>
+    <div class="sidebar-section-label">Modes</div>
+    <div id="presets-list"></div>
+  </div>
+
+  <div class="sidebar-footer">
+    <button type="button" title="Paramètres" onclick="aria.toggleSettings()">⚙</button>
+    <span class="sidebar-version">v2.0.0</span>
+  </div>
+</aside>
+
+<!-- Main -->
+<main id="main">
+  <header id="header">
+    <div></div>
+    <h1 id="header-title">ARIA</h1>
+    <div class="header-actions">
+      <span id="weather-clock" class="sr-only" aria-hidden="true"></span>
+      <span id="model-display" class="sr-only" aria-hidden="true"></span>
+      <button type="button" id="stop-btn" onclick="aria.stopSpeaking()">Stop</button>
+      <button type="button" class="hbtn" id="mic-btn" title="Micro" onclick="aria.toggleMic()">🎤</button>
+    </div>
+  </header>
+
+  <div id="chat-column">
+    <div id="chat-messages">
+      <div id="empty-state">
+        <div class="empty-icon">A</div>
+        <div class="empty-title">Comment puis-je t'aider ?</div>
+        <div class="empty-sub">Parle ou écris un message</div>
+      </div>
+    </div>
+
+    <div id="input-bar">
+      <div class="input-wrapper">
+        <button type="button" id="input-mic-btn" title="Micro" onclick="aria.toggleMic()">🎤</button>
+        <textarea id="text-input" rows="1" placeholder="Envoyer un message à ARIA…"></textarea>
+        <label id="file-btn" title="Joindre un fichier">
+          📎
+          <input type="file" id="file-input" multiple accept="image/*,video/*,.pdf,.txt,.py,.js,.html,.css,.json,.yaml,.md,.csv,.xlsx,.docx" style="display:none" onchange="aria.handleFiles(this.files)">
+        </label>
+        <button type="button" id="send-btn" title="Envoyer" onclick="aria.sendText()">↑</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div id="settings-panel"></div>
+
+<div id="quit-modal">
+  <div class="modal-box">
+    <div style="font-size:15px;font-weight:500;margin-bottom:6px">Fermer ARIA ?</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:20px">Ollama sera arrêté.</div>
+    <div style="display:flex;gap:10px;justify-content:center">
+      <button onclick="window.pywebview.api.quit_aria()" style="background:rgba(248,113,113,0.15);border:1px solid var(--error);color:var(--error);padding:8px 20px;border-radius:8px;cursor:pointer;font-family:inherit">Fermer</button>
+      <button onclick="document.getElementById('quit-modal').classList.remove('open')" style="background:var(--accent-bg);border:1px solid var(--accent);color:var(--accent);padding:8px 20px;border-radius:8px;cursor:pointer;font-family:inherit">Annuler</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+<script>
+const aria = {
+  status: 'idle',
+  theme: 'slate',
+  themes: ['slate','warm','forest','rose','mono','contrast'],
+  themeColors: { slate:'#FF6B35', warm:'#F59E0B', forest:'#4ADE80', rose:'#F472B6', mono:'#ECECEC', contrast:'#ffffff' },
+  settingsOpen: false,
+  trainingInterval: null,
+  rms: 0, displayRms: 0,
+  orbR: 14, targetOrbR: 14,
+  arcA: 0, arcB: 0,
+  orbCtx: null,
+  reducedMotion: false,
+  showTimestamps: true,
+  showAvatars: true,
+  ariaAlign: 'left',
+  weatherText: '',
+  streamingCursor: null,
+  currentWrap: null,
+  currentContent: null,
+  presetKeys: ['vol','etude','gaming','detente','nuit'],
+  defaultPresets: {
+    vol: { label:'Vol', icon:'✈', apps_open:['msfs'], apps_close:['discord','spotify'], volume:50 },
+    etude: { label:'Étude', icon:'📚', apps_open:['cursor'], apps_close:['discord','steam','spotify'], volume:30 },
+    gaming: { label:'Gaming', icon:'🎮', apps_open:['steam','discord'], apps_close:[], volume:80 },
+    detente: { label:'Détente', icon:'🎵', apps_open:['spotify','discord'], apps_close:[], volume:60 },
+    nuit: { label:'Nuit', icon:'🌙', apps_open:[], apps_close:['discord','steam','spotify','chrome'], volume:15, brightness:20 },
+  },
+  presetsCustom: {},
+
+  init() {
+    this.orbCtx = document.getElementById('orb-canvas').getContext('2d');
+    this.buildSettingsPanel();
+    this.loadSettings();
+    this.loadPresets();
+    this.loadConversations();
+    this.setStatus('idle');
+    this.startClock();
+    document.getElementById('text-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.sendText(); }
+    });
+    document.getElementById('text-input').addEventListener('input', e => {
+      e.target.style.height = 'auto';
+      e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
+    });
+
+    const chat = document.getElementById('chat-messages');
+    chat.addEventListener('dragover', e => { e.preventDefault(); chat.style.background = 'rgba(255,107,53,0.05)'; });
+    chat.addEventListener('dragleave', () => { chat.style.background = ''; });
+    chat.addEventListener('drop', e => {
+      e.preventDefault();
+      chat.style.background = '';
+      if (e.dataTransfer?.files?.length) this.handleFiles(e.dataTransfer.files);
+    });
+
+    document.addEventListener('paste', e => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) this.handleFiles([file]);
+        }
+      }
+    });
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') this.stopSpeaking();
+    });
+
+    requestAnimationFrame(() => this.drawOrb());
+  },
+
+  api(name, ...args) {
+    const fn = window.pywebview?.api?.[name];
+    return fn ? fn(...args) : null;
+  },
+
+  drawOrb() {
+    if (!this.reducedMotion) {
+      this.arcA += 0.013;
+      this.arcB -= 0.008;
+      const lvl = Math.min(1, this.rms / 1000);
+      this.displayRms += (lvl - this.displayRms) * 0.1;
+      const active = ['listening','thinking','speaking','transcribing'].includes(this.status);
+      this.targetOrbR = active ? 22 : 14 + this.displayRms * 6;
+      this.orbR += (this.targetOrbR - this.orbR) * 0.12;
+    }
+    const ctx = this.orbCtx;
+    const W = 200, H = 80, cx = W / 2, cy = 36;
+    ctx.clearRect(0, 0, W, H);
+    const accent = getComputedStyle(document.body).getPropertyValue('--accent').trim() || '#FF6B35';
+    const rgb = this.hexRgb(accent);
+    const t = Math.min(1, this.displayRms * 1.5);
+    const r = Math.round(rgb.r + (255 - rgb.r) * t);
+    const g = Math.round(rgb.g + (255 - rgb.g) * t);
+    const b = Math.round(rgb.b + (255 - rgb.b) * t);
+
+    [28, 34].forEach((radius, i) => {
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, this.arcA + i * 0.8, this.arcA + i * 0.8 + Math.PI * 0.7);
+      ctx.strokeStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${0.1 - i * 0.03})`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    });
+
+    const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, this.orbR + 8);
+    glow.addColorStop(0, `rgba(${r},${g},${b},0.18)`);
+    glow.addColorStop(1, 'transparent');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(cx, cy, this.orbR + 8, 0, Math.PI * 2);
+    ctx.fill();
+
+    const grad = ctx.createRadialGradient(cx - 3, cy - 3, 1, cx, cy, this.orbR);
+    grad.addColorStop(0, `rgba(${r},${g},${b},0.9)`);
+    grad.addColorStop(1, `rgba(${r},${g},${b},0.25)`);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, this.orbR, 0, Math.PI * 2);
+    ctx.fill();
+
+    requestAnimationFrame(() => this.drawOrb());
+  },
+
+  hexRgb(hex) {
+    const h = hex.replace('#', '');
+    if (h.length < 6) return { r: 255, g: 107, b: 53 };
+    return { r: parseInt(h.slice(0,2),16), g: parseInt(h.slice(2,4),16), b: parseInt(h.slice(4,6),16) };
+  },
+
+  show() { document.body.style.display = 'flex'; },
+  hide() { document.body.style.display = 'none'; },
+
+  setStatus(state) {
+    this.status = state;
+    const labels = { idle:'En veille', inactive:'En veille', listening:'Écoute…', transcribing:'Transcription…', thinking:'Réflexion…', speaking:'ARIA parle…' };
+    document.getElementById('status-text').textContent = labels[state] || 'En veille';
+    const active = ['listening','thinking','speaking','transcribing'].includes(state);
+    document.getElementById('mic-btn')?.classList.toggle('active', active);
+    document.getElementById('input-mic-btn')?.classList.toggle('active', active);
+    const stopBtn = document.getElementById('stop-btn');
+    if (stopBtn) {
+      stopBtn.style.display = ['speaking', 'thinking'].includes(state) ? 'inline-flex' : 'none';
+    }
+  },
+
+  updateWaveform(rms) { this.rms = rms; },
+
+  updateEmpty() {
+    const has = document.querySelectorAll('.bubble-user, .bubble-aria-wrap').length > 0;
+    document.getElementById('empty-state').classList.toggle('hidden', has);
+  },
+
+  ts() {
+    return this.showTimestamps ? new Date().toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' }) : '';
+  },
+
+  addUserBubble(text) {
+    this.finalizeMessage();
+    const el = document.createElement('div');
+    el.className = 'bubble-user' + (this.ariaAlign === 'center' ? ' center' : '');
+    el.textContent = text;
+    if (this.showTimestamps) {
+      const t = document.createElement('div');
+      t.className = 'bubble-time';
+      t.textContent = this.ts();
+      el.appendChild(t);
+    }
+    document.getElementById('chat-messages').appendChild(el);
+    this.updateEmpty();
+    this.scrollChat();
+  },
+
+  appendToken(token) {
+    if (!this.currentWrap) {
+      const wrap = document.createElement('div');
+      wrap.className = 'bubble-aria-wrap' + (this.ariaAlign === 'center' ? ' center' : '') + (this.showAvatars ? '' : ' no-avatar');
+      const name = document.getElementById('assistant-name').textContent || 'A';
+      wrap.innerHTML = `
+        <div class="bubble-avatar">${this.esc(name[0])}</div>
+        <div class="bubble-body">
+          <div class="bubble-content"></div>
+          <button type="button" class="copy-btn" onclick="aria.copyBubble(this)">Copier</button>
+        </div>`;
+      document.getElementById('chat-messages').appendChild(wrap);
+      this.currentWrap = wrap;
+      this.currentContent = wrap.querySelector('.bubble-content');
+      this.streamingCursor = document.createElement('span');
+      this.streamingCursor.className = 'cursor-blink';
+      this.currentContent.appendChild(this.streamingCursor);
+      this.updateEmpty();
+    }
+    this.streamingCursor?.insertAdjacentText('beforebegin', token);
+    this.scrollChat();
+  },
+
+  finalizeMessage() {
+    this.streamingCursor?.remove();
+    this.streamingCursor = null;
+    this.currentWrap = null;
+    this.currentContent = null;
+  },
+
+  copyBubble(btn) {
+    const text = btn.closest('.bubble-body')?.querySelector('.bubble-content')?.textContent?.trim() || '';
+    if (!text) return;
+    const orig = btn.textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = 'Copié';
+      setTimeout(() => { btn.textContent = orig; }, 2000);
+    }).catch(() => this.showToast('Copie impossible', 'error'));
+  },
+
+  showToast(msg, type = 'info', duration = 3000) {
+    const c = document.getElementById('toast-container');
+    const t = document.createElement('div');
+    t.className = `toast ${type}`;
+    t.textContent = msg;
+    c.appendChild(t);
+    if (c.children.length > 4) c.firstChild.remove();
+    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, duration);
+  },
+
+  showError(text) { this.showToast(text, 'error', 5000); },
+
+  updateWeather(text) {
+    this.weatherText = text || '';
+    this.refreshClockLine();
+  },
+
+  setModel(name) {
+    const el = document.getElementById('model-display');
+    if (el) el.textContent = name ? name : '';
+  },
+
+  setInputText(text) {
+    const input = document.getElementById('text-input');
+    if (!input) return;
+    input.value = text;
+    input.focus();
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+    input.dispatchEvent(new Event('input'));
+  },
+
+  stopSpeaking() {
+    this.api('stop_speaking');
+    this.setStatus('idle');
+  },
+
+  toggleMic() { this.api('toggle_activation'); },
+
+  sendText() {
+    const input = document.getElementById('text-input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    input.style.height = '52px';
+    this.addUserBubble(text);
+    this.api('send_text', text);
+    this.loadConversations();
+  },
+
+  askFilePrompt() {
+    return new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:5000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
+      overlay.innerHTML = `
+        <div style="background:var(--surface);border:1px solid var(--border2);border-radius:12px;padding:24px;width:480px;max-width:90vw">
+          <div style="font-size:14px;font-weight:500;margin-bottom:6px;color:var(--text)">Que voulez-vous savoir ?</div>
+          <div style="font-size:12px;color:var(--text3);margin-bottom:16px">Entrez votre question pour ces fichiers</div>
+          <textarea id="file-prompt-input" placeholder="Ex: Corrige ce devoir, Explique ce graphique, Que montre cette image..."
+            style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px;color:var(--text);font-family:inherit;font-size:14px;resize:none;height:80px;outline:none"></textarea>
+          <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
+            <button id="file-prompt-cancel" style="background:transparent;border:1px solid var(--border);color:var(--text2);padding:8px 16px;border-radius:8px;cursor:pointer;font-family:inherit">Annuler</button>
+            <button id="file-prompt-send" style="background:var(--accent);border:none;color:white;padding:8px 20px;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:500">Envoyer ➤</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      const input = overlay.querySelector('#file-prompt-input');
+      const sendBtn = overlay.querySelector('#file-prompt-send');
+      const cancelBtn = overlay.querySelector('#file-prompt-cancel');
+
+      setTimeout(() => input.focus(), 100);
+
+      const confirm = () => {
+        const val = input.value.trim();
+        if (!val) { input.style.borderColor = 'var(--error)'; return; }
+        overlay.remove();
+        resolve(val);
+      };
+
+      const cancel = () => { overlay.remove(); resolve(null); };
+
+      sendBtn.onclick = confirm;
+      cancelBtn.onclick = cancel;
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); confirm(); }
+        if (e.key === 'Escape') cancel();
+      });
+    });
+  },
+
+  async handleFiles(files) {
+    const fileArray = Array.from(files);
+    if (!fileArray.length) return;
+
+    const inputEl = document.getElementById('text-input');
+    let userPrompt = inputEl.value.trim();
+
+    if (!userPrompt) {
+      userPrompt = await this.askFilePrompt();
+      if (!userPrompt) {
+        document.getElementById('file-input').value = '';
+        return;
+      }
+    }
+
+    fileArray.forEach(file => {
+      const type = file.type.startsWith('image/') ? 'image'
+                 : file.type.startsWith('video/') ? 'video'
+                 : 'file';
+      this.showFileBubble(file, type);
+    });
+
+    this.addUserBubble(userPrompt);
+    inputEl.value = '';
+    inputEl.style.height = '48px';
+
+    const filesData = await Promise.all(fileArray.map(async file => ({
+      b64: await this.fileToBase64(file),
+      name: file.name,
+      type: file.type || 'application/octet-stream',
+    })));
+
+    if (window.pywebview?.api) {
+      window.pywebview.api.send_files_with_prompt(
+        JSON.stringify(filesData),
+        userPrompt
+      ).catch(() => this.showToast('Erreur envoi fichiers', 'error'));
+    }
+
+    document.getElementById('file-input').value = '';
+  },
+
+  showFileBubble(file, type) {
+    const wrap = document.createElement('div');
+    wrap.className = 'bubble-user';
+    if (type === 'image') {
+      const url = URL.createObjectURL(file);
+      wrap.innerHTML = `
+        <img src="${url}" style="max-width:100%;max-height:300px;border-radius:8px;display:block;margin-bottom:8px" alt="">
+        <div style="font-size:12px;color:var(--text3)">${this.esc(file.name)}</div>`;
+    } else if (type === 'video') {
+      const url = URL.createObjectURL(file);
+      wrap.innerHTML = `
+        <video src="${url}" controls style="max-width:100%;max-height:200px;border-radius:8px;display:block;margin-bottom:8px"></video>
+        <div style="font-size:12px;color:var(--text3)">${this.esc(file.name)}</div>`;
+    } else {
+      wrap.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
+          <span style="font-size:24px">${this.fileIcon(file.name)}</span>
+          <div>
+            <div style="font-size:13px;font-weight:500">${this.esc(file.name)}</div>
+            <div style="font-size:11px;color:var(--text3)">${(file.size / 1024).toFixed(1)} KB</div>
+          </div>
+        </div>`;
+    }
+    document.getElementById('chat-messages').appendChild(wrap);
+    this.scrollChat();
+    this.updateEmpty();
+  },
+
+  fileIcon(name) {
+    const ext = name.split('.').pop().toLowerCase();
+    const icons = { pdf:'📄', py:'🐍', js:'⚡', html:'🌐', css:'🎨', json:'📋', md:'📝', csv:'📊', txt:'📃', yaml:'⚙️' };
+    return icons[ext] || '📁';
+  },
+
+  fileToBase64(file) {
+    return new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result.split(',')[1]);
+      r.onerror = rej;
+      r.readAsDataURL(file);
+    });
+  },
+
+  showChat() {
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.nav === 'chat'));
+    this.toggleSettings(false);
+  },
+
+  async loadConversations() {
+    try {
+      let raw = this.api('get_conversations');
+      if (raw?.then) raw = await raw;
+      const convs = JSON.parse(raw || '[]');
+      const list = document.getElementById('conv-list');
+      if (!list) return;
+      list.innerHTML = convs.slice(0, 20).map(c => `
+        <div class="conv-item" onclick="aria.openConversation('${this.esc(c.id)}')" title="${this.esc(c.title)}">
+          <div class="conv-title">${this.esc(c.title)}</div>
+          <div class="conv-meta">${this.esc(c.date)} · ${c.count} msgs</div>
+        </div>
+      `).join('');
+    } catch (e) {}
+  },
+
+  async openConversation(id) {
+    let raw = this.api('load_conversation', id);
+    if (raw?.then) raw = await raw;
+    const messages = JSON.parse(raw || '[]');
+    document.querySelectorAll('.bubble-user,.bubble-aria-wrap').forEach(e => e.remove());
+    this.updateEmpty();
+    messages.forEach(m => {
+      if (m.role === 'user') this.addUserBubble(m.text);
+      else { this.appendToken(m.text); this.finalizeMessage(); }
+    });
+    this.showToast('Conversation chargée', 'success');
+  },
+
+  async startNewConversation() {
+    let p = this.api('new_conversation');
+    if (p?.then) await p;
+    document.querySelectorAll('.bubble-user,.bubble-aria-wrap').forEach(e => e.remove());
+    this.updateEmpty();
+    await this.loadConversations();
+    this.showToast('Nouvelle conversation', 'info');
+  },
+
+  toggleSettings(open) {
+    if (open === undefined) open = !this.settingsOpen;
+    this.settingsOpen = open;
+    document.getElementById('settings-panel').classList.toggle('open', open);
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', open ? false : n.dataset.nav === 'chat'));
+    if (open) {
+      this.loadMemoryStats();
+      this.loadTrainingStats();
+    }
+  },
+
+  async loadTrainingStats() {
+    try {
+      let raw = this.api('get_training_stats');
+      if (raw?.then) raw = await raw;
+      const s = JSON.parse(raw || '{}');
+      document.getElementById('train-examples').textContent = s.total_examples ?? '—';
+      document.getElementById('train-since-last').textContent = s.new_since_last ?? '—';
+      document.getElementById('train-last-date').textContent = s.last_train_date ?? 'Jamais';
+      document.getElementById('train-model').textContent = s.active_model ?? 'qwen3:14b';
+
+      const progress = Math.min(100, ((s.new_since_last || 0) / 50) * 100);
+      document.getElementById('train-progress-bar').style.width = progress + '%';
+      document.getElementById('train-progress-text').textContent = `${s.new_since_last || 0}/50`;
+
+      const switcher = document.getElementById('model-switcher');
+      if (switcher) {
+        switcher.style.display = s.custom_model_exists ? 'block' : 'none';
+      }
+
+      const activeIsCustom = s.active_model === 'aria-custom';
+      document.getElementById('train-model').style.color = activeIsCustom ? 'var(--success)' : 'var(--accent)';
+    } catch (e) {}
+  },
+
+  async switchToCustomModel() {
+    try {
+      let p = this.api('switch_model', 'aria-custom');
+      if (p?.then) await p;
+      document.getElementById('train-model').textContent = 'aria-custom';
+      document.getElementById('train-model').style.color = 'var(--success)';
+      this.setModel('aria-custom');
+      this.showToast('🤖 Modèle aria-custom activé !', 'success', 4000);
+      this.loadTrainingStats();
+    } catch (e) {
+      this.showToast('Erreur changement de modèle', 'error');
+    }
+  },
+
+  async switchToBaseModel() {
+    try {
+      let p = this.api('switch_model', 'qwen3:14b');
+      if (p?.then) await p;
+      document.getElementById('train-model').textContent = 'qwen3:14b';
+      document.getElementById('train-model').style.color = 'var(--accent)';
+      this.setModel('qwen3:14b');
+      this.showToast('↩ Modèle de base restauré', 'info');
+      this.loadTrainingStats();
+    } catch (e) {
+      this.showToast('Erreur changement de modèle', 'error');
+    }
+  },
+
+  async startTraining() {
+    const examples = parseInt(document.getElementById('train-examples').textContent, 10);
+    if (isNaN(examples) || examples < 10) {
+      this.showToast(`Pas assez de données (${examples || 0}/10)`, 'warning');
+      return;
+    }
+
+    if (!confirm("Lancer l'entraînement ? Cela prendra 2-4h et utilisera votre GPU.")) return;
+
+    document.getElementById('btn-train-start').style.display = 'none';
+    document.getElementById('btn-train-stop').style.display = 'block';
+    const log = document.getElementById('train-log');
+    log.style.display = 'block';
+    log.textContent = "🚀 Démarrage de l'entraînement...\n";
+
+    this.api('start_training');
+
+    this.trainingInterval = setInterval(async () => {
+      try {
+        let raw = this.api('get_training_log');
+        if (raw?.then) raw = await raw;
+        const data = JSON.parse(raw || '{}');
+        if (data.log) {
+          log.textContent = data.log;
+          log.scrollTop = log.scrollHeight;
+        }
+        if (data.status === 'done') {
+          clearInterval(this.trainingInterval);
+          this.trainingInterval = null;
+          document.getElementById('btn-train-start').style.display = 'block';
+          document.getElementById('btn-train-stop').style.display = 'none';
+          this.showToast('✅ Entraînement terminé ! Modèle aria-custom disponible.', 'success', 6000);
+          this.loadTrainingStats();
+        } else if (data.status === 'error') {
+          clearInterval(this.trainingInterval);
+          this.trainingInterval = null;
+          document.getElementById('btn-train-start').style.display = 'block';
+          document.getElementById('btn-train-stop').style.display = 'none';
+          this.showToast('❌ Erreur entraînement — voir les logs', 'error', 5000);
+        }
+      } catch (e) {}
+    }, 2000);
+  },
+
+  stopTraining() {
+    if (this.trainingInterval) clearInterval(this.trainingInterval);
+    this.trainingInterval = null;
+    this.api('stop_training');
+    document.getElementById('btn-train-start').style.display = 'block';
+    document.getElementById('btn-train-stop').style.display = 'none';
+    this.showToast('Entraînement arrêté', 'warning');
+  },
+
+  async loadMemoryStats() {
+    try {
+      let raw = this.api('get_memory_stats');
+      if (raw?.then) raw = await raw;
+      const stats = JSON.parse(raw || '{}');
+      const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val ?? '—'; };
+      set('mem-sessions', stats.total_sessions ?? 0);
+      set('mem-messages', stats.total_messages ?? 0);
+      set('mem-top-app', stats.top_app || '—');
+      set('mem-top-topic', stats.top_topic || '—');
+      set('mem-satisfaction', stats.satisfaction || '—');
+      set('mem-corrections', stats.corrections ?? 0);
+      set('mem-finetune', stats.fine_tune_examples ?? 0);
+      set('mem-convs', stats.conversations_saved ?? 0);
+      set('mem-peak', stats.peak_hour != null ? `${stats.peak_hour}h` : '—');
+      set('mem-shortcuts', stats.voice_shortcuts ?? 0);
+    } catch (e) {}
+  },
+
+  async exportFineTune() {
+    try {
+      let path = this.api('export_fine_tune');
+      if (path?.then) path = await path;
+      this.showToast('Exporté: ' + (path || 'fine_tune_dataset.jsonl'), 'success');
+    } catch (e) {
+      this.showToast('Erreur export fine-tuning', 'error');
+    }
+  },
+
+  confirmQuit() { document.getElementById('quit-modal').classList.add('open'); },
+
+  activatePreset(key, label, evt) {
+    const p = this.api('activate_preset', key);
+    if (p?.then) p.then(msg => this.showToast(msg, 'success'));
+    document.querySelectorAll('.preset-row').forEach(r => r.classList.remove('active'));
+    evt?.currentTarget?.classList.add('active');
+  },
+
+  cycleTheme() {
+    const i = this.themes.indexOf(this.theme);
+    const next = this.themes[(i + 1) % this.themes.length];
+    const sw = document.querySelector(`.theme-swatch[data-theme="${next}"]`);
+    this.setTheme(next, sw);
+    this.showToast('Thème : ' + next, 'info');
+  },
+
+  setTheme(name, el) {
+    document.body.className = `theme-${name}` + (this.reducedMotion ? ' reduced-motion' : '');
+    this.theme = name;
+    document.querySelectorAll('.theme-swatch').forEach(s => s.classList.remove('active'));
+    (el || document.querySelector(`.theme-swatch[data-theme="${name}"]`))?.classList.add('active');
+    this.saveSettings();
+  },
+
+  applyBubbleStyles() {
+    const root = document.documentElement;
+    const bg = document.getElementById('set-user-bg')?.value;
+    const radius = document.getElementById('set-user-radius')?.value;
+    const uFont = document.getElementById('set-user-font')?.value;
+    const aFont = document.getElementById('set-aria-font')?.value;
+    if (bg) root.style.setProperty('--user-bg', bg);
+    if (radius) root.style.setProperty('--user-radius', radius + 'px');
+    if (uFont) root.style.setProperty('--user-font', uFont + 'px');
+    if (aFont) root.style.setProperty('--aria-font', aFont + 'px');
+    this.showTimestamps = document.getElementById('set-timestamps')?.checked ?? true;
+    this.showAvatars = document.getElementById('set-avatars')?.checked ?? true;
+    this.ariaAlign = document.getElementById('set-aria-align')?.value || 'left';
+  },
+
+  collectSettings() {
+    const rate = document.getElementById('set-tts-rate')?.value ?? 0;
+    return {
+      theme: this.theme,
+      opacity: (document.getElementById('set-opacity')?.value ?? 100) / 100,
+      reduced_motion: document.getElementById('set-reduced-motion')?.checked ?? false,
+      user_bubble_bg: document.getElementById('set-user-bg')?.value,
+      user_bubble_radius: document.getElementById('set-user-radius')?.value,
+      user_bubble_font: document.getElementById('set-user-font')?.value,
+      aria_bubble_font: document.getElementById('set-aria-font')?.value,
+      show_timestamps: document.getElementById('set-timestamps')?.checked,
+      show_avatars: document.getElementById('set-avatars')?.checked,
+      aria_align: document.getElementById('set-aria-align')?.value,
+      tts_voice: document.getElementById('set-voice')?.value,
+      tts_rate: (rate >= 0 ? '+' : '') + rate + '%',
+      tts_volume: +(document.getElementById('set-tts-vol')?.value ?? 90),
+      tts_enabled: document.getElementById('set-tts-enabled')?.checked ?? false,
+      sounds_enabled: document.getElementById('set-sounds')?.checked,
+      assistant_name: document.getElementById('set-name')?.value?.trim(),
+      response_length: document.querySelector('input[name=response-len]:checked')?.value ?? 'normal',
+      memory_enabled: document.getElementById('set-memory')?.checked,
+      model_fast: document.getElementById('set-model-fast')?.value,
+      model_heavy: document.getElementById('set-model-heavy')?.value,
+      model_code: document.getElementById('set-model-code')?.value,
+      auto_routing: document.getElementById('set-auto-route')?.checked,
+      silence_threshold: document.getElementById('set-silence-th')?.value,
+      silence_duration: document.getElementById('set-silence-dur')?.value,
+      auto_mic: document.getElementById('set-auto-mic')?.checked,
+      always_on_top: document.getElementById('set-always-top')?.checked,
+    };
+  },
+
+  saveSettings() {
+    this.applyBubbleStyles();
+    const s = this.collectSettings();
+    if (s.assistant_name) {
+      document.getElementById('assistant-name').textContent = s.assistant_name;
+      document.getElementById('header-title').textContent = s.assistant_name;
+    }
+    document.body.style.opacity = s.opacity;
+    this.reducedMotion = s.reduced_motion;
+    document.body.classList.toggle('reduced-motion', this.reducedMotion);
+    this.api('save_settings', JSON.stringify(s));
+    this.api('set_voice', s.tts_voice);
+    this.api('set_tts_rate', s.tts_rate);
+    this.api('set_tts_volume', s.tts_volume);
+    this.api('set_tts_enabled', !!s.tts_enabled);
+  },
+
+  onTtsToggle(enabled) {
+    if (window.pywebview?.api) {
+      window.pywebview.api.set_tts_enabled(enabled);
+    }
+    this.showToast(enabled ? '🔊 Parole activée' : '🔇 Parole désactivée', 'info');
+    this.saveSettings();
+  },
+
+  loadSettings() {
+    const p = this.api('load_settings');
+    if (!p?.then) return;
+    p.then(raw => {
+      try {
+        const d = JSON.parse(raw || '{}');
+        if (d.theme) this.setTheme(d.theme);
+        if (d.opacity != null) {
+          document.getElementById('set-opacity').value = Math.round(d.opacity * 100);
+          document.body.style.opacity = d.opacity;
+        }
+        if (d.reduced_motion != null) {
+          document.getElementById('set-reduced-motion').checked = d.reduced_motion;
+          this.reducedMotion = d.reduced_motion;
+          document.body.classList.toggle('reduced-motion', d.reduced_motion);
+        }
+        const fields = [
+          ['user_bubble_bg','set-user-bg'], ['user_bubble_radius','set-user-radius'],
+          ['user_bubble_font','set-user-font'], ['aria_bubble_font','set-aria-font'],
+          ['tts_voice','set-voice'], ['tts_volume','set-tts-vol','number'],
+          ['assistant_name','set-name'], ['model_fast','set-model-fast'],
+          ['model_heavy','set-model-heavy'], ['model_code','set-model-code'],
+          ['silence_threshold','set-silence-th'], ['silence_duration','set-silence-dur'],
+          ['aria_align','set-aria-align'],
+        ];
+        fields.forEach(([k, id]) => { if (d[k] != null) { const el = document.getElementById(id); if (el) el.value = d[k]; } });
+        if (d.tts_rate) { const m = String(d.tts_rate).match(/(-?\d+)/); if (m) document.getElementById('set-tts-rate').value = m[1]; }
+        if (d.tts_enabled != null) {
+          document.getElementById('set-tts-enabled').checked = d.tts_enabled;
+          if (window.pywebview?.api) window.pywebview.api.set_tts_enabled(d.tts_enabled);
+        }
+        if (d.response_length) {
+          const r = document.querySelector(`input[name=response-len][value="${d.response_length}"]`);
+          if (r) r.checked = true;
+        }
+        [['show_timestamps','set-timestamps'],['show_avatars','set-avatars'],['sounds_enabled','set-sounds'],
+         ['memory_enabled','set-memory'],['auto_routing','set-auto-route'],['auto_mic','set-auto-mic'],
+         ['always_on_top','set-always-top']].forEach(([k,id]) => {
+          if (d[k] != null) { const el = document.getElementById(id); if (el) el.checked = d[k]; }
+        });
+        if (d.assistant_name) {
+          document.getElementById('assistant-name').textContent = d.assistant_name;
+          document.getElementById('header-title').textContent = d.assistant_name;
+        }
+        this.applyBubbleStyles();
+      } catch (e) {}
+    });
+  },
+
+  mergePresets(custom) {
+    const m = {};
+    this.presetKeys.forEach(k => { m[k] = { ...this.defaultPresets[k], ...(custom[k] || {}) }; });
+    return m;
+  },
+
+  renderPresetSidebar(merged) {
+    const list = document.getElementById('presets-list');
+    list.innerHTML = '';
+    this.presetKeys.forEach(k => {
+      const p = merged[k];
+      const row = document.createElement('div');
+      row.className = 'preset-row';
+      row.textContent = `${p.icon} ${p.label}`;
+      row.onclick = e => this.activatePreset(k, `${p.icon} ${p.label}`, e);
+      list.appendChild(row);
+    });
+  },
+
+  loadPresets() {
+    const p = this.api('get_presets');
+    const done = async custom => {
+      this.presetsCustom = custom || {};
+      const merged = this.mergePresets(this.presetsCustom);
+      this.renderPresetSidebar(merged);
+      await this.renderPresetEditors(merged);
+    };
+    if (p?.then) p.then(r => { try { done(JSON.parse(r || '{}')); } catch { done({}); } });
+    else done({});
+  },
+
+  readPresetForm(key) {
+    const getSelected = id => {
+      const sel = document.getElementById(id);
+      if (!sel) return [];
+      return Array.from(sel.selectedOptions).map(o => o.value);
+    };
+    return {
+      label: document.getElementById(`pre-${key}-label`)?.value?.trim(),
+      icon: document.getElementById(`pre-${key}-icon`)?.value?.trim(),
+      apps_open: getSelected(`pre-${key}-open-select`),
+      apps_close: getSelected(`pre-${key}-close-select`),
+      volume: parseInt(document.getElementById(`pre-${key}-vol`)?.value, 10),
+      brightness: parseInt(document.getElementById(`pre-${key}-bri`)?.value, 10),
+    };
+  },
+
+  savePreset(key) {
+    const data = this.readPresetForm(key);
+    this.api('save_settings', JSON.stringify({ presets: { [key]: data } }));
+    this.presetsCustom[key] = { ...(this.presetsCustom[key] || {}), ...data };
+    const merged = this.mergePresets(this.presetsCustom);
+    this.renderPresetSidebar(merged);
+    this.showToast(`Preset « ${data.label || key} » enregistré`, 'success');
+  },
+
+  csvToList(s) { return String(s || '').split(',').map(x => x.trim()).filter(Boolean); },
+  listToCsv(a) { return Array.isArray(a) ? a.join(', ') : ''; },
+
+  async renderPresetEditors(merged) {
+    const box = document.getElementById('settings-presets');
+    if (!box) return;
+
+    let appList = [];
+    try {
+      let raw = this.api('get_installed_apps');
+      if (raw?.then) raw = await raw;
+      appList = JSON.parse(raw || '[]');
+    } catch (e) {}
+
+    box.innerHTML = '';
+    this.presetKeys.forEach(key => {
+      const p = merged[key];
+
+      const buildSelect = (id, selected) => {
+        const selectedSet = new Set(Array.isArray(selected) ? selected : []);
+        const opts = appList.map(app =>
+          `<option value="${this.esc(app)}" ${selectedSet.has(app) ? 'selected' : ''}>${this.esc(app)}</option>`
+        ).join('');
+        return `<select id="${id}" multiple size="5" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:12px;padding:4px">${opts}</select>`;
+      };
+
+      const ed = document.createElement('div');
+      ed.className = 'preset-editor';
+      ed.innerHTML = `
+        <div class="preset-editor-title">${this.esc(p.icon)} ${this.esc(p.label)}</div>
+        <div class="preset-field"><label>Nom</label><input id="pre-${key}-label" value="${this.esc(p.label)}"></div>
+        <div class="preset-field"><label>Icône</label><input id="pre-${key}-icon" value="${this.esc(p.icon)}" maxlength="4"></div>
+        <div class="preset-field">
+          <label>Apps à ouvrir (Ctrl+clic pour sélectionner)</label>
+          ${buildSelect(`pre-${key}-open-select`, p.apps_open || [])}
+        </div>
+        <div class="preset-field">
+          <label>Apps à fermer (Ctrl+clic pour sélectionner)</label>
+          ${buildSelect(`pre-${key}-close-select`, p.apps_close || [])}
+        </div>
+        <div class="setting-row"><label>Volume</label><input type="range" id="pre-${key}-vol" min="0" max="100" value="${p.volume ?? 50}"><span id="pre-${key}-vol-val">${p.volume ?? 50}%</span></div>
+        <div class="setting-row"><label>Luminosité</label><input type="range" id="pre-${key}-bri" min="0" max="100" value="${p.brightness ?? 50}"></div>
+        <button type="button" class="preset-save" onclick="aria.savePreset('${key}')">Enregistrer</button>`;
+      box.appendChild(ed);
+
+      document.getElementById(`pre-${key}-vol`)?.addEventListener('input', function() {
+        document.getElementById(`pre-${key}-vol-val`).textContent = this.value + '%';
+      });
+    });
+  },
+
+  buildSettingsPanel() {
+    const panel = document.getElementById('settings-panel');
+    panel.innerHTML = `
+      <div class="settings-head">
+        <h2>Paramètres</h2>
+        <button class="hbtn" onclick="aria.toggleSettings(false)">✕</button>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-title">Apparence</div>
+        <div class="theme-grid">
+          <div class="theme-swatch active" data-theme="slate" style="background:#FF6B35" onclick="aria.setTheme('slate',this)">Slate</div>
+          <div class="theme-swatch" data-theme="warm" style="background:#F59E0B" onclick="aria.setTheme('warm',this)">Warm</div>
+          <div class="theme-swatch" data-theme="forest" style="background:#4ADE80" onclick="aria.setTheme('forest',this)">Forest</div>
+          <div class="theme-swatch" data-theme="rose" style="background:#F472B6" onclick="aria.setTheme('rose',this)">Rose</div>
+          <div class="theme-swatch" data-theme="mono" style="background:#555" onclick="aria.setTheme('mono',this)">Mono</div>
+          <div class="theme-swatch" data-theme="contrast" style="background:linear-gradient(135deg,#fff,#000);color:#000" onclick="aria.setTheme('contrast',this)">Contrast</div>
+        </div>
+        <div class="setting-row"><label>Opacité</label><input type="range" id="set-opacity" min="70" max="100" value="100" oninput="aria.saveSettings()"></div>
+        <div class="setting-row"><label>Réduction animations</label><input type="checkbox" id="set-reduced-motion" onchange="aria.saveSettings()"></div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-title">Bulles de conversation</div>
+        <div class="setting-row"><label>Couleur user</label><input type="color" id="set-user-bg" value="#3A3A3C" onchange="aria.saveSettings()"></div>
+        <div class="setting-row"><label>Radius user</label><input type="range" id="set-user-radius" min="4" max="24" value="18" oninput="aria.saveSettings()"></div>
+        <div class="setting-row"><label>Taille user</label><input type="range" id="set-user-font" min="13" max="17" value="15" oninput="aria.saveSettings()"></div>
+        <div class="setting-row"><label>Taille ARIA</label><input type="range" id="set-aria-font" min="13" max="17" value="15" oninput="aria.saveSettings()"></div>
+        <div class="setting-row"><label>Timestamps</label><input type="checkbox" id="set-timestamps" checked onchange="aria.saveSettings()"></div>
+        <div class="setting-row"><label>Avatars</label><input type="checkbox" id="set-avatars" checked onchange="aria.saveSettings()"></div>
+        <div class="setting-row"><label>Alignement ARIA</label>
+          <select id="set-aria-align" onchange="aria.saveSettings()"><option value="left">Gauche</option><option value="center">Centre</option></select>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-title">Modes / Presets</div>
+        <div id="settings-presets"></div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-title">Voix &amp; Audio</div>
+        <div class="setting-row">
+          <label style="font-weight:500;color:var(--text)">Parole activée</label>
+          <input type="checkbox" id="set-tts-enabled" onchange="aria.onTtsToggle(this.checked)">
+        </div>
+        <div class="setting-row"><label>Voix</label>
+          <select id="set-voice" onchange="aria.saveSettings()">
+            <option value="fr-FR-DeniseNeural">Denise</option>
+            <option value="fr-FR-HenriNeural">Henri</option>
+            <option value="fr-FR-EloiseNeural">Eloise</option>
+          </select>
+        </div>
+        <div class="setting-row"><label>Vitesse</label><input type="range" id="set-tts-rate" min="-50" max="50" value="0" oninput="aria.saveSettings()"></div>
+        <div class="setting-row"><label>Volume</label><input type="range" id="set-tts-vol" min="0" max="100" value="90" oninput="aria.saveSettings()"></div>
+        <div class="setting-row"><label>Sons ambiance</label><input type="checkbox" id="set-sounds" checked onchange="aria.saveSettings()"></div>
+        <button class="settings-btn" onclick="aria.showToast('Test voix bientôt disponible','info')">Tester la voix</button>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-title">Assistant</div>
+        <div class="setting-row"><label>Nom</label><input type="text" id="set-name" value="ARIA" onchange="aria.saveSettings()"></div>
+        <div class="radio-group" style="margin-bottom:10px">
+          <label><input type="radio" name="response-len" value="short" onchange="aria.saveSettings()"> Courte</label>
+          <label><input type="radio" name="response-len" value="normal" checked onchange="aria.saveSettings()"> Normale</label>
+          <label><input type="radio" name="response-len" value="detailed" onchange="aria.saveSettings()"> Détaillée</label>
+        </div>
+        <div class="setting-row"><label>Mémoire</label><input type="checkbox" id="set-memory" checked onchange="aria.saveSettings()"></div>
+        <button class="settings-btn" onclick="aria.api('open_file','data/memory.json')">Voir la mémoire</button>
+        <button class="settings-btn" onclick="aria.showToast('Effacez via memory.json','info')">Effacer la mémoire</button>
+        <button class="settings-btn" onclick="aria.clearHistory()">Effacer l'historique</button>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-title">Mémoire &amp; Apprentissage</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+          <div class="stat-card"><div class="stat-val" id="mem-sessions">—</div><div class="stat-label">Sessions</div></div>
+          <div class="stat-card"><div class="stat-val" id="mem-messages">—</div><div class="stat-label">Messages</div></div>
+          <div class="stat-card"><div class="stat-val" id="mem-top-app">—</div><div class="stat-label">App fav.</div></div>
+          <div class="stat-card"><div class="stat-val" id="mem-top-topic">—</div><div class="stat-label">Sujet fav.</div></div>
+          <div class="stat-card"><div class="stat-val" id="mem-satisfaction">—</div><div class="stat-label">Satisfaction</div></div>
+          <div class="stat-card"><div class="stat-val" id="mem-corrections">—</div><div class="stat-label">Corrections</div></div>
+          <div class="stat-card"><div class="stat-val" id="mem-finetune">—</div><div class="stat-label">Exemples IA</div></div>
+          <div class="stat-card"><div class="stat-val" id="mem-convs">—</div><div class="stat-label">Conversations</div></div>
+          <div class="stat-card"><div class="stat-val" id="mem-peak">—</div><div class="stat-label">Heure active</div></div>
+          <div class="stat-card"><div class="stat-val" id="mem-shortcuts">—</div><div class="stat-label">Raccourcis</div></div>
+        </div>
+        <button class="settings-btn" onclick="aria.exportFineTune()">Exporter dataset fine-tuning</button>
+        <button class="settings-btn" onclick="aria.api('open_file','data/user_profile.json')">Voir profil complet</button>
+        <button class="settings-btn" onclick="aria.api('open_file','data/learned_patterns.json')">Voir patterns appris</button>
+        <button class="settings-btn" style="color:var(--error);border-color:var(--error)"
+          onclick="if(confirm('Effacer toute la mémoire ?')) { const p = aria.api('reset_memory'); if (p?.then) p.then(() => { aria.loadMemoryStats(); aria.showToast('Mémoire effacée','success'); }); else { aria.loadMemoryStats(); aria.showToast('Mémoire effacée','success'); } }">
+          Réinitialiser la mémoire
+        </button>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-title">Entraînement IA</div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">
+          <div class="stat-card">
+            <div class="stat-val" id="train-examples">—</div>
+            <div class="stat-label">Exemples collectés</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val" id="train-since-last">—</div>
+            <div class="stat-label">Depuis dernier entr.</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val" id="train-last-date">—</div>
+            <div class="stat-label">Dernier entraînement</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val" id="train-model">—</div>
+            <div class="stat-label">Modèle actif</div>
+          </div>
+        </div>
+
+        <div style="margin-bottom:16px">
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3);margin-bottom:6px">
+            <span>Progression vers prochain entraînement</span>
+            <span id="train-progress-text">0/50</span>
+          </div>
+          <div style="background:var(--card);border-radius:4px;height:6px;overflow:hidden">
+            <div id="train-progress-bar" style="height:100%;background:var(--accent);border-radius:4px;width:0%;transition:width 0.3s"></div>
+          </div>
+        </div>
+
+        <div id="train-log" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:monospace;font-size:11px;color:var(--text2);max-height:160px;overflow-y:auto;margin-bottom:12px;white-space:pre-wrap"></div>
+
+        <button class="settings-btn" id="btn-train-start" onclick="aria.startTraining()"
+          style="background:var(--accent-bg);border-color:var(--accent);color:var(--accent);font-weight:500">
+          🚀 Lancer l'entraînement
+        </button>
+        <button class="settings-btn" id="btn-train-stop" onclick="aria.stopTraining()" style="display:none;color:var(--error);border-color:var(--error)">
+          ⏹ Arrêter l'entraînement
+        </button>
+        <button class="settings-btn" onclick="aria.loadTrainingStats()">
+          🔄 Rafraîchir les stats
+        </button>
+        <button class="settings-btn" onclick="aria.api('open_file','data/fine_tune_dataset.jsonl')">
+          📄 Voir le dataset
+        </button>
+
+        <div id="model-switcher" style="display:none;margin-top:12px;padding:12px;background:var(--card);border:1px solid var(--border);border-radius:8px">
+          <div style="font-size:12px;font-weight:500;color:var(--text);margin-bottom:8px">✅ Modèle aria-custom disponible</div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Votre modèle personnalisé entraîné sur vos conversations est prêt.</div>
+          <div style="display:flex;gap:8px">
+            <button onclick="aria.switchToCustomModel()"
+              style="flex:1;background:var(--accent-bg);border:1px solid var(--accent);color:var(--accent);padding:8px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:12px;font-weight:500">
+              🤖 Utiliser aria-custom
+            </button>
+            <button onclick="aria.switchToBaseModel()"
+              style="flex:1;background:var(--card);border:1px solid var(--border);color:var(--text2);padding:8px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:12px">
+              ↩ Revenir au modèle de base
+            </button>
+          </div>
+        </div>
+
+        <div style="font-size:11px;color:var(--text3);margin-top:8px;line-height:1.5">
+          Minimum 10 exemples requis. L'entraînement prend 2-4h sur RTX 5080.
+          Le nouveau modèle <code style="background:var(--card);padding:2px 4px;border-radius:3px">aria-custom</code> sera disponible dans Ollama.
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-title">Modèles</div>
+        <div class="setting-row"><label>Rapide</label>
+          <select id="set-model-fast" onchange="aria.saveSettings()">
+            <option value="llama3.1:8b-instruct-q8_0">llama3.1:8b</option>
+            <option value="qwen3:14b">qwen3:14b</option>
+            <option value="qwen2.5-coder:14b">qwen2.5-coder:14b</option>
+          </select>
+        </div>
+        <div class="setting-row"><label>Lourd</label>
+          <select id="set-model-heavy" onchange="aria.saveSettings()">
+            <option value="qwen3:14b">qwen3:14b</option>
+            <option value="llama3.1:8b-instruct-q8_0">llama3.1:8b</option>
+            <option value="qwen2.5-coder:14b">qwen2.5-coder:14b</option>
+          </select>
+        </div>
+        <div class="setting-row"><label>Code</label>
+          <select id="set-model-code" onchange="aria.saveSettings()">
+            <option value="qwen2.5-coder:14b">qwen2.5-coder:14b</option>
+            <option value="llama3.1:8b-instruct-q8_0">llama3.1:8b</option>
+            <option value="qwen3:14b">qwen3:14b</option>
+          </select>
+        </div>
+        <div class="setting-row"><label>Routage auto</label><input type="checkbox" id="set-auto-route" checked onchange="aria.saveSettings()"></div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-title">Micro</div>
+        <div class="setting-row"><label>Seuil silence</label><input type="range" id="set-silence-th" min="100" max="2000" value="500" oninput="aria.saveSettings()"></div>
+        <div class="setting-row"><label>Durée silence</label><input type="range" id="set-silence-dur" min="0.5" max="3" step="0.1" value="2" oninput="aria.saveSettings()"></div>
+        <div class="setting-row"><label>Auto au démarrage</label><input type="checkbox" id="set-auto-mic" onchange="aria.saveSettings()"></div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-title">Système</div>
+        <div class="setting-row"><label>Toujours visible</label><input type="checkbox" id="set-always-top" onchange="aria.saveSettings()"></div>
+        <button class="settings-btn" onclick="aria.api('open_file','config.yaml')">Ouvrir config.yaml</button>
+        <button class="settings-btn" onclick="aria.api('open_file','assistant-vocal.log')">Voir les logs</button>
+        <button class="settings-btn" onclick="aria.confirmQuit()">Quitter ARIA</button>
+        <div class="setting-row" style="margin-top:8px"><span style="font-size:11px;color:var(--text3)">ARIA v2.0.0</span></div>
+      </div>`;
+  },
+
+  clearHistory() {
+    this.api('clear_history');
+    document.querySelectorAll('.bubble-user, .bubble-aria-wrap').forEach(el => el.remove());
+    this.updateEmpty();
+    this.showToast('Historique effacé', 'success');
+  },
+
+  refreshClockLine() {
+    const time = new Date().toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
+    const w = this.weatherText;
+    const el = document.getElementById('weather-clock');
+    if (el) el.textContent = w ? `${w} · ${time}` : time;
+  },
+
+  startClock() {
+    const tick = () => { this.refreshClockLine(); setTimeout(tick, 1000); };
+    tick();
+  },
+
+  scrollChat() {
+    const el = document.getElementById('chat-messages');
+    el.scrollTop = el.scrollHeight;
+  },
+
+  esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  },
+};
+
+window.aria = aria;
+window.addEventListener('pywebviewready', () => aria.init());
+if (!window.pywebview) window.addEventListener('load', () => aria.init());
+</script>
+</body>
+</html>

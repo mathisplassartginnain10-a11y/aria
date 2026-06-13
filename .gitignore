@@ -1,0 +1,45 @@
+# Environnement Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+dist/
+build/
+*.spec.bak
+
+# Données personnelles — ne jamais uploader
+data/conversations.json
+data/sessions.json
+data/user_profile.json
+data/learned_patterns.json
+data/fine_tune_dataset.jsonl
+data/last_train_count.txt
+data/last_train_date.txt
+data/ui_state.json
+data/memory.json
+data/history.json
+data/webview_cache/
+
+# Clés API et config sensible
+config.yaml
+
+# Logs
+*.log
+assistant-vocal.log
+
+# Modèles IA
+data/aria_lora/
+*.gguf
+*.bin
+
+# Fichiers système
+.DS_Store
+Thumbs.db
+
+# Sounds générés
+sounds/*.wav
+
+# Temp
+*.tmp
+autostart_task.xml
+crash.log

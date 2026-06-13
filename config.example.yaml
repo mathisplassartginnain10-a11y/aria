@@ -1,0 +1,109 @@
+# Général
+hotkey: f24
+model: qwen3:14b
+model_fast: llama3.1:8b-instruct-q8_0
+model_heavy: qwen3:14b
+model_code: qwen2.5-coder:14b
+ollama_path: "C:/Users/USERNAME/AppData/Local/Programs/Ollama/ollama.exe"
+language: fr
+debug: false
+debug_keys: false
+
+# STT
+whisper_model: small
+silence_threshold: 500
+silence_duration: 2.0
+sample_rate: 16000
+chunk_size: 1024
+min_confidence: 0.3
+
+# TTS
+tts_voice: fr-FR-DeniseNeural
+tts_rate: "+5%"
+tts_volume: "+0%"
+sounds_enabled: true
+
+# LLM
+max_history: 20
+system_prompt: |
+  Tu es ARIA (Assistant Résidant Intelligent et Autonome), un assistant vocal local
+  en français. Tu es concis, naturel, et adapté à une lecture à voix haute.
+  Tu connais ton utilisateur : lycéen en Première (Maths/Allemand), passionné
+  d'aviation (PPL, Robin DR400, LFRS Nantes), gaming (MSFS 2024, No Man's Sky,
+  Age of Empires 4), et développement (Python, React Native, Three.js).
+  Réponds toujours en français sauf si on te demande autre chose.
+  Sois direct et précis. Pas de listes à puces dans tes réponses vocales.
+
+# UI
+ui_width: 500
+ui_height: 700
+ui_position: bottom_right
+ui_opacity: 0.95
+ui_theme: midnight
+ui_font: Consolas
+ui_font_size: 11
+always_on_top: true
+show_waveform: true
+
+# Localisation
+city: Couëron
+lat: 47.2167
+lon: -1.7333
+timezone: Europe/Paris
+
+# APIs (à remplir)
+openweather_api_key: ""
+newsapi_key: ""
+avwx_api_key: ""
+
+# Applications (chemins personnalisés)
+apps:
+  msfs: "C:/Program Files/WindowsApps/Microsoft.FlightSimulator_*/FlightSimulator.exe"
+  spotify: "C:/Users/USERNAME/AppData/Roaming/Spotify/Spotify.exe"
+  chrome: "C:/Program Files/Google/Chrome/Application/chrome.exe"
+  firefox: "C:/Program Files/Mozilla Firefox/firefox.exe"
+  vscode: "C:/Users/USERNAME/AppData/Local/Programs/Microsoft VS Code/Code.exe"
+  cursor: "C:/Users/USERNAME/AppData/Local/Programs/cursor/Cursor.exe"
+  discord: "C:/Users/USERNAME/AppData/Local/Discord/app-*/Discord.exe"
+  steam: "C:/Program Files (x86)/Steam/Steam.exe"
+  obs: "C:/Program Files/obs-studio/bin/64bit/obs64.exe"
+  notepad: "notepad.exe"
+  explorer: "explorer.exe"
+  calculator: "calc.exe"
+  taskmgr: "taskmgr.exe"
+
+# Aviation
+default_icao: LFRS
+home_icao: LFRS
+callsign: N123AZ
+
+# Modes/Presets
+presets:
+  etude:
+    apps_open: [vscode, cursor]
+    apps_close: [discord, steam, spotify]
+    volume: 30
+    message: "Mode étude activé. Discord et Steam fermés."
+  vol:
+    apps_open: [msfs]
+    apps_close: [discord]
+    volume: 50
+    message: "Mode vol activé. MSFS en cours de lancement."
+  gaming:
+    apps_open: [steam, discord]
+    volume: 70
+    message: "Mode gaming activé."
+  detente:
+    apps_open: [spotify, discord]
+    volume: 60
+    message: "Mode détente activé."
+  nuit:
+    apps_close: [discord, steam, spotify, chrome]
+    volume: 15
+    brightness: 30
+    message: "Mode nuit activé. Bonne nuit."
+
+# Démarrage
+morning_briefing: true
+morning_briefing_time: "08:00"
+briefing_includes: [weather, news, calendar]
