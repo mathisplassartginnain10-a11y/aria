@@ -1,5 +1,8 @@
 import logging
+import os
 import re
+import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -12,6 +15,15 @@ import app_paths
 from actions.alias_store import lookup as lookup_extra_alias
 
 logger = logging.getLogger(__name__)
+
+CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+CHROME_PATHS = [
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+]
+EDGE_PATH = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+EDGE_PATH64 = r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"
 
 _CONFIG_PATH = app_paths.config_path()
 with _CONFIG_PATH.open("r", encoding="utf-8") as f:
@@ -498,50 +510,52 @@ def search_current_page(query: str) -> str:
         return f"Erreur: {e}"
 
 
+def _get_browser_exe() -> str:
+    """Retourne le chemin du navigateur disponible."""
+    for path in CHROME_PATHS:
+        if os.path.exists(path):
+            return path
+    for path in (EDGE_PATH, EDGE_PATH64):
+        if os.path.exists(path):
+            return path
+    return "start"
+
+
 def open_url(url: str) -> str:
+    """Ouvre une URL dans Chrome/Edge."""
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
-    page = get_page()
-    page.goto(url, wait_until="domcontentloaded", timeout=30000)
-    page.wait_for_load_state("networkidle", timeout=15000)
-    return f"Page ouverte : {page.title()}."
+
+    browser = _get_browser_exe()
+    try:
+        if browser == "start":
+            os.startfile(url)
+        else:
+            subprocess.Popen(
+                [browser, url],
+                creationflags=CREATE_NO_WINDOW,
+            )
+        logger.info("URL ouverte dans %s: %s", browser, url)
+        return f"Page ouverte : {url}"
+    except Exception as exc:
+        logger.error("open_url error: %s", exc)
+        try:
+            os.startfile(url)
+            return f"Page ouverte : {url}"
+        except Exception as exc2:
+            return f"Erreur ouverture: {exc2}"
 
 
 def search_google(query: str) -> str:
     q = re.sub(r"^(recherche|cherche|google)\s*", "", query, flags=re.I).strip()
-    url = f"https://www.google.com/search?q={quote_plus(q)}"
-    page = get_page()
-    page.goto(url, wait_until="domcontentloaded", timeout=30000)
-    try:
-        first = page.locator("h3").first
-        first.wait_for(timeout=8000)
-        title = first.inner_text()
-        first.click()
-        page.wait_for_load_state("domcontentloaded", timeout=15000)
-        snippet = page.locator("p").first.inner_text(timeout=5000) if page.locator("p").count() else ""
-        return f"Premier résultat Google : {title}. {snippet[:200]}"
-    except Exception:
-        logger.exception("Google search parse failed")
-        return f"Recherche Google lancée pour : {q}."
+    return open_url(f"https://www.google.com/search?q={quote_plus(q)}")
 
 
 def search_youtube(query: str) -> str:
     q = re.sub(r".*youtube.*?(?:cherche|lance|joue|mets)\s*", "", query, flags=re.I).strip()
     if not q:
         q = re.sub(r".*youtube\s*", "", query, flags=re.I).strip()
-    url = f"https://www.youtube.com/results?search_query={quote_plus(q)}"
-    page = get_page()
-    page.goto(url, wait_until="domcontentloaded", timeout=30000)
-    try:
-        page.locator("ytd-video-renderer a#video-title").first.wait_for(timeout=10000)
-        page.locator("ytd-video-renderer a#video-title").first.click()
-        page.wait_for_load_state("domcontentloaded", timeout=20000)
-        page.keyboard.press("k")
-        title = page.title().replace(" - YouTube", "")
-        return f"Lecture YouTube : {title}."
-    except Exception:
-        logger.exception("YouTube search failed")
-        return f"Recherche YouTube pour : {q}."
+    return open_url(f"https://www.youtube.com/results?search_query={quote_plus(q)}")
 
 
 def youtube_control(action: str) -> str:

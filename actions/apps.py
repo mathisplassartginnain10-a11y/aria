@@ -17,59 +17,520 @@ logger = logging.getLogger(__name__)
 
 CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
+USER = os.environ.get("USERNAME", "User")
+LOCALAPPDATA = os.environ.get("LOCALAPPDATA", f"C:/Users/{USER}/AppData/Local")
+APPDATA = os.environ.get("APPDATA", f"C:/Users/{USER}/AppData/Roaming")
+PROGRAMFILES = os.environ.get("ProgramFiles", "C:/Program Files")
+PROGRAMFILES86 = os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")
+
+
+def _u(path: str) -> str:
+    """Expand env vars and return path string."""
+    return str(Path(os.path.expandvars(path)))
+
+
 KNOWN_APPS: dict = {
-    "msfs": [
-        r"C:\Program Files\WindowsApps\Microsoft.FlightSimulator*\FlightSimulator.exe",
-        r"C:\Program Files (x86)\Steam\steamapps\common\MicrosoftFlightSimulator\FlightSimulator.exe",
+    # === MICROSOFT FLIGHT SIMULATOR ===
+    "msfs2024": [
+        r"C:\Program Files\WindowsApps\Microsoft.FlightSimulator2024*\FlightSimulator2024.exe",
+        r"C:\Program Files\WindowsApps\Microsoft.Limitless*\FlightSimulator2024.exe",
+        _u(r"%LOCALAPPDATA%\Microsoft Flight Simulator 2024\FlightSimulator2024.exe"),
+        r"shell:AppsFolder\Microsoft.FlightSimulator2024_8wekyb3d8bbwe!App",
     ],
-    "flight simulator": "msfs",
-    "simulateur de vol": "msfs",
-    "steam": r"C:\Program Files (x86)\Steam\Steam.exe",
-    "valorant": r"C:\Riot Games\VALORANT\live\VALORANT.exe",
-    "no man sky": r"C:\Program Files (x86)\Steam\steamapps\common\No Man's Sky\Binaries\NMS.exe",
-    "no man's sky": r"C:\Program Files (x86)\Steam\steamapps\common\No Man's Sky\Binaries\NMS.exe",
-    "age of empires": r"C:\Program Files\WindowsApps\Microsoft.MSPhoenix*\RelicCardinal.exe",
-    "cossacks": r"C:\Program Files (x86)\Steam\steamapps\common\Cossacks 3\cossacks3.exe",
+    "msfs2020": [
+        r"C:\Program Files\WindowsApps\Microsoft.FlightSimulator_*\FlightSimulator.exe",
+        _u(r"%LOCALAPPDATA%\Microsoft Flight Simulator\FlightSimulator.exe"),
+        r"shell:AppsFolder\Microsoft.FlightSimulator_8wekyb3d8bbwe!App",
+    ],
+    "msfs": "msfs2024",
+    "flight simulator": "msfs2024",
+    "simulateur de vol": "msfs2024",
+    "fsx": [r"C:\Program Files (x86)\Steam\steamapps\common\FSX\fsx.exe"],
+    # === JEUX STEAM ===
+    "steam": [
+        r"C:\Program Files (x86)\Steam\Steam.exe",
+        r"C:\Program Files\Steam\Steam.exe",
+        _u(r"%PROGRAMFILES(x86)%\Steam\Steam.exe"),
+    ],
+    "no mans sky": [
+        r"C:\Program Files (x86)\Steam\steamapps\common\No Man's Sky\Binaries\NMS.exe",
+        r"C:\Program Files\Steam\steamapps\common\No Man's Sky\Binaries\NMS.exe",
+    ],
+    "no man's sky": "no mans sky",
+    "nms": "no mans sky",
+    "age of empires 4": [
+        r"C:\Program Files\WindowsApps\Xbox.AgeOfEmpires4*\RelicCardinal.exe",
+        r"C:\Program Files (x86)\Steam\steamapps\common\AgeOfEmpires4\RelicCardinal.exe",
+        r"shell:AppsFolder\Xbox.AgeOfEmpires4_8wekyb3d8bbwe!App",
+    ],
+    "aoe4": "age of empires 4",
+    "age of empires": "age of empires 4",
+    "cossacks 3": [
+        r"C:\Program Files (x86)\Steam\steamapps\common\Cossacks 3\cossacks3.exe",
+        r"C:\Program Files\Steam\steamapps\common\Cossacks 3\cossacks3.exe",
+    ],
+    "cossacks": "cossacks 3",
+    "valorant": [
+        _u(r"%LOCALAPPDATA%\Riot Games\VALORANT\live\VALORANT.exe"),
+        r"C:\Riot Games\VALORANT\live\VALORANT.exe",
+    ],
+    "minecraft": [
+        _u(r"%PROGRAMFILES(x86)%\Minecraft Launcher\MinecraftLauncher.exe"),
+        _u(r"%LOCALAPPDATA%\Packages\Microsoft.MinecraftUWP_*\LocalState\games\com.mojang"),
+        r"shell:AppsFolder\Microsoft.MinecraftUWP_8wekyb3d8bbwe!App",
+    ],
+    "fortnite": [
+        _u(r"%LOCALAPPDATA%\FortniteGame\Binaries\Win64\FortniteClient-Win64-Shipping.exe"),
+        r"C:\Program Files\Epic Games\Fortnite\FortniteGame\Binaries\Win64\FortniteClient-Win64-Shipping.exe",
+    ],
+    "league of legends": [
+        r"C:\Riot Games\League of Legends\LeagueClient.exe",
+        _u(r"%LOCALAPPDATA%\Riot Games\League of Legends\LeagueClient.exe"),
+    ],
+    "lol": "league of legends",
+    "gta5": [
+        r"C:\Program Files (x86)\Steam\steamapps\common\Grand Theft Auto V\GTA5.exe",
+        r"C:\Program Files\Rockstar Games\Grand Theft Auto V\GTA5.exe",
+        r"C:\Program Files\Epic Games\GTAV\GTA5.exe",
+    ],
+    "gta": "gta5",
+    "cyberpunk": [
+        r"C:\Program Files (x86)\Steam\steamapps\common\Cyberpunk 2077\bin\x64\Cyberpunk2077.exe",
+        r"C:\Program Files\GOG Galaxy\Games\Cyberpunk 2077\bin\x64\Cyberpunk2077.exe",
+        r"C:\Program Files\Epic Games\Cyberpunk 2077\bin\x64\Cyberpunk2077.exe",
+    ],
+    "elden ring": [
+        r"C:\Program Files (x86)\Steam\steamapps\common\ELDEN RING\Game\eldenring.exe",
+    ],
+    "cs2": [
+        r"C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive\game\bin\win64\cs2.exe",
+    ],
+    "csgo": "cs2",
+    "counter strike": "cs2",
+    "dota 2": [
+        r"C:\Program Files (x86)\Steam\steamapps\common\dota 2 beta\game\bin\win64\dota2.exe",
+    ],
+    "tf2": [
+        r"C:\Program Files (x86)\Steam\steamapps\common\Team Fortress 2\hl2.exe",
+    ],
+    "rust": [
+        r"C:\Program Files (x86)\Steam\steamapps\common\Rust\RustClient.exe",
+    ],
+    "ark": [
+        r"C:\Program Files (x86)\Steam\steamapps\common\ARK\ShooterGame\Binaries\Win64\ShooterGame.exe",
+    ],
+    "the witcher 3": [
+        r"C:\Program Files (x86)\Steam\steamapps\common\The Witcher 3\bin\x64\witcher3.exe",
+        r"C:\Program Files\GOG Galaxy\Games\The Witcher 3 Wild Hunt\bin\x64\witcher3.exe",
+    ],
+    "red dead": [
+        r"C:\Program Files\Rockstar Games\Red Dead Redemption 2\RDR2.exe",
+    ],
+    "rdr2": "red dead",
+    # === LAUNCHERS ===
+    "epic games": [
+        _u(r"%LOCALAPPDATA%\EpicGamesLauncher\Portal\Binaries\Win64\EpicGamesLauncher.exe"),
+        r"C:\Program Files (x86)\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe",
+    ],
+    "epic": "epic games",
+    "battle net": [
+        r"C:\Program Files (x86)\Battle.net\Battle.net.exe",
+        r"C:\Program Files\Battle.net\Battle.net.exe",
+    ],
+    "battlenet": "battle net",
+    "ubisoft": [
+        _u(r"%LOCALAPPDATA%\Ubisoft Game Launcher\UbisoftConnect.exe"),
+        r"C:\Program Files (x86)\Ubisoft\Ubisoft Game Launcher\UbisoftConnect.exe",
+    ],
+    "uplay": "ubisoft",
+    "ea app": [
+        _u(r"%LOCALAPPDATA%\Electronic Arts\EA Desktop\EA Desktop\EADesktop.exe"),
+    ],
+    "origin": "ea app",
+    "ea": "ea app",
+    "gog": [
+        _u(r"%LOCALAPPDATA%\GOG.com\Galaxy\GalaxyClient.exe"),
+        r"C:\Program Files (x86)\GOG Galaxy\GalaxyClient.exe",
+    ],
+    "rockstar": [
+        _u(r"%LOCALAPPDATA%\Rockstar Games\Launcher\Launcher.exe"),
+    ],
+    "xbox": r"shell:AppsFolder\Microsoft.GamingApp_8wekyb3d8bbwe!Microsoft.Xbox.App",
+    "xbox app": "xbox",
+    # === DÉVELOPPEMENT ===
     "cursor": [
-        r"C:\Users\mathi\AppData\Local\Programs\cursor\Cursor.exe",
-        r"C:\Users\%USERNAME%\AppData\Local\Programs\cursor\Cursor.exe",
+        _u(r"%LOCALAPPDATA%\Programs\cursor\Cursor.exe"),
+        _u(r"%LOCALAPPDATA%\Programs\Cursor\Cursor.exe"),
+        rf"C:\Users\{USER}\AppData\Local\Programs\cursor\Cursor.exe",
     ],
     "vscode": [
-        r"C:\Users\mathi\AppData\Local\Programs\Microsoft VS Code\Code.exe",
+        _u(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe"),
         r"C:\Program Files\Microsoft VS Code\Code.exe",
     ],
     "visual studio code": "vscode",
+    "vs code": "vscode",
     "code": "vscode",
-    "chrome": r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-    "firefox": r"C:\Program Files\Mozilla Firefox\firefox.exe",
-    "edge": r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-    "opera": r"C:\Users\mathi\AppData\Local\Programs\Opera GX\opera.exe",
-    "opera gx": r"C:\Users\mathi\AppData\Local\Programs\Opera GX\opera.exe",
-    "discord": r"C:\Users\mathi\AppData\Local\Discord\app-*\Discord.exe",
-    "spotify": r"C:\Users\mathi\AppData\Roaming\Spotify\Spotify.exe",
-    "vlc": r"C:\Program Files\VideoLAN\VLC\vlc.exe",
-    "obs": r"C:\Program Files\obs-studio\bin\64bit\obs64.exe",
+    "visual studio": [
+        r"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\devenv.exe",
+        r"C:\Program Files\Microsoft Visual Studio\2022\Professional\Common7\IDE\devenv.exe",
+        r"C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\IDE\devenv.exe",
+        r"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\Common7\IDE\devenv.exe",
+    ],
+    "git": r"C:\Program Files\Git\git-bash.exe",
+    "git bash": "git",
+    "github desktop": [
+        _u(r"%LOCALAPPDATA%\GitHubDesktop\GitHubDesktop.exe"),
+        rf"C:\Users\{USER}\AppData\Local\GitHubDesktop\GitHubDesktop.exe",
+    ],
+    "postman": [
+        _u(r"%LOCALAPPDATA%\Postman\Postman.exe"),
+    ],
+    "insomnia": [
+        _u(r"%LOCALAPPDATA%\insomnia\Insomnia.exe"),
+    ],
+    "docker": [
+        r"C:\Program Files\Docker\Docker\Docker Desktop.exe",
+    ],
+    "android studio": [
+        r"C:\Program Files\Android\Android Studio\bin\studio64.exe",
+        _u(r"%LOCALAPPDATA%\Programs\Android Studio\bin\studio64.exe"),
+    ],
+    "intellij": [
+        r"C:\Program Files\JetBrains\IntelliJ IDEA*\bin\idea64.exe",
+        _u(r"%LOCALAPPDATA%\JetBrains\IntelliJ IDEA*\bin\idea64.exe"),
+    ],
+    "pycharm": [
+        r"C:\Program Files\JetBrains\PyCharm*\bin\pycharm64.exe",
+        _u(r"%LOCALAPPDATA%\JetBrains\PyCharm*\bin\pycharm64.exe"),
+    ],
+    "webstorm": [
+        r"C:\Program Files\JetBrains\WebStorm*\bin\webstorm64.exe",
+    ],
+    "sublime": [
+        r"C:\Program Files\Sublime Text\sublime_text.exe",
+        r"C:\Program Files\Sublime Text 3\sublime_text.exe",
+    ],
+    "notepad++": [
+        r"C:\Program Files\Notepad++\notepad++.exe",
+        r"C:\Program Files (x86)\Notepad++\notepad++.exe",
+    ],
+    "wsl": "wsl.exe",
+    "powershell": "powershell.exe",
+    "terminal": "wt.exe",
+    "windows terminal": "wt.exe",
+    "cmd": "cmd.exe",
+    "invite de commandes": "cmd.exe",
+    # === NAVIGATEURS ===
+    "chrome": [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    ],
+    "google chrome": "chrome",
+    "firefox": [
+        r"C:\Program Files\Mozilla Firefox\firefox.exe",
+        r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe",
+    ],
+    "edge": [
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    ],
+    "microsoft edge": "edge",
+    "opera": [
+        _u(r"%LOCALAPPDATA%\Programs\Opera GX\opera.exe"),
+        _u(r"%LOCALAPPDATA%\Programs\Opera\opera.exe"),
+        rf"C:\Users\{USER}\AppData\Local\Programs\Opera GX\opera.exe",
+    ],
+    "opera gx": "opera",
+    "brave": [
+        _u(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\Application\brave.exe"),
+    ],
+    # === COMMUNICATION ===
+    "discord": [
+        _u(r"%LOCALAPPDATA%\Discord\app-*\Discord.exe"),
+        _u(r"%LOCALAPPDATA%\Discord\Update.exe"),
+        r"shell:AppsFolder\Discord.Discord_*!Discord",
+    ],
+    "whatsapp": [
+        r"shell:AppsFolder\WhatsApp.WhatsApp_5g5c11yj14cce!WhatsApp",
+        _u(r"%LOCALAPPDATA%\WhatsApp\WhatsApp.exe"),
+    ],
+    "telegram": [
+        _u(r"%APPDATA%\Telegram Desktop\Telegram.exe"),
+        _u(r"%LOCALAPPDATA%\Telegram Desktop\Telegram.exe"),
+    ],
+    "signal": [
+        _u(r"%LOCALAPPDATA%\Programs\signal-desktop\Signal.exe"),
+    ],
+    "zoom": [
+        _u(r"%APPDATA%\Zoom\bin\Zoom.exe"),
+        _u(r"%LOCALAPPDATA%\Zoom\bin\Zoom.exe"),
+    ],
+    "teams": [
+        _u(r"%LOCALAPPDATA%\Microsoft\Teams\Update.exe"),
+        _u(r"%LOCALAPPDATA%\Microsoft\Teams\current\Teams.exe"),
+        r"shell:AppsFolder\MicrosoftTeams_8wekyb3d8bbwe!MicrosoftTeams",
+    ],
+    "microsoft teams": "teams",
+    "skype": [
+        _u(r"%APPDATA%\Microsoft\Teams\current\Skype.exe"),
+        r"shell:AppsFolder\Microsoft.SkypeApp_kzf8qxf38zg5c!App",
+    ],
+    "slack": [
+        _u(r"%LOCALAPPDATA%\slack\slack.exe"),
+        _u(r"%LOCALAPPDATA%\slack\app-*\slack.exe"),
+    ],
+    "instagram": [
+        r"shell:AppsFolder\Instagram.Instagram_8xx8rvfyw5nnt!Instagram",
+    ],
+    # === MÉDIAS ===
+    "spotify": [
+        _u(r"%APPDATA%\Spotify\Spotify.exe"),
+        _u(r"%LOCALAPPDATA%\Microsoft\WindowsApps\Spotify.exe"),
+        r"shell:AppsFolder\SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify",
+    ],
+    "vlc": [
+        r"C:\Program Files\VideoLAN\VLC\vlc.exe",
+        r"C:\Program Files (x86)\VideoLAN\VLC\vlc.exe",
+    ],
+    "media player": "wmplayer.exe",
+    "windows media player": "wmplayer.exe",
+    "groove": r"shell:AppsFolder\Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic",
+    "films": r"shell:AppsFolder\Microsoft.ZuneVideo_8wekyb3d8bbwe!Microsoft.ZuneVideo",
+    "photos": r"shell:AppsFolder\Microsoft.Windows.Photos_8wekyb3d8bbwe!App",
+    # === CRÉATION ET DESIGN ===
+    "obs": [
+        r"C:\Program Files\obs-studio\bin\64bit\obs64.exe",
+        r"C:\Program Files (x86)\obs-studio\bin\32bit\obs32.exe",
+    ],
+    "obs studio": "obs",
+    "blender": [
+        r"C:\Program Files\Blender Foundation\Blender 4.2\blender.exe",
+        r"C:\Program Files\Blender Foundation\Blender 4.1\blender.exe",
+        r"C:\Program Files\Blender Foundation\Blender 4.0\blender.exe",
+        r"C:\Program Files\Blender Foundation\Blender 3.6\blender.exe",
+        _u(r"%PROGRAMFILES%\Blender Foundation\Blender*\blender.exe"),
+    ],
+    "davinci": [
+        r"C:\Program Files\Blackmagic Design\DaVinci Resolve\Resolve.exe",
+    ],
+    "davinci resolve": "davinci",
+    "premiere": [
+        r"C:\Program Files\Adobe\Adobe Premiere Pro *\Adobe Premiere Pro.exe",
+    ],
+    "after effects": [
+        r"C:\Program Files\Adobe\Adobe After Effects *\Support Files\AfterFX.exe",
+    ],
+    "photoshop": [
+        r"C:\Program Files\Adobe\Adobe Photoshop *\Photoshop.exe",
+    ],
+    "illustrator": [
+        r"C:\Program Files\Adobe\Adobe Illustrator *\Support Files\Contents\Windows\Illustrator.exe",
+    ],
+    "audacity": [
+        r"C:\Program Files\Audacity\Audacity.exe",
+        r"C:\Program Files (x86)\Audacity\Audacity.exe",
+    ],
+    "figma": [
+        _u(r"%LOCALAPPDATA%\Figma\Figma.exe"),
+    ],
+    "unity": [
+        r"C:\Program Files\Unity\Hub\Editor\*\Editor\Unity.exe",
+        _u(r"%PROGRAMFILES%\Unity\Hub\Editor\*\Editor\Unity.exe"),
+    ],
+    "unity hub": [
+        r"C:\Program Files\Unity Hub\Unity Hub.exe",
+        _u(r"%LOCALAPPDATA%\Programs\Unity Hub\Unity Hub.exe"),
+    ],
+    "unreal engine": [
+        r"C:\Program Files\Epic Games\UE_*\Engine\Binaries\Win64\UnrealEditor.exe",
+    ],
+    "unreal": "unreal engine",
+    # === BUREAUTIQUE ===
+    "word": [
+        r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
+        r"C:\Program Files (x86)\Microsoft Office\root\Office16\WINWORD.EXE",
+        r"C:\Program Files\Microsoft Office 15\root\Office15\WINWORD.EXE",
+    ],
+    "excel": [
+        r"C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE",
+        r"C:\Program Files (x86)\Microsoft Office\root\Office16\EXCEL.EXE",
+    ],
+    "powerpoint": [
+        r"C:\Program Files\Microsoft Office\root\Office16\POWERPNT.EXE",
+        r"C:\Program Files (x86)\Microsoft Office\root\Office16\POWERPNT.EXE",
+    ],
+    "outlook": [
+        r"C:\Program Files\Microsoft Office\root\Office16\OUTLOOK.EXE",
+        r"C:\Program Files (x86)\Microsoft Office\root\Office16\OUTLOOK.EXE",
+    ],
+    "onenote": [
+        r"C:\Program Files\Microsoft Office\root\Office16\ONENOTE.EXE",
+        r"shell:AppsFolder\Microsoft.Office.OneNote_8wekyb3d8bbwe!microsoft.onenoteim",
+    ],
+    "access": [
+        r"C:\Program Files\Microsoft Office\root\Office16\MSACCESS.EXE",
+    ],
+    "notion": [
+        _u(r"%LOCALAPPDATA%\Programs\Notion\Notion.exe"),
+        _u(r"%APPDATA%\Notion\Notion.exe"),
+    ],
+    # === OUTILS SYSTÈME ===
     "notepad": "notepad.exe",
     "bloc-notes": "notepad.exe",
+    "bloc notes": "notepad.exe",
     "calculatrice": "calc.exe",
     "calculette": "calc.exe",
     "calc": "calc.exe",
+    "paint": "mspaint.exe",
+    "paint 3d": r"shell:AppsFolder\Microsoft.MSPaint_8wekyb3d8bbwe!Microsoft.MSPaint",
     "explorateur": "explorer.exe",
     "explorer": "explorer.exe",
+    "gestionnaire de taches": "taskmgr.exe",
     "gestionnaire de tâches": "taskmgr.exe",
+    "task manager": "taskmgr.exe",
     "taskmgr": "taskmgr.exe",
-    "paint": "mspaint.exe",
-    "word": r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
-    "excel": r"C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE",
-    "blender": r"C:\Program Files\Blender Foundation\Blender*\blender.exe",
-    "unity": r"C:\Program Files\Unity\Hub\Editor\*\Editor\Unity.exe",
-    "paramètres": "ms-settings:",
+    "registre": "regedit.exe",
+    "regedit": "regedit.exe",
+    "gestionnaire de peripheriques": "devmgmt.msc",
+    "gestionnaire de périphériques": "devmgmt.msc",
+    "panneau de configuration": "control.exe",
     "parametres": "ms-settings:",
-    "store": "ms-windows-store:",
-    "xbox": "xbox:",
-    # Alias noms → exe (fermeture fiable)
-    "microsoft edge": "msedge.exe",
-    "google chrome": "chrome.exe",
+    "paramètres": "ms-settings:",
+    "settings": "ms-settings:",
+    "defragmentation": "dfrgui.exe",
+    "nettoyage": "cleanmgr.exe",
+    "moniteur de ressources": "resmon.exe",
+    "performance": "perfmon.exe",
+    "services": "services.msc",
+    "gestion de disques": "diskmgmt.msc",
+    "pare-feu": "wf.msc",
+    "snip": "SnippingTool.exe",
+    "capture": "SnippingTool.exe",
+    "winrar": [
+        r"C:\Program Files\WinRAR\WinRAR.exe",
+        r"C:\Program Files (x86)\WinRAR\WinRAR.exe",
+    ],
+    "7zip": [
+        r"C:\Program Files\7-Zip\7zFM.exe",
+        r"C:\Program Files (x86)\7-Zip\7zFM.exe",
+    ],
+    "7-zip": "7zip",
+    # === UTILITAIRES ===
+    "everything": [
+        r"C:\Program Files\Everything\Everything.exe",
+        _u(r"%LOCALAPPDATA%\Programs\Everything\Everything.exe"),
+    ],
+    "powertoys": [
+        r"C:\Program Files\PowerToys\PowerToys.exe",
+        _u(r"%LOCALAPPDATA%\Microsoft\PowerToys\PowerToys.exe"),
+    ],
+    "cpu-z": [
+        r"C:\Program Files\CPUID\CPU-Z\cpuz_x64.exe",
+        r"C:\Program Files (x86)\CPUID\CPU-Z\cpuz.exe",
+    ],
+    "gpu-z": [
+        _u(r"%LOCALAPPDATA%\GPU-Z\GPU-Z.exe"),
+        r"C:\Program Files\GPU-Z\GPU-Z.exe",
+    ],
+    "hwinfo": [
+        r"C:\Program Files\HWiNFO64\HWiNFO64.exe",
+        r"C:\Program Files (x86)\HWiNFO32\HWiNFO32.exe",
+    ],
+    "msi afterburner": [
+        r"C:\Program Files (x86)\MSI Afterburner\MSIAfterburner.exe",
+    ],
+    "afterburner": "msi afterburner",
+    "cinebench": [
+        _u(r"%LOCALAPPDATA%\Programs\Cinebench*\Cinebench.exe"),
+    ],
+    "furmark": [
+        r"C:\Program Files\Geeks3D\FurMark*\FurMark.exe",
+        r"C:\Program Files (x86)\Geeks3D\FurMark*\FurMark.exe",
+    ],
+    "wireshark": [
+        r"C:\Program Files\Wireshark\Wireshark.exe",
+    ],
+    "putty": [
+        r"C:\Program Files\PuTTY\putty.exe",
+        r"C:\Program Files (x86)\PuTTY\putty.exe",
+    ],
+    "filezilla": [
+        r"C:\Program Files\FileZilla FTP Client\filezilla.exe",
+        r"C:\Program Files (x86)\FileZilla FTP Client\filezilla.exe",
+    ],
+    "virtualbox": [
+        r"C:\Program Files\Oracle\VirtualBox\VirtualBox.exe",
+    ],
+    "vmware": [
+        r"C:\Program Files (x86)\VMware\VMware Workstation\vmware.exe",
+        r"C:\Program Files\VMware\VMware Workstation\vmware.exe",
+    ],
+    "malwarebytes": [
+        r"C:\Program Files\Malwarebytes\Anti-Malware\mbam.exe",
+    ],
+    "bitwarden": [
+        _u(r"%LOCALAPPDATA%\Programs\bitwarden\Bitwarden.exe"),
+    ],
+    "veracrypt": [
+        r"C:\Program Files\VeraCrypt\VeraCrypt.exe",
+    ],
+    "logitech": [
+        _u(r"%LOCALAPPDATA%\LGHUB\lghub.exe"),
+        r"C:\Program Files\LGHUB\lghub.exe",
+    ],
+    "lghub": "logitech",
+    "geforce experience": [
+        r"C:\Program Files\NVIDIA Corporation\NVIDIA GeForce Experience\NVIDIA GeForce Experience.exe",
+    ],
+    "nvidia": "geforce experience",
+    "amd radeon": [
+        r"C:\Program Files\AMD\CNext\CNext\RadeonSoftware.exe",
+    ],
+    "radeon": "amd radeon",
+    # === AVIATION ===
+    "sayintentions": [
+        _u(r"%LOCALAPPDATA%\Programs\SayIntentions.AI\SayIntentions.exe"),
+        _u(r"%APPDATA%\SayIntentions.AI\SayIntentions.exe"),
+        rf"C:\Users\{USER}\AppData\Local\Programs\SayIntentions.AI\SayIntentions.exe",
+    ],
+    "say intentions": "sayintentions",
+    "littlenavmap": [
+        _u(r"%LOCALAPPDATA%\Programs\Little Navmap\littlenavmap.exe"),
+        r"C:\Little Navmap\littlenavmap.exe",
+    ],
+    "little navmap": "littlenavmap",
+    "pfpx": [
+        r"C:\Program Files (x86)\PFPX\PFPX.exe",
+    ],
+    "simbrief": "chrome",
+    # === MUSIQUE ===
+    "itunes": [
+        r"C:\Program Files\iTunes\iTunes.exe",
+        r"C:\Program Files (x86)\iTunes\iTunes.exe",
+        r"shell:AppsFolder\AppleInc.iTunes_nzyj5cx40ttqa!iTunes",
+    ],
+    "deezer": [
+        _u(r"%LOCALAPPDATA%\Programs\Deezer\Deezer.exe"),
+        r"shell:AppsFolder\Deezer.Deezer_*!App",
+    ],
+    "tidal": [
+        _u(r"%LOCALAPPDATA%\TIDAL\TIDAL.exe"),
+    ],
+    # === MICROSOFT STORE APPS ===
+    "netflix": r"shell:AppsFolder\4DF9E0F8.Netflix_mcm4njqhnhss8!Netflix",
+    "tiktok": r"shell:AppsFolder\TikTok.TikTok_ywdps6kjntwvw!TikTok",
+    "store": r"shell:AppsFolder\Microsoft.WindowsStore_8wekyb3d8bbwe!App",
+    "windows store": "store",
+    "xbox game bar": r"shell:AppsFolder\Microsoft.XboxGamingOverlay_8wekyb3d8bbwe!App",
+    "cortana": r"shell:AppsFolder\Microsoft.549981C3F5F10_8wekyb3d8bbwe!App",
+    "mail": r"shell:AppsFolder\microsoft.windowscommunicationsapps_8wekyb3d8bbwe!microsoft.windowsLive.mail",
+    "calendrier": r"shell:AppsFolder\microsoft.windowscommunicationsapps_8wekyb3d8bbwe!microsoft.windowsLive.calendar",
+    "meteo": r"shell:AppsFolder\Microsoft.BingWeather_8wekyb3d8bbwe!App",
+    "actualites": r"shell:AppsFolder\Microsoft.BingNews_8wekyb3d8bbwe!AppexNews",
+    "cartes": r"shell:AppsFolder\Microsoft.WindowsMaps_8wekyb3d8bbwe!App",
+    "camera": r"shell:AppsFolder\Microsoft.WindowsCamera_8wekyb3d8bbwe!App",
+    "horloge": r"shell:AppsFolder\Microsoft.WindowsAlarms_8wekyb3d8bbwe!App",
+    "alarme": "horloge",
 }
 
 CLOSE_ALIASES: dict[str, str] = {
@@ -80,42 +541,25 @@ CLOSE_ALIASES: dict[str, str] = {
     "spotify": "Spotify.exe",
     "discord": "Discord.exe",
     "steam": "steam.exe",
-    "msfs": "FlightSimulator.exe",
-    "flight simulator": "FlightSimulator.exe",
-    "simulateur de vol": "FlightSimulator.exe",
+    "msfs": "FlightSimulator2024.exe",
+    "msfs2024": "FlightSimulator2024.exe",
+    "msfs2020": "FlightSimulator.exe",
+    "flight simulator": "FlightSimulator2024.exe",
+    "simulateur de vol": "FlightSimulator2024.exe",
+    "firefox": "firefox.exe",
+    "opera": "opera.exe",
+    "opera gx": "opera.exe",
+    "vscode": "Code.exe",
+    "visual studio code": "Code.exe",
+    "cursor": "Cursor.exe",
+    "obs": "obs64.exe",
+    "obs studio": "obs64.exe",
+    "teams": "Teams.exe",
+    "slack": "slack.exe",
+    "valorant": "VALORANT.exe",
+    "league of legends": "LeagueClient.exe",
+    "lol": "LeagueClient.exe",
 }
-
-UWP_APPS: dict[str, str] = {
-    "whatsapp": "WhatsApp",
-    "instagram": "Instagram",
-    "tiktok": "TikTok",
-    "netflix": "Netflix",
-}
-
-
-def _match_uwp_app(name_lower: str) -> str | None:
-    for key, package_name in UWP_APPS.items():
-        if key in name_lower or name_lower in key:
-            return package_name
-    return None
-
-
-def _launch_uwp(app_name: str) -> bool:
-    try:
-        subprocess.Popen(
-            [
-                "powershell",
-                "-WindowStyle",
-                "Hidden",
-                "-Command",
-                f'Start-Process "shell:AppsFolder\\$(Get-AppxPackage *{app_name}* | Select-Object -First 1 | ForEach-Object {{$_.PackageFamilyName + "!App"}})"',
-            ],
-            creationflags=CREATE_NO_WINDOW,
-        )
-        return True
-    except Exception as exc:
-        logger.error("UWP launch error: %s", exc)
-        return False
 
 
 def _load_custom_apps() -> None:
@@ -131,21 +575,35 @@ def _load_custom_apps() -> None:
 _load_custom_apps()
 
 
-def _resolve_path(path_str: str) -> str | None:
-    if not path_str or path_str.endswith(":"):
-        return path_str
+def _resolve_path_candidate(path: str) -> str | None:
+    """Résout un candidat (glob, shell URI, chemin absolu ou exe PATH)."""
+    if path.startswith("shell:"):
+        return path
+    expanded = os.path.expandvars(path)
+    if "*" in expanded:
+        matches = sorted(glob.glob(expanded))
+        return matches[-1] if matches else None
+    if os.path.exists(expanded):
+        return expanded
+    if os.path.sep not in expanded and (not os.path.altsep or os.path.altsep not in expanded):
+        return expanded
+    return None
 
-    path_str = os.path.expandvars(path_str)
 
-    if "*" in path_str:
-        matches = sorted(glob.glob(path_str))
-        if matches:
-            return matches[-1]
+def _resolve_app(name: str) -> str | None:
+    """Résout un nom d'app en chemin exécutable, avec gestion des aliases."""
+    val = KNOWN_APPS.get(name.lower().strip())
+    if val is None:
         return None
-
-    if os.path.exists(path_str):
-        return path_str
-
+    if isinstance(val, str) and val in KNOWN_APPS:
+        return _resolve_app(val)
+    if isinstance(val, str):
+        return _resolve_path_candidate(val)
+    if isinstance(val, list):
+        for path in val:
+            resolved = _resolve_path_candidate(path)
+            if resolved:
+                return resolved
     return None
 
 
@@ -246,17 +704,6 @@ def _search_everywhere(app_name: str) -> str | None:
             except Exception:
                 pass
 
-    uwp_apps = {
-        "spotify": "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify",
-        "xbox": "Microsoft.XboxApp_8wekyb3d8bbwe!Microsoft.XboxApp",
-        "photos": "Microsoft.Windows.Photos_8wekyb3d8bbwe!App",
-        "calculatrice": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
-        "store": "Microsoft.WindowsStore_8wekyb3d8bbwe!App",
-    }
-    for key, app_id in uwp_apps.items():
-        if key in name_lower or name_lower in key:
-            return f"shell:AppsFolder\\{app_id}"
-
     search_dirs = [
         r"C:\Program Files",
         r"C:\Program Files (x86)",
@@ -284,61 +731,70 @@ def _target_is_launchable(target: str) -> bool:
         return True
     if target.endswith(".lnk"):
         return os.path.exists(target)
-    if (os.path.sep not in target and (not os.path.altsep or os.path.altsep not in target)) and target.endswith(".exe"):
+    if (
+        os.path.sep not in target
+        and (not os.path.altsep or os.path.altsep not in target)
+        and target.endswith(".exe")
+    ):
+        return True
+    if target.endswith(".msc") or target.endswith(".cpl"):
         return True
     return os.path.exists(target)
 
 
-def _resolve_app_target(name_lower: str) -> str | None:
+def _resolve_launch_target(name_lower: str) -> str | None:
     _load_custom_apps()
-    target = None
 
-    for key, value in KNOWN_APPS.items():
-        if key in name_lower or name_lower in key:
-            if isinstance(value, str) and value in KNOWN_APPS and not value.endswith((".exe", ":")):
-                value = KNOWN_APPS[value]
-            if isinstance(value, list):
-                for entry in value:
-                    resolved = _resolve_path(entry)
-                    if resolved:
-                        target = resolved
-                        break
-            elif isinstance(value, str):
-                if value in KNOWN_APPS:
-                    nested = KNOWN_APPS[value]
-                    if isinstance(nested, list):
-                        for entry in nested:
-                            resolved = _resolve_path(entry)
-                            if resolved:
-                                target = resolved
-                                break
-                    elif isinstance(nested, str):
-                        target = _resolve_path(nested) or nested
-                else:
-                    target = _resolve_path(value) if ("*" in value or "%" in value) else value
-            if target:
-                break
+    path = _resolve_app(name_lower)
+    if not path:
+        for key in KNOWN_APPS:
+            if key in name_lower or name_lower in key:
+                path = _resolve_app(key)
+                if path:
+                    break
 
-    if target and isinstance(target, str) and not target.endswith(":") and not target.startswith("shell:") and not os.path.exists(target):
-        if "*" in target or "%" in target:
-            target = _resolve_path(target)
+    if not path:
+        path = (
+            _find_in_registry(name_lower.replace(" ", ""))
+            or _search_start_menu(name_lower)
+            or _search_everywhere(name_lower)
+        )
 
-    if not target or (
-        isinstance(target, str)
-        and not target.endswith(":")
-        and not target.startswith("shell:")
-        and not os.path.exists(target)
-    ):
-        reg_path = _find_in_registry(name_lower.replace(" ", ""))
-        if reg_path:
-            target = reg_path
+    if path and _target_is_launchable(path):
+        return path
+    return None
 
-    if not target:
-        lnk = _search_start_menu(name_lower)
-        if lnk:
-            target = lnk
 
-    return target
+def _resolve_app_target(name_lower: str) -> str | None:
+    """Compatibilité fermeture / focus."""
+    return _resolve_launch_target(name_lower)
+
+
+def _execute_launch(path: str, label: str) -> str:
+    """Lance un path résolu."""
+    try:
+        if path.startswith("shell:"):
+            subprocess.Popen(
+                f'explorer.exe "{path}"',
+                shell=True,
+                creationflags=CREATE_NO_WINDOW,
+            )
+        elif path.endswith(".msc") or path.endswith(".cpl"):
+            subprocess.Popen(["mmc.exe", path], creationflags=CREATE_NO_WINDOW)
+        elif path.endswith(":"):
+            os.startfile(path)
+        elif path.endswith(".lnk"):
+            os.startfile(path)
+        else:
+            subprocess.Popen([path], creationflags=CREATE_NO_WINDOW)
+        logger.info("Lancé: %s → %s", label, path)
+        memory.remember("context.last_app_launched", label)
+        return f"{label} lancé"
+    except FileNotFoundError:
+        return f"Fichier introuvable : {path}"
+    except Exception as exc:
+        logger.error("Erreur lancement %s: %s", label, exc)
+        return f"Erreur : {exc}"
 
 
 def _normalize_close_query(app_name: str) -> str:
@@ -407,6 +863,7 @@ def _process_matches_close(proc_name: str, candidates: list[str], name_lower: st
 
 
 def launch(app_name: str) -> str:
+    """Lance une application. Cherche dans KNOWN_APPS puis fallback."""
     name_lower = app_name.lower().strip()
     name_lower = re.sub(
         r"^(lance(?:-moi)?|ouvre(?:-moi)?|d[ée]marre(?:-moi)?|mets?)\s+",
@@ -416,57 +873,11 @@ def launch(app_name: str) -> str:
     ).strip()
     name_lower = re.sub(r"\s+en route$", "", name_lower).strip()
 
-    uwp_package = _match_uwp_app(name_lower)
-    if uwp_package:
-        if _launch_uwp(uwp_package):
-            logger.info("Lancé via UWP: %s", uwp_package)
-            memory.remember("context.last_app_launched", app_name)
-            return f"{app_name} ouvert"
-        return f"Je n'ai pas pu lancer {app_name}"
+    path = _resolve_launch_target(name_lower)
+    if not path:
+        return f"Application '{app_name}' introuvable sur ce PC"
 
-    target = _resolve_app_target(name_lower)
-    if not target or (isinstance(target, str) and not _target_is_launchable(target)):
-        found = _search_everywhere(name_lower)
-        if found:
-            target = found
-
-    if not target:
-        return f"Je n'ai pas trouvé {app_name} sur ton PC"
-
-    try:
-        if isinstance(target, str) and target.startswith("shell:"):
-            subprocess.Popen(
-                f'explorer.exe "{target}"',
-                shell=True,
-                creationflags=CREATE_NO_WINDOW,
-            )
-            logger.info("Lancé via shell: %s", target)
-            memory.remember("context.last_app_launched", app_name)
-            return f"{app_name} ouvert"
-        if isinstance(target, str) and target.endswith(":"):
-            os.startfile(target)
-            logger.info("Lancé via URI: %s", target)
-            memory.remember("context.last_app_launched", app_name)
-            return f"{app_name} ouvert"
-        if isinstance(target, str) and target.endswith(".lnk"):
-            os.startfile(target)
-            logger.info("Lancé via raccourci: %s", target)
-            memory.remember("context.last_app_launched", app_name)
-            return f"{app_name} lancé"
-        subprocess.Popen(
-            [target],
-            creationflags=CREATE_NO_WINDOW,
-            close_fds=True,
-        )
-        logger.info("Lancé: %s", target)
-        memory.remember("context.last_app_launched", app_name)
-        return f"{app_name} lancé"
-    except FileNotFoundError:
-        logger.error("App introuvable: %s (résolu: %s)", app_name, target)
-        return f"Je n'ai pas trouvé {app_name} sur ton PC"
-    except Exception as exc:
-        logger.error("Erreur lancement %s: %s", app_name, exc)
-        return f"Erreur au lancement de {app_name}: {exc}"
+    return _execute_launch(path, app_name.strip())
 
 
 def launch_multiple(app_names: list[str]) -> str:
@@ -553,8 +964,13 @@ def list_running() -> list[str]:
     running: list[str] = []
     known_exes: set[str] = set()
     for val in KNOWN_APPS.values():
-        if isinstance(val, str) and val.endswith(".exe"):
-            known_exes.add(Path(val).name.lower())
+        if isinstance(val, str):
+            if val.endswith(".exe"):
+                known_exes.add(Path(val).name.lower())
+            elif val in KNOWN_APPS:
+                nested = KNOWN_APPS[val]
+                if isinstance(nested, str) and nested.endswith(".exe"):
+                    known_exes.add(Path(nested).name.lower())
         elif isinstance(val, list):
             for entry in val:
                 if isinstance(entry, str) and entry.endswith(".exe"):

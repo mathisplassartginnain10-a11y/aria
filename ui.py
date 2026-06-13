@@ -438,7 +438,8 @@ class AriaAPI:
 
         total = 0
         if dataset_path.exists():
-            total = sum(1 for _ in dataset_path.open(encoding="utf-8"))
+            with dataset_path.open(encoding="utf-8") as f:
+                total = sum(1 for _ in f)
 
         last_count = 0
         if last_count_path.exists():
@@ -543,7 +544,8 @@ class AriaAPI:
                     last_date_path.write_text(datetime.now().isoformat(), encoding="utf-8")
                     dataset_path = app_paths.data_dir() / "fine_tune_dataset.jsonl"
                     if dataset_path.exists():
-                        count = sum(1 for _ in dataset_path.open(encoding="utf-8"))
+                        with dataset_path.open(encoding="utf-8") as f:
+                            count = sum(1 for _ in f)
                         (app_paths.data_dir() / "last_train_count.txt").write_text(
                             str(count), encoding="utf-8"
                         )

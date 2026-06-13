@@ -5,11 +5,19 @@ from pathlib import Path
 
 import requests
 import yaml
-from duckduckgo_search import DDGS
 
 import app_paths
 
 logger = logging.getLogger(__name__)
+
+try:
+    from ddgs import DDGS
+except ImportError:
+    try:
+        from duckduckgo_search import DDGS
+    except ImportError:
+        DDGS = None
+        logger.error("Ni ddgs ni duckduckgo_search installé. Lance: pip install ddgs")
 
 _CONFIG_PATH = app_paths.config_path()
 _PROMPTS_DIR = app_paths.prompts_dir()
@@ -33,20 +41,24 @@ GEOPOLITICS_PROMPT = (_PROMPTS_DIR / "geopolitics_system.txt").read_text(encodin
 
 
 def search_web(query: str, max_results: int = 5) -> list[dict]:
+    if DDGS is None:
+        return []
     try:
         with DDGS() as ddgs:
             return list(ddgs.text(query, max_results=max_results))
     except Exception as e:
-        logger.error("DDG error: %s", e)
+        logger.error("DDG search error: %s", e)
         return []
 
 
 def search_news(query: str, max_results: int = 5, timelimit: str = "d") -> list[dict]:
+    if DDGS is None:
+        return []
     try:
         with DDGS() as ddgs:
             return list(ddgs.news(query, max_results=max_results, timelimit=timelimit))
     except Exception as e:
-        logger.error("DDG error: %s", e)
+        logger.error("DDG news error: %s", e)
         return []
 
 

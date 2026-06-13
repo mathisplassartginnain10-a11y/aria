@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+import scipy.signal
 import sounddevice as sd
 import yaml
 from faster_whisper import WhisperModel
@@ -24,7 +25,8 @@ BLOCK_SIZE: int = int(_config.get("chunk_size", 2048))
 SILENCE_THRESHOLD: float = float(_config.get("silence_threshold", 500))
 SILENCE_DURATION: float = float(_config.get("silence_duration", 2.0))
 WHISPER_MODEL: str = _config["whisper_model"]
-MIN_AUDIO_FRAMES: int = int(SAMPLE_RATE / BLOCK_SIZE * 1.0)
+ACTUAL_RATE: int = SAMPLE_RATE
+ACTUAL_BLOCKSIZE: int = BLOCK_SIZE
 
 SKIP_DEVICE_KEYWORDS = (
     "voicemeeter",
@@ -101,12 +103,8 @@ def get_audio_level() -> float:
         return _current_rms
 
 
-def _chunk_rms(audio_chunk: np.ndarray) -> float:
-    return float(np.sqrt(np.mean(audio_chunk ** 2)) * 32768)
-
-
-def _is_speech(audio_chunk: np.ndarray, threshold: float) -> bool:
-    return _chunk_rms(audio_chunk) > threshold
+def _chunk_rms(flat: np.ndarray) -> float:
+    return float(np.sqrt(np.mean(flat ** 2)) * 32768)
 
 
 def _hostapi_name(device_info: dict) -> str:
@@ -157,36 +155,119 @@ def _find_input_device() -> int | None:
     return None
 
 
-def _open_input_stream(device_index: int | None) -> sd.InputStream:
-    return sd.InputStream(
-        samplerate=SAMPLE_RATE,
-        channels=1,
-        dtype="float32",
-        blocksize=BLOCK_SIZE,
-        device=device_index,
-        latency="high",
-    )
+def _get_device_native_rate(device_index: int | None) -> int:
+    try:
+        if device_index is not None:
+            info = sd.query_devices(device_index)
+        else:
+            info = sd.query_devices(kind="input")
+        native = int(info.get("default_samplerate", 48000))
+        logger.info("Device: %s, native rate: %d Hz", info.get("name", "?"), native)
+        return native
+    except Exception as exc:
+        logger.warning("Impossible de lire le sample rate natif: %s", exc)
+        return 48000
 
 
-def _transcribe_audio(audio_np: np.ndarray) -> str:
+def _open_mic_stream(
+    device_index: int | None,
+) -> tuple[sd.InputStream, int, int]:
+    """Ouvre le stream micro avec le meilleur sample rate disponible."""
+    global ACTUAL_RATE, ACTUAL_BLOCKSIZE
+
+    native_rate = _get_device_native_rate(device_index)
+    rates_to_try = list(dict.fromkeys([native_rate, 48000, 44100, 16000, 22050, 8000]))
+    blocksizes = list(dict.fromkeys([BLOCK_SIZE, 2048, 1024, 4096]))
+
+    last_error: Exception | None = None
+    for rate in rates_to_try:
+        for blocksize in blocksizes:
+            stream: sd.InputStream | None = None
+            try:
+                stream = sd.InputStream(
+                    samplerate=rate,
+                    channels=1,
+                    dtype="float32",
+                    blocksize=blocksize,
+                    device=device_index,
+                    latency="high",
+                )
+                stream.start()
+                ACTUAL_RATE = rate
+                ACTUAL_BLOCKSIZE = blocksize
+                logger.info("Micro ouvert: %d Hz, blocksize=%d, device=%s", rate, blocksize, device_index)
+                return stream, rate, blocksize
+            except Exception as exc:
+                last_error = exc
+                logger.debug("Rate %d blocksize %d: %s", rate, blocksize, exc)
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except Exception:
+                        pass
+
+    raise RuntimeError(f"Impossible d'ouvrir le microphone avec aucun sample rate: {last_error}")
+
+
+def _resample_to_16k(audio: np.ndarray, original_rate: int) -> np.ndarray:
+    """Rééchantillonne l'audio à 16000 Hz pour Whisper."""
+    if original_rate == 16000:
+        return audio.astype(np.float32)
+    target_samples = int(len(audio) * 16000 / original_rate)
+    if target_samples < 1:
+        return audio.astype(np.float32)
+    resampled = scipy.signal.resample(audio, target_samples)
+    return resampled.astype(np.float32)
+
+
+def _transcribe_audio(audio_np: np.ndarray, actual_rate: int) -> str:
     global _whisper_model
 
-    audio_np = np.concatenate(audio_np, axis=0).flatten().astype(np.float32) if isinstance(audio_np, list) else audio_np.flatten().astype(np.float32)
+    if isinstance(audio_np, list):
+        audio_np = np.concatenate(audio_np, axis=0)
+    audio_np = audio_np.flatten().astype(np.float32)
+
     peak = float(np.max(np.abs(audio_np)))
     if peak > 0:
         audio_np = audio_np / peak * 0.95
 
+    audio_16k = _resample_to_16k(audio_np, actual_rate)
+    logger.info("Transcription de %.1fs audio…", len(audio_np) / actual_rate)
+
     for attempt in range(2):
         try:
             model = _load_whisper_model()
-            segments, _ = model.transcribe(
-                audio_np,
+            segments, info = model.transcribe(
+                audio_16k,
                 language="fr",
                 beam_size=5,
                 vad_filter=True,
                 vad_parameters={"min_silence_duration_ms": 500},
             )
-            return " ".join(segment.text for segment in segments).strip()
+            text = " ".join(segment.text for segment in segments).strip()
+            lang_prob = getattr(info, "language_probability", 1.0) or 1.0
+            logger.info(
+                "Transcription: '%s' (lang=%s, prob=%.2f)",
+                text,
+                getattr(info, "language", "?"),
+                lang_prob,
+            )
+
+            if not text:
+                return ""
+
+            if lang_prob < 0.4:
+                segments2, _ = model.transcribe(
+                    audio_16k,
+                    beam_size=5,
+                    vad_filter=True,
+                    vad_parameters={"min_silence_duration_ms": 500},
+                )
+                text2 = " ".join(segment.text for segment in segments2).strip()
+                if text2:
+                    text = text2
+
+            return text
         except Exception as exc:
             err = str(exc).lower()
             if attempt == 0 and ("cublas" in err or "cuda" in err or "cudnn" in err):
@@ -240,6 +321,8 @@ def _record_loop() -> None:
 
     logger.info("Démarrage _record_loop")
     stream: sd.InputStream | None = None
+    actual_rate = ACTUAL_RATE
+    blocksize = ACTUAL_BLOCKSIZE
     device_index = _find_input_device()
 
     time.sleep(0.5)
@@ -248,144 +331,129 @@ def _record_loop() -> None:
         if _stop_event.is_set():
             return
         try:
-            stream = _open_input_stream(device_index)
-            stream.start()
-            logger.info("Microphone ouvert (device=%s, block=%d)", device_index, BLOCK_SIZE)
+            stream, actual_rate, blocksize = _open_mic_stream(device_index)
             break
         except Exception as exc:
             logger.warning("Tentative micro %d/10: %s", retry, exc)
-            if stream is not None:
-                try:
-                    stream.close()
-                except Exception:
-                    pass
-                stream = None
             time.sleep(1.5)
 
     if stream is None or not stream.active:
         logger.error("Impossible d'ouvrir le microphone")
         ui.show_toast("Microphone indisponible", toast_type="error")
+        ui.set_status("idle")
         return
 
     _is_recording = True
     try:
-        calibration_samples: list[float] = []
         ui.set_status("listening")
-        logger.info("Calibration bruit ambiant (50 chunks)…")
+        ui.show_toast(f"Micro actif ({actual_rate}Hz)", toast_type="info")
+        logger.info("Calibration bruit ambiant…")
 
-        for _ in range(50):
+        cal_frames = max(1, int(actual_rate / blocksize * 2))
+        cal_rms: list[float] = []
+        for _ in range(cal_frames):
             if _stop_event.is_set():
-                logger.info("Stop demandé pendant calibration")
                 return
             try:
-                data, _ = stream.read(BLOCK_SIZE)
+                data, _ = stream.read(blocksize)
             except Exception as exc:
                 logger.warning("Erreur lecture micro (calibration): %s", exc)
                 time.sleep(0.1)
                 continue
-            rms = _chunk_rms(data)
-            calibration_samples.append(rms)
+            flat = data.flatten()
+            rms = _chunk_rms(flat)
+            cal_rms.append(rms)
             with _rms_lock:
                 _current_rms = rms
             ui.update_waveform(rms)
 
-        max_rms = max(calibration_samples) if calibration_samples else 0.0
-        avg_rms = sum(calibration_samples) / len(calibration_samples) if calibration_samples else 0.0
-        logger.info("Calibration: max=%.0f avg=%.0f", max_rms, avg_rms)
+        ambient = float(np.mean(cal_rms)) if cal_rms else 0.0
+        threshold = max(float(SILENCE_THRESHOLD), ambient * 3.5, 200.0)
+        logger.info("Seuil adaptatif: %.0f (ambiant: %.0f)", threshold, ambient)
 
-        if max_rms < 5:
-            logger.error("MICRO SILENCIEUX — vérifie les paramètres Windows")
-            ui.show_toast("Micro silencieux — vérifie Windows", toast_type="error")
-            ui.show_toast("Paramètres → Système → Son → Micro → Volume", toast_type="warning")
+        if ambient < 1.0:
+            logger.error("Micro silencieux — vérifie Windows > Son > Micro")
+            ui.show_toast("Micro silencieux — vérifie les paramètres Windows", toast_type="error")
             return
-
-        threshold = max(float(SILENCE_THRESHOLD), avg_rms * 4, 200.0)
-        logger.info("Seuil adaptatif: %.0f (ambiant: %.0f)", threshold, avg_rms)
-        ui.show_toast(f"Micro actif — seuil {threshold:.0f}", toast_type="info")
 
         buffer: list[np.ndarray] = []
         silence_frames = 0
         speaking = False
         frame_count = 0
-        silence_limit = int(SAMPLE_RATE / BLOCK_SIZE * SILENCE_DURATION)
+        silence_limit = int(actual_rate / blocksize * SILENCE_DURATION)
+        min_speech = max(1, int(actual_rate / blocksize * 0.8))
 
         logger.info(
-            "Boucle d'enregistrement (silence_limit=%d, min_frames=%d)",
+            "Boucle d'enregistrement (silence_limit=%d, min_speech=%d, rate=%d, block=%d)",
             silence_limit,
-            MIN_AUDIO_FRAMES,
+            min_speech,
+            actual_rate,
+            blocksize,
         )
 
         while not _stop_event.is_set():
             try:
-                data, _overflowed = stream.read(BLOCK_SIZE)
+                data, _overflowed = stream.read(blocksize)
             except Exception as exc:
                 logger.warning("Erreur lecture micro: %s", exc)
                 time.sleep(0.1)
                 continue
 
-            rms = _chunk_rms(data)
+            flat = data.flatten()
+            rms = _chunk_rms(flat)
             with _rms_lock:
                 _current_rms = rms
-            ui.update_waveform(rms)
 
+            if frame_count % 3 == 0:
+                ui.update_waveform(rms)
             frame_count += 1
-            if frame_count % 50 == 0:
-                logger.info(
-                    "Chunk RMS=%.0f threshold=%.0f speaking=%s buffer=%d",
-                    rms,
-                    threshold,
-                    speaking,
-                    len(buffer),
-                )
 
-            if _is_speech(data, threshold):
+            if rms > threshold:
                 if not speaking:
-                    logger.info("Parole détectée (RMS=%.0f)", rms)
+                    logger.debug("Parole détectée (RMS=%.0f)", rms)
                 speaking = True
                 silence_frames = 0
-                buffer.append(data.copy())
+                buffer.append(flat.copy())
             elif speaking:
                 silence_frames += 1
-                buffer.append(data.copy())
-                if silence_frames >= silence_limit:
-                    if len(buffer) < MIN_AUDIO_FRAMES:
-                        logger.debug("Buffer trop court (%d frames), ignoré", len(buffer))
-                        buffer = []
-                        speaking = False
-                        silence_frames = 0
-                        continue
+                buffer.append(flat.copy())
 
-                    logger.info("Fin de segment (%d frames), transcription…", len(buffer))
-                    audio_chunks = buffer
+                if silence_frames >= silence_limit:
+                    if len(buffer) >= min_speech:
+                        audio_np = np.concatenate(buffer).astype(np.float32)
+                        ui.set_status("transcribing")
+                        try:
+                            text = _transcribe_audio(audio_np, actual_rate)
+                            if text:
+                                _enqueue_transcript(text)
+                            else:
+                                ui.show_toast("Je n'ai rien entendu — réessaie", toast_type="warning")
+                        except Exception as exc:
+                            logger.error("Erreur transcription: %s", exc)
+                        finally:
+                            ui.set_status("listening")
+
                     buffer = []
                     speaking = False
                     silence_frames = 0
 
-                    ui.set_status("transcribing")
-                    try:
-                        text = _transcribe_audio(np.concatenate(audio_chunks, axis=0))
-                        if text:
-                            logger.info("Transcription OK: '%s'", text)
-                            _enqueue_transcript(text)
-                        else:
-                            logger.info("Transcription vide")
-                            ui.show_toast("Je n'ai rien entendu — réessaie", toast_type="warning")
-                    except Exception as exc:
-                        logger.error("Erreur transcription: %s", exc)
-                    finally:
-                        ui.set_status("listening")
+    except Exception as exc:
+        logger.error("Erreur _record_loop: %s", exc)
+        ui.show_toast(f"Erreur micro: {exc}", toast_type="error")
     finally:
         _is_recording = False
-        try:
-            if stream is not None:
+        if stream is not None:
+            try:
                 stream.stop()
                 stream.close()
-        except Exception:
-            pass
+                logger.info("Stream micro fermé")
+            except Exception:
+                pass
         try:
             sd.stop()
         except Exception:
             pass
+        ui.set_status("idle")
 
     logger.info("Stopped listening")
 

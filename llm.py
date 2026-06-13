@@ -83,7 +83,7 @@ INTENTS = [
     # Cursor v3
     "cursor_open", "cursor_generate_code", "cursor_open_file", "cursor_open_project",
     # Browser v4
-    "browser_open_url", "browser_search_google", "browser_youtube_search",
+    "browser_open_site", "browser_open_url", "ouvrir_site", "browser_search_google", "browser_youtube_search",
     "browser_youtube_control", "browser_spotify", "browser_new_tab", "browser_close_tab",
     "browser_close", "browser_scroll", "browser_read_page", "browser_screenshot",
     "browser_type", "browser_type_send", "browser_type_claude", "cursor_prompt",
@@ -99,7 +99,7 @@ INTENTS = [
 ]
 
 SEARCH_INTENTS = frozenset({
-    "search_web", "search_news", "search_geopolitics", "cherche", "recherche", "recherche_web",
+    "search_news", "search_geopolitics", "search_aviation_news",
 })
 
 DRIVE_INTENTS = frozenset({
@@ -108,13 +108,22 @@ DRIVE_INTENTS = frozenset({
 })
 
 FAST_REGEX: dict[str, str] = {
-    r"\b(lance|ouvre|démarre|demarre|start)\b.+": "lancer_app",
+    r"\b(lance|démarre|demarre|start)\b.+": "lancer_app",
+    r"\b(ouvre|ouvre-moi)\b.+": "lancer_app",
     r"\b(ferme|quitte|stop|arrête|arrete)\b.+": "fermer_app",
     r"\b(volume|son)\b.+(up|down|monte|baisse|\d+)": "volume",
     r"\b(météo|meteo|température|temperature|temps)\b": "meteo",
     r"\b(heure|date|aujourd'hui|aujourdhui)\b": "heure_date",
     r"\b(minuteur|timer|dans \d+ min)\b": "minuteur",
 }
+
+FAST_BROWSER_REGEX: list[tuple[str, str]] = [
+    (r"(?:ouvre|va sur|navigue vers)\s+(?:le site\s+)?(?:https?://|www\.)\S+", "browser_open_url"),
+    (r"(?:ouvre|va sur)\s+(?:youtube|google|github|reddit|wikipedia|netflix|tiktok)\b", "browser_open_site"),
+    (r"cherche .+ sur (?:youtube|google|github|reddit|amazon|wikipedia)", "browser_search_in_site"),
+    (r"recherche .+ dans (?:le navigateur|chrome|edge)", "search_web"),
+    (r"va sur ", "browser_open_site"),
+]
 
 INTENT_CATEGORY_MAP: dict[str, str] = {
     "lancer_app": "lancer_app",
@@ -131,12 +140,78 @@ INTENT_CATEGORY_MAP: dict[str, str] = {
     "minuteur": "minuteur",
 }
 
+# === ROUTING INTELLIGENCE ===
+
+# Actions that NEVER need the LLM — pure function calls
+PURE_ACTIONS = frozenset({
+    "lancer_app", "fermer_app", "volume", "luminosite", "veille",
+    "reboot", "shutdown", "lock", "screenshot", "clipboard_copy",
+    "clipboard_paste", "minuteur", "alarme", "preset",
+    "browser_open_site", "browser_open_url", "ouvrir_site",
+    "browser_youtube_search", "browser_search_in_site", "browser_youtube_control",
+    "browser_search_google", "cursor_open", "cursor_open_file", "git",
+})
+
+# Actions that use an external API then summarize with LLM
+API_THEN_LLM = frozenset({
+    "meteo",
+    "aviation_metar",
+    "aviation_taf",
+    "search_web",
+    "search_news",
+    "search_geopolitics",
+    "search_aviation_news",
+    "actu",
+    "drive_search",
+    "drive_list",
+})
+
+# Actions that use API/system only — no LLM
+API_ONLY = frozenset({
+    "heure_date",
+    "browser_open_url",
+    "browser_open_site",
+    "ouvrir_site",
+    "lancer_app",
+    "fermer_app",
+    "volume",
+    "luminosite",
+})
+
+# Actions that need full LLM conversation (skip specialized dispatch)
+LLM_REQUIRED = frozenset({
+    "question_libre", "math_general", "math_calculate", "math_derive",
+    "math_integrate", "math_solve_equation", "math_suite", "math_proba",
+    "math_matrix", "math_limit",
+    "aviation_theory", "aviation_nav", "aviation_gonogo",
+    "traduction", "cursor_generate_code", "blague",
+})
+
+OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate"
+
 _history: list[dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+_last_clear_time: float = 0.0
+
+_BROWSER_LAUNCH_SKIP = re.compile(
+    r"\b(va sur|visite|youtube|google\b|facebook|instagram|twitter|reddit|github|"
+    r"wikipedia|netflix|tiktok|\.com\b|\.fr\b|https?://)",
+    re.I,
+)
 
 
 def _fast_intent(text: str) -> str | None:
     """Détecte l'intent sans appel LLM via regex — latence 0ms."""
     text_lower = text.lower()
+
+    for pattern, intent in FAST_BROWSER_REGEX:
+        if re.search(pattern, text_lower):
+            return intent
+
+    if _BROWSER_LAUNCH_SKIP.search(text_lower) and re.search(
+        r"\b(lance|ouvre|démarre|demarre|start|mets)\b", text_lower
+    ):
+        return None
+
     for pattern, intent in FAST_REGEX.items():
         if re.search(pattern, text_lower):
             return intent
@@ -423,7 +498,8 @@ def _rule_based_intent(text: str) -> dict:
         (r"ferme.*navigateur|ferme chrome", "browser_close", {}),
         (r"ferme.*onglet", "browser_close_tab", {}),
         (r"nouvel onglet", "browser_new_tab", {"url": text}),
-        (r"va sur |ouvre https?://", "browser_open_url", {"url": text}),
+        (r"va sur ", "browser_open_site", {"site": text}),
+        (r"ouvre https?://", "browser_open_url", {"url": text}),
         # Saisie universelle navigateur / Claude / Cursor
         (r"demande\s+(?:à|a)\s+claude", "browser_type_claude", {"text": text}),
         (r"envoie.*cursor|demande\s+(?:à|a)\s+cursor", "cursor_prompt", {"text": text}),
@@ -607,6 +683,358 @@ def _finish_streamed_response(full_response: str, *, already_spoken: bool = Fals
     ui.set_status("idle")
 
 
+def _extract_site_for_browser(params: dict, original_text: str) -> str:
+    site = params.get("site") or params.get("url") or params.get("query") or original_text
+    if site == original_text:
+        extracted = browser._extract_site_name(original_text)
+        if extracted:
+            site = extracted
+        else:
+            match = re.search(
+                r"(?:ouvre|va sur|lance|ouvre le navigateur sur)\s+(.+)",
+                original_text,
+                re.I,
+            )
+            if match:
+                site = match.group(1).strip()
+    site = re.sub(r"^(va sur|ouvre(?:-moi)?|visite|lance)\s*", "", site, flags=re.I).strip()
+    site = re.sub(r"\s+en route$", "", site, flags=re.I).strip()
+    return site
+
+
+def _resolve_intent_for_routing(text: str) -> tuple[str, dict, float]:
+    """Résout l'intent : regex rapide puis détection complète."""
+    intent = _fast_intent(text)
+    params: dict = {}
+    confidence = 0.95
+
+    if intent:
+        params = _fast_intent_params(intent, text)
+        logger.info("Fast intent (regex): %s", intent)
+        return intent, params, confidence
+
+    try:
+        detected = _detect_intent(text)
+        intent = detected.get("intent", "question_libre")
+        params = detected.get("params", {})
+        confidence = float(detected.get("confidence", 0.5))
+        logger.info("Detected intent: %s (confidence=%.2f)", intent, confidence)
+        if confidence < 0.6:
+            intent = "question_libre"
+    except Exception as exc:
+        logger.warning("Intent detection failed: %s", exc)
+        intent = "question_libre"
+        confidence = 0.0
+
+    return intent, params, confidence
+
+
+def _is_news_query(text: str) -> bool:
+    t = text.lower()
+    return any(
+        kw in t
+        for kw in ("actu", "news", "nouvelles", "actualité", "actualites", "géopolitique", "geopolitique", "briefing")
+    )
+
+
+def _fetch_api_data(intent: str, params: dict, text: str) -> str | None:
+    """Récupère les données API brutes. Retourne None en cas d'échec."""
+    try:
+        if intent == "meteo":
+            city = params.get("city")
+            if isinstance(city, str):
+                for c in ("nantes", "couëron", "coueron", "paris"):
+                    if c in city.lower():
+                        city = c.capitalize()
+                        break
+                else:
+                    city = re.sub(
+                        r".*(météo|meteo|température|temperature|temps)\s*(?:à|a|de|pour)?\s*",
+                        "",
+                        city,
+                        flags=re.I,
+                    ).strip() or None
+            if not city:
+                for c in ("nantes", "couëron", "coueron", "paris"):
+                    if c in text.lower():
+                        city = c.capitalize()
+                        break
+            data = weather.get_current(city or _config.get("city", "Coueron"))
+            if "error" not in data:
+                return (
+                    f"Données météo pour {data.get('city', city)}: "
+                    f"température {data.get('temp')}°C, ressenti {data.get('feels_like')}°C, "
+                    f"{data.get('description')}, humidité {data.get('humidity')}%, "
+                    f"vent {data.get('wind')} km/h"
+                )
+            return None
+
+        if intent == "aviation_metar":
+            metar_match = re.search(r"METAR\s+[A-Z]{4}\s+.*", text.upper())
+            if metar_match:
+                return f"METAR brut: {metar_match.group(0)}"
+            icao = params.get("icao") or _extract_icao(text)
+            data = aviation.get_metar(icao)
+            if isinstance(data, dict) and "error" not in data:
+                return f"METAR brut pour {icao}: {data.get('raw', data)}"
+            return None
+
+        if intent == "aviation_taf":
+            icao = params.get("icao") or _extract_icao(text)
+            data = aviation.get_taf(icao)
+            if isinstance(data, dict) and "error" not in data:
+                raw = data.get("raw") or data.get("taf") or str(data)
+                return f"TAF brut pour {icao}: {raw}"
+            return None
+
+        if intent == "actu":
+            category = "technology" if "tech" in text.lower() else None
+            articles = news.get_top_headlines(category)
+            if articles:
+                items = [
+                    f"- {a.get('title', '')}: {a.get('description', '')[:200]}"
+                    for a in articles[:5]
+                ]
+                return "Actualités:\n" + "\n".join(items)
+            return None
+
+        if intent == "search_aviation_news":
+            summary = web_search.search_aviation_news()
+            return summary if summary and "Pas d'" not in summary else None
+
+        if intent in ("search_web", "search_news", "search_geopolitics"):
+            query = _extract_search_query(params.get("query", text))
+            if intent == "search_geopolitics" and (not query or query == text.strip()):
+                query = "géopolitique mondiale"
+            is_news = intent in ("search_news", "search_geopolitics") or _is_news_query(text)
+            results = search_news(query) if is_news else search_web(query)
+            if not results:
+                results = search_web(query) if is_news else search_news(query)
+            if results:
+                items = [
+                    f"- {r.get('title', '')}: {r.get('body', r.get('snippet', ''))[:200]}"
+                    for r in results[:5]
+                ]
+                return "Résultats de recherche:\n" + "\n".join(items)
+            return None
+
+        if intent == "drive_search":
+            query = params.get("query", text)
+            q_match = re.search(
+                r"cherche\s+(.+?)\s+(?:dans|sur)\s+(?:mon\s+)?(?:google\s+)?drive",
+                text,
+                re.I,
+            )
+            if q_match:
+                query = q_match.group(1).strip()
+            return f"Recherche Drive: {query}"
+
+        if intent == "drive_list":
+            return "Liste des fichiers récents Google Drive demandée"
+
+    except Exception as exc:
+        logger.error("API fetch error for %s: %s", intent, exc)
+        return None
+
+    return None
+
+
+def _build_format_prompt(intent: str, api_data: str, original_text: str) -> str:
+    prompts = {
+        "meteo": f"Formate ces données météo en une phrase naturelle en français pour lecture vocale: {api_data}",
+        "aviation_metar": f"Décode ce METAR en français naturel pour un pilote PPL, inclus les conditions VFR/IMC: {api_data}",
+        "aviation_taf": f"Décode ce TAF en français naturel pour un pilote PPL: {api_data}",
+        "search_web": f"Résume ces résultats en 2-3 phrases naturelles en français. Question: '{original_text}'. Résultats: {api_data}",
+        "search_news": f"Résume ces actualités en 3-4 phrases en français. Question: '{original_text}'. Actualités: {api_data}",
+        "search_geopolitics": f"Analyse ces infos géopolitiques en 3-4 phrases factuelles en français: {api_data}",
+        "search_aviation_news": f"Résume ces actualités aviation en français pour un passionné PPL: {api_data}",
+        "actu": f"Résume ces actualités en 3-4 phrases naturelles en français: {api_data}",
+        "drive_search": f"Indique en français comment effectuer cette recherche Google Drive: {api_data}",
+        "drive_list": f"Explique en français comment lister les fichiers Drive: {api_data}",
+    }
+    return prompts.get(intent, f"Résume en français naturel pour lecture vocale: {api_data}")
+
+
+def _llm_format(prompt: str) -> str:
+    try:
+        response = requests.post(
+            OLLAMA_GENERATE_URL,
+            json={
+                "model": MODEL_FAST,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"num_predict": 200, "temperature": 0.3},
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json().get("response", "").strip() or prompt
+    except Exception as exc:
+        logger.error("LLM format error: %s", exc)
+        return prompt
+
+
+def _execute_action(intent: str, params: dict, text: str) -> str | None:
+    try:
+        if intent == "lancer_app":
+            app = params.get("app", "")
+            if not app:
+                match = re.search(r"(?:lance|ouvre|démarre|demarre|start)\s+(.+)", text, re.I)
+                app = match.group(1).strip() if match else text
+            clean = _extract_app_name(app)
+            app_names = [a.strip() for a in re.split(r"\bet\b|,|&", clean) if a.strip()]
+            if len(app_names) > 1:
+                for name in app_names:
+                    memory_engine.record_app_launch(name)
+                return apps.launch_multiple(app_names)
+            memory_engine.record_app_launch(clean or app)
+            result = apps.launch(clean or app)
+            if "introuvable" in result.lower():
+                return browser.open_site(browser._extract_site_name(text) or clean)
+            return result
+
+        if intent == "fermer_app":
+            return apps.close(_extract_app_name(params.get("app", text)))
+
+        if intent == "volume":
+            level = params.get("level", text)
+            nums = re.findall(r"\d+", str(level))
+            return system.set_volume(int(nums[0]) if nums else level)
+
+        if intent == "luminosite":
+            level = params.get("level", text)
+            nums = re.findall(r"\d+", str(level))
+            return system.set_brightness(int(nums[0]) if nums else level)
+
+        if intent == "veille":
+            return system.sleep()
+        if intent == "reboot":
+            return system.reboot()
+        if intent == "shutdown":
+            delay_match = re.search(r"(\d+)", text)
+            delay = int(delay_match.group(1)) * 60 if delay_match else 0
+            return system.shutdown(delay)
+        if intent == "lock":
+            return system.lock()
+        if intent == "screenshot":
+            return system.screenshot()
+
+        if intent == "heure_date":
+            now = datetime.now()
+            return f"Il est {now.strftime('%H:%M')}, le {now.strftime('%d/%m/%Y')}"
+
+        if intent in ("browser_open_site", "browser_open_url", "ouvrir_site"):
+            target = _extract_site_for_browser(params, text)
+            return browser.open_url(target) if target.startswith("http") else browser.open_site(target)
+
+        if intent == "browser_youtube_search":
+            match = re.search(r"(?:cherche|lance|mets|youtube)\s+(.+?)(?:\s+sur youtube)?$", text, re.I)
+            query = match.group(1).strip() if match else params.get("query", text)
+            return browser.search_youtube(query)
+
+        if intent == "browser_search_google":
+            return browser.search_google(params.get("query", text))
+
+        if intent == "browser_search_in_site":
+            parsed = _extract_in_site_search(text)
+            if parsed:
+                return browser.search_within_site(parsed[1], parsed[0])
+            return browser.search_google(text)
+
+        if intent == "browser_youtube_control":
+            return browser.youtube_control(params.get("action", text))
+
+        if intent == "cursor_open":
+            return cursor_control.open_cursor()
+
+        if intent == "cursor_open_file":
+            file_match = re.search(r"([\w./\\-]+\.(py|ts|tsx|js|jsx|json|yaml|md))", text, re.I)
+            if file_match:
+                return cursor_control.open_file_in_cursor(file_match.group(1))
+            return cursor_control.handle(text)
+
+        if intent == "git":
+            t = text.lower()
+            if "statut" in t or "status" in t:
+                return git.status()
+            if "commit" in t:
+                return git.commit(re.sub(r".*message\s*", "", text, flags=re.I).strip() or "commit vocal")
+            if "push" in t or "pousse" in t:
+                return git.push()
+            if "pull" in t:
+                return git.pull()
+            return git.status()
+
+        if intent in ("minuteur", "alarme"):
+            return timer.parse_and_set(text)
+
+        if intent == "preset":
+            if "désactive" in text.lower() or "desactive" in text.lower():
+                return presets.deactivate()
+            preset = params.get("preset") or params.get("name", "")
+            if not preset:
+                for p in ("vol", "etude", "gaming", "detente", "nuit", "étude", "détente"):
+                    if p in text.lower():
+                        preset = p
+                        break
+            return presets.activate(preset) if preset else "Quel mode ? (vol/etude/gaming/detente/nuit)"
+
+        if intent == "clipboard_copy":
+            return clipboard.copy_text(text)
+        if intent == "clipboard_paste":
+            clip = clipboard.get_text()
+            return clip if clip.strip() else "Le presse-papier est vide."
+
+    except Exception as exc:
+        logger.error("Action error for %s: %s", intent, exc)
+        return f"Erreur: {exc}"
+
+    return None
+
+
+def _route_with_intelligence(
+    intent: str,
+    params: dict,
+    text: str,
+    *,
+    stream_to_ui: bool = True,
+) -> str:
+    if intent in PURE_ACTIONS or intent in API_ONLY:
+        result = _execute_action(intent, params, text)
+        if not result:
+            result = _dispatch_action(intent, params, text)
+        if result and stream_to_ui:
+            _speak_response(result)
+        return result or ""
+
+    if intent in API_THEN_LLM:
+        api_data = _fetch_api_data(intent, params, text)
+        if api_data:
+            formatted = _llm_format(_build_format_prompt(intent, api_data, text))
+            if stream_to_ui:
+                _speak_response(formatted)
+            return formatted
+        logger.warning("API failed for %s, falling back to LLM", intent)
+
+    if intent != "question_libre":
+        try:
+            result = _dispatch_action(intent, params, text)
+        except Exception:
+            logger.exception("Dispatch failed for intent %s", intent)
+            result = ""
+        if result:
+            if stream_to_ui and intent != "blague":
+                _speak_response(result)
+            elif stream_to_ui and intent == "blague":
+                _present_action_result(result)
+            return result
+
+    response, spoke = _conversation(text, stream_to_ui=stream_to_ui)
+    if stream_to_ui and response:
+        _finish_streamed_response(response, already_spoken=spoke)
+    return response
+
+
 def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
     if intent == "lancer_app":
         app_param = params.get("app", original_text)
@@ -621,6 +1049,9 @@ def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
             app_name = clean or app_param
             memory_engine.record_app_launch(app_name)
             result = apps.launch(app_name)
+            if "introuvable" in result.lower():
+                site = browser._extract_site_name(original_text) or app_name
+                result = browser.open_site(site)
 
         ui.show_toast(result, toast_type="success")
         return result
@@ -698,6 +1129,10 @@ def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
         return math_expert.handle(original_text)
     if intent in SEARCH_INTENTS:
         return _execute_ddg_search(intent, params, original_text)
+    if intent == "search_web":
+        query = params.get("query", original_text)
+        browser.search_google(query)
+        return "Recherche lancée dans Chrome"
     if intent == "search_aviation_news":
         return web_search.search_aviation_news()
     if intent == "cursor_open":
@@ -730,16 +1165,18 @@ def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
     if intent == "browser_type_claude":
         payload = _extract_browser_text(original_text, "browser_type_claude")
         return browser.type_in_claude(payload or original_text)
-    if intent == "browser_open_url":
-        url_match = re.search(r"(https?://\S+|\b[\w-]+\.(com|fr|org|net|io)\b[\w./-]*)", original_text, re.I)
-        url = url_match.group(1) if url_match else original_text
-        url = re.sub(r"^(va sur|ouvre)\s*", "", url, flags=re.I).strip()
-        return browser.open_url(url)
+    if intent in ("browser_open_site", "browser_open_url", "ouvrir_site"):
+        site = _extract_site_for_browser(params, original_text)
+        if site.startswith("http"):
+            return browser.open_url(site)
+        return browser.open_site(site)
     if intent == "browser_search_google":
         query = params.get("query", original_text)
         return browser.search_google(query)
     if intent == "browser_youtube_search":
-        return browser.search_youtube(original_text)
+        query = params.get("query", original_text)
+        result = browser.search_youtube(query)
+        return result or f"YouTube : {query}"
     if intent == "browser_youtube_control":
         return browser.youtube_control(params.get("action", original_text))
     if intent == "browser_spotify":
@@ -763,6 +1200,10 @@ def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
         parsed = _extract_in_site_search(original_text)
         if parsed:
             query, site = parsed
+            return browser.search_within_site(site, query)
+        query = params.get("query", original_text)
+        site = params.get("site", "")
+        if site and query:
             return browser.search_within_site(site, query)
         return browser.search_google(original_text)
     if intent == "browser_search_page":
@@ -830,19 +1271,7 @@ def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
 def _route_action(intent_data: dict, original_text: str) -> str:
     intent = intent_data.get("intent", "question_libre")
     params = intent_data.get("params", {})
-    defer_ui = intent == "blague" or intent in SEARCH_INTENTS
-
-    try:
-        result = _dispatch_action(intent, params, original_text)
-    except Exception:
-        logger.exception("Action routing failed for intent %s", intent)
-        sounds.play("error")
-        ui.show_error("Une erreur s'est produite.")
-        result = "Désolé, une erreur s'est produite."
-
-    if result and result.strip() and not defer_ui:
-        _present_action_result(result)
-    return result
+    return _route_with_intelligence(intent, params, original_text, stream_to_ui=True)
 
 
 def _conversation(text: str, stream_to_ui: bool = True) -> tuple[str, bool]:
@@ -911,6 +1340,7 @@ def _conversation(text: str, stream_to_ui: bool = True) -> tuple[str, bool]:
 
 
 def ask(text: str, *, show_user: bool = True) -> None:
+    """Point d'entrée principal — route vers le bon handler selon l'intent."""
     if not text or not text.strip():
         return
 
@@ -922,7 +1352,7 @@ def ask(text: str, *, show_user: bool = True) -> None:
         if show_user:
             ui.show_user_text(text)
         ui.set_status("thinking")
-        response = _route_action({"intent": "question_libre", "params": {}}, custom)
+        response, _ = _conversation(custom, stream_to_ui=show_user)
         if response:
             return
         _present_action_result(custom)
@@ -933,19 +1363,16 @@ def ask(text: str, *, show_user: bool = True) -> None:
     ui.set_status("thinking")
     sounds.play("thinking")
 
-    intent_data = _detect_intent(text)
-    logger.info("Intent: %s (confidence=%.2f)", intent_data.get("intent"), intent_data.get("confidence", 0))
-
-    confidence = intent_data.get("confidence", 0)
-    intent = intent_data.get("intent", "question_libre")
+    intent, params, _confidence = _resolve_intent_for_routing(text)
+    logger.info("Routing intent: %s", intent)
 
     _refresh_system_prompt()
     memory_engine.record_message("user", text, intent=intent, model=MODEL)
     memory_engine.record_intent(intent)
     memory_engine.add_to_conversation("user", text)
 
-    if confidence > 0.8 and intent != "question_libre":
-        response = _route_action(intent_data, text)
+    try:
+        response = _route_with_intelligence(intent, params, text, stream_to_ui=show_user)
         if response:
             _history.append({"role": "user", "content": text.strip()})
             _history.append({"role": "assistant", "content": response})
@@ -955,23 +1382,17 @@ def ask(text: str, *, show_user: bool = True) -> None:
             memory_engine.record_message("assistant", response, model=MODEL)
             memory_engine.extract_preferences(text, response)
             memory_engine.add_to_conversation("assistant", response)
+            memory_engine.get_engine().save_current_conversation()
             _process_memory_learning(text, response)
-            if intent == "blague":
-                _present_action_result(response)
-            return
+    except Exception as exc:
+        logger.error("Routing error: %s", exc)
+        sounds.play("error")
+        error_msg = f"Désolé, une erreur s'est produite: {exc}"
+        ui.append_assistant_text(error_msg)
+        ui.finalize_assistant_message()
+        _speak_response(error_msg)
 
-    response, spoke_streaming = _conversation(text)
-    if response:
-        logger.info("Assistant: %s", response[:200])
-        _save_history()
-        memory.extract_from_conversation(text)
-        memory_engine.record_message("assistant", response, model=MODEL)
-        memory_engine.extract_preferences(text, response)
-        memory_engine.add_to_conversation("assistant", response)
-        _process_memory_learning(text, response)
-        _finish_streamed_response(response, already_spoken=spoke_streaming)
-    else:
-        ui.set_status("idle")
+    ui.set_status("idle")
 
 
 def ask_return_text(text: str) -> str:
@@ -986,32 +1407,28 @@ def ask_return_text(text: str) -> str:
         response, _ = _conversation(custom, stream_to_ui=False)
         return response or custom
 
-    intent_data = _detect_intent(text)
-    confidence = intent_data.get("confidence", 0)
-    intent = intent_data.get("intent", "question_libre")
-    params = intent_data.get("params", {})
+    intent, params, _confidence = _resolve_intent_for_routing(text)
 
     _refresh_system_prompt()
     memory_engine.record_message("user", text, intent=intent, model=MODEL)
     memory_engine.record_intent(intent)
     memory_engine.add_to_conversation("user", text)
 
-    if confidence > 0.8 and intent != "question_libre":
-        try:
-            response = _dispatch_action(intent, params, text)
-            if response:
-                _history.append({"role": "user", "content": text.strip()})
-                _history.append({"role": "assistant", "content": response})
-                _trim_history()
-                _save_history()
-                memory.extract_from_conversation(text)
-                memory_engine.record_message("assistant", response, model=MODEL)
-                memory_engine.extract_preferences(text, response)
-                memory_engine.add_to_conversation("assistant", response)
-                _process_memory_learning(text, response)
-                return response
-        except Exception:
-            logger.exception("ask_return_text action failed")
+    try:
+        response = _route_with_intelligence(intent, params, text, stream_to_ui=False)
+        if response:
+            _history.append({"role": "user", "content": text.strip()})
+            _history.append({"role": "assistant", "content": response})
+            _trim_history()
+            _save_history()
+            memory.extract_from_conversation(text)
+            memory_engine.record_message("assistant", response, model=MODEL)
+            memory_engine.extract_preferences(text, response)
+            memory_engine.add_to_conversation("assistant", response)
+            _process_memory_learning(text, response)
+            return response
+    except Exception:
+        logger.exception("ask_return_text routing failed")
 
     response, _ = _conversation(text, stream_to_ui=False)
     if response:
@@ -1243,7 +1660,11 @@ def ask_with_video(question: str, video_path: str) -> None:
 
 
 def clear_history() -> None:
-    global _history
+    global _history, _last_clear_time
+    now = time.monotonic()
+    if now - _last_clear_time < 1.0:
+        return
+    _last_clear_time = now
     _history = [{"role": "system", "content": _build_dynamic_system_prompt()}]
     _save_history()
     logger.info("History cleared")

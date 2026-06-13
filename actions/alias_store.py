@@ -103,32 +103,56 @@ def _merge_base() -> dict[str, str]:
 
 
 def apply_prefix(prefix: str, *, _skip_ensure: bool = False) -> int:
-    """Double le catalogue en SQL — ajoute « prefix alias » pour chaque entrée."""
+    """Double le catalogue en SQL — INSERT SELECT par plages rowid (évite MemoryError)."""
     if not _skip_ensure:
         ensure_db()
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=300)
+
+    needle = f"{prefix.strip().lower()} "
+    pl = prefix.strip().lower()
+    batch_size = 500_000
+    added_total = 0
+    last_rowid = 0
+
+    conn = sqlite3.connect(DB_PATH, timeout=600)
     try:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute("PRAGMA temp_store=MEMORY")
-        conn.execute("PRAGMA cache_size=-200000")
-        needle = f"{prefix.strip().lower()} "
-        before = conn.execute("SELECT COUNT(*) FROM aliases").fetchone()[0]
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO aliases(key, domain)
-            SELECT ? || key, domain FROM aliases
-            WHERE key NOT LIKE ? || '%'
-            """,
-            (needle, prefix.strip().lower()),
-        )
-        conn.commit()
-        after = conn.execute("SELECT COUNT(*) FROM aliases").fetchone()[0]
+        conn.execute("PRAGMA temp_store=FILE")
+        conn.execute("PRAGMA cache_size=-131072")
+
+        max_rowid = conn.execute("SELECT MAX(rowid) FROM aliases").fetchone()[0] or 0
+
+        while last_rowid < max_rowid:
+            end_rowid = min(last_rowid + batch_size, max_rowid)
+            before_changes = conn.total_changes
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO aliases(key, domain)
+                SELECT ? || key, domain FROM aliases
+                WHERE rowid > ? AND rowid <= ?
+                  AND key NOT LIKE ? || '%'
+                """,
+                (needle, last_rowid, end_rowid, pl),
+            )
+            conn.commit()
+            batch_added = conn.total_changes - before_changes
+            added_total += batch_added
+            last_rowid = end_rowid
+
+            import logging
+
+            msg = (
+                f"Préfixe « {prefix} » rowid<={end_rowid:,} / {max_rowid:,} "
+                f": +{batch_added:,} (cumul {added_total:,})"
+            )
+            logging.getLogger(__name__).info(msg)
+            print(f"  {msg}", flush=True)
     finally:
         conn.close()
+
     _checkpoint_wal()
-    return int(after - before)
+    return added_total
 
 
 def _remove_sidecars(path: Path) -> None:
@@ -243,6 +267,25 @@ def raw_count() -> int:
         conn.close()
 
 
+def fast_count() -> int:
+    """Estimation rapide via MAX(rowid) — évite COUNT(*) sur des centaines de millions de lignes."""
+    if not DB_PATH.exists():
+        return 0
+    conn = sqlite3.connect(DB_PATH, timeout=120)
+    try:
+        row = conn.execute("SELECT MAX(rowid) FROM aliases").fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+    finally:
+        conn.close()
+
+
+def _db_is_large() -> bool:
+    try:
+        return DB_PATH.stat().st_size > 5 * 1024**3
+    except OSError:
+        return False
+
+
 def lookup(key: str) -> str | None:
     ensure_db()
     conn = sqlite3.connect(DB_PATH, timeout=30)
@@ -260,10 +303,20 @@ def count() -> int:
     return raw_count()
 
 
-def apply_prefix_and_record(prefix: str) -> int:
+def record_batch(batch_num: int) -> None:
+    """Enregistre un batch SQL déjà appliqué (sans ré-exécuter apply_prefix)."""
+    nums = _batch_numbers()
+    completed = [prefix_for_batch(n) for n in nums if 8 <= n <= batch_num]
+    _write_prefixes(completed)
+    _write_stamp()
+
+
+def apply_prefix_and_record(prefix: str, batch_num: int | None = None) -> int:
     added = apply_prefix(prefix, _skip_ensure=True)
-    prefixes = _read_prefixes()
-    prefixes.append(prefix)
-    _write_prefixes(prefixes)
+    nums = _batch_numbers()
+    if batch_num is None:
+        batch_num = max(nums) if nums else 8
+    completed = [prefix_for_batch(n) for n in nums if 8 <= n <= batch_num]
+    _write_prefixes(completed)
     _write_stamp()
     return added
