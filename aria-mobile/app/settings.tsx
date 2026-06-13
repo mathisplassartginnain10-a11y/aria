@@ -6,11 +6,13 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  Switch,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../App';
+import { useARIA } from '../hooks/useARIA';
 
 type Props = {
   navigation: StackNavigationProp<RootStackParamList, 'Settings'>;
@@ -18,8 +20,10 @@ type Props = {
 
 export default function SettingsScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
+  const aria = useARIA();
   const [ip, setIp] = useState('');
   const [port, setPort] = useState('5000');
+  const [ttsEnabled, setTtsEnabled] = useState(true);
 
   useEffect(() => {
     AsyncStorage.multiGet(['aria_ip', 'aria_port']).then((pairs) => {
@@ -27,12 +31,18 @@ export default function SettingsScreen({ navigation }: Props) {
       if (map.aria_ip) setIp(map.aria_ip);
       if (map.aria_port) setPort(map.aria_port);
     });
+    aria.getTtsEnabled().then(setTtsEnabled);
   }, []);
 
   const save = async () => {
     await AsyncStorage.setItem('aria_ip', ip.trim());
     await AsyncStorage.setItem('aria_port', port.trim() || '5000');
     Alert.alert('Enregistré', 'Configuration mise à jour.');
+  };
+
+  const onTtsToggle = async (value: boolean) => {
+    setTtsEnabled(value);
+    await aria.setTtsEnabled(value);
   };
 
   const logout = async () => {
@@ -70,6 +80,19 @@ export default function SettingsScreen({ navigation }: Props) {
         keyboardType="numeric"
       />
 
+      <View style={styles.row}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.rowTitle}>Lecture vocale</Text>
+          <Text style={styles.rowSub}>ARIA lit les réponses sur le téléphone</Text>
+        </View>
+        <Switch
+          value={ttsEnabled}
+          onValueChange={onTtsToggle}
+          trackColor={{ false: '#333', true: '#6C8EFF' }}
+          thumbColor="#fff"
+        />
+      </View>
+
       <TouchableOpacity style={styles.btnPrimary} onPress={save}>
         <Text style={styles.btnText}>Enregistrer</Text>
       </TouchableOpacity>
@@ -79,8 +102,8 @@ export default function SettingsScreen({ navigation }: Props) {
       </TouchableOpacity>
 
       <Text style={styles.footer}>
-        L'app mobile envoie les commandes à ARIA sur ton PC.{'\n'}
-        Endpoint rapide : /ask/fast · Stream : /ask/stream
+        Endpoints : /ask/stream · /ask/fast · /transcribe{'\n'}
+        Toutes les actions s'exécutent sur le PC
       </Text>
     </View>
   );
@@ -107,6 +130,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 20,
   },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#17171E',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 20,
+    gap: 12,
+  },
+  rowTitle: { color: '#F1F1F3', fontSize: 15, fontWeight: '500' },
+  rowSub: { color: '#55555F', fontSize: 12, marginTop: 4 },
   btnPrimary: {
     backgroundColor: '#6C8EFF',
     borderRadius: 12,

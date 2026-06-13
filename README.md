@@ -35,6 +35,8 @@ Pour contrôler ARIA depuis ton téléphone (même WiFi) :
 
 Connecte-toi à l'URL affichée avec le code PIN par défaut `0000`.
 
+L'app mobile peut **scanner le réseau local** pour trouver automatiquement le PC (bouton sur l'écran de connexion).
+
 Endpoints optimisés mobile :
 - `POST /ask/fast` — réponses courtes (cache + modèle rapide)
 - `POST /ask/stream` — streaming token par token

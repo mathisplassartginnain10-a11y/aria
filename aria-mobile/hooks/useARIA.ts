@@ -1,6 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const DEFAULT_PORT = '5000';
+export const STORAGE_TTS = 'aria_tts_enabled';
+
+export type PingResult = {
+  ip: string;
+  pc_name?: string;
+  local_ip?: string;
+  whisper_ready?: boolean;
+  ollama_running?: boolean;
+};
 
 function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 8000) {
   const controller = new AbortController();
@@ -17,10 +26,64 @@ export function useARIA() {
 
   const getToken = async () => AsyncStorage.getItem('aria_token');
 
+  const getTtsEnabled = async () => {
+    const v = await AsyncStorage.getItem(STORAGE_TTS);
+    return v !== 'false';
+  };
+
+  const setTtsEnabled = async (enabled: boolean) => {
+    await AsyncStorage.setItem(STORAGE_TTS, enabled ? 'true' : 'false');
+  };
+
+  const pingHost = async (ip: string, port = DEFAULT_PORT, timeoutMs = 1500): Promise<PingResult | null> => {
+    try {
+      const res = await fetchWithTimeout(`http://${ip}:${port}/ping`, {}, timeoutMs);
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data?.status === 'ok' && data?.name === 'ARIA') {
+        return { ip, ...data };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
   const ping = async (ip: string) => {
     const port = (await AsyncStorage.getItem('aria_port')) || DEFAULT_PORT;
-    const res = await fetchWithTimeout(`http://${ip}:${port}/ping`, {}, 3000);
-    return res.json();
+    const result = await pingHost(ip, port, 3000);
+    if (!result) throw new Error('PC introuvable');
+    return result;
+  };
+
+  const scanForPc = async (
+    onProgress?: (message: string) => void,
+    seedIp?: string,
+  ): Promise<PingResult | null> => {
+    const port = (await AsyncStorage.getItem('aria_port')) || DEFAULT_PORT;
+    const prefixes: string[] = [];
+
+    if (seedIp) {
+      const parts = seedIp.trim().split('.');
+      if (parts.length >= 3 && parts.every((p) => /^\d+$/.test(p))) {
+        prefixes.push(`${parts[0]}.${parts[1]}.${parts[2]}`);
+      }
+    }
+    for (const p of ['192.168.1', '192.168.0', '192.168.43', '10.0.0', '172.16.0']) {
+      if (!prefixes.includes(p)) prefixes.push(p);
+    }
+
+    for (const prefix of prefixes) {
+      onProgress?.(`Recherche sur ${prefix}.x…`);
+      const hosts = Array.from({ length: 254 }, (_, i) => `${prefix}.${i + 1}`);
+      for (let i = 0; i < hosts.length; i += 30) {
+        const batch = hosts.slice(i, i + 30);
+        const results = await Promise.all(batch.map((host) => pingHost(host, port, 1200)));
+        const found = results.find((r) => r !== null);
+        if (found) return found;
+      }
+    }
+    return null;
   };
 
   const auth = async (ip: string, pin: string) => {
@@ -119,5 +182,8 @@ export function useARIA() {
     return data.text || '';
   };
 
-  return { ping, auth, askFast, askStream, warmup, clearHistory, transcribeAudio, getBaseUrl, getToken };
+  return {
+    ping, pingHost, scanForPc, auth, askFast, askStream, warmup, clearHistory,
+    transcribeAudio, getTtsEnabled, setTtsEnabled, getBaseUrl, getToken,
+  };
 }

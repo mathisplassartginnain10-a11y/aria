@@ -91,7 +91,9 @@ export default function ChatScreen({ navigation }: Props) {
       });
       setConnected(true);
       const spoken = toSpeechText(full);
-      if (spoken) Speech.speak(spoken, { language: 'fr-FR', rate: 1.0 });
+      if (spoken && (await aria.getTtsEnabled())) {
+        Speech.speak(spoken, { language: 'fr-FR', rate: 1.0 });
+      }
     } catch {
       setMessages((prev) =>
         prev.map((m) =>

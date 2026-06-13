@@ -26,6 +26,8 @@ export default function PinScreen({ navigation }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [pcInfo, setPcInfo] = useState<PcInfo | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanStatus, setScanStatus] = useState('');
   const aria = useARIA();
 
   useEffect(() => {
@@ -69,6 +71,30 @@ export default function PinScreen({ navigation }: Props) {
     setLoading(false);
   };
 
+  const handleScan = async () => {
+    setScanning(true);
+    setError('');
+    setScanStatus('Démarrage…');
+    try {
+      const found = await aria.scanForPc(setScanStatus, ip || undefined);
+      if (found) {
+        setIp(found.ip);
+        setPcInfo(found);
+        setStep('pin');
+        Vibration.vibrate(50);
+      } else {
+        setError('Aucun PC ARIA trouvé. Lance aria_mobile_server.py sur ton PC.');
+        Vibration.vibrate(300);
+      }
+    } catch {
+      setError('Erreur lors du scan réseau.');
+    }
+    setScanning(false);
+    setScanStatus('');
+  };
+
+  const busy = loading || scanning;
+
   return (
     <View style={styles.container}>
       <Text style={styles.logo}>A R I A</Text>
@@ -86,9 +112,17 @@ export default function PinScreen({ navigation }: Props) {
             keyboardType="numeric"
             autoFocus
           />
-          <Text style={styles.hint}>Lance ARIA sur ton PC pour voir l'IP</Text>
+          <Text style={styles.hint}>Lance aria_mobile_server.py sur ton PC (même WiFi)</Text>
+          {scanStatus ? <Text style={styles.scanStatus}>{scanStatus}</Text> : null}
           {error ? <Text style={styles.error}>{error}</Text> : null}
-          <TouchableOpacity style={styles.btn} onPress={handleIpNext} disabled={loading || !ip}>
+          <TouchableOpacity style={styles.btnScan} onPress={handleScan} disabled={busy}>
+            {scanning ? (
+              <ActivityIndicator color="#6C8EFF" />
+            ) : (
+              <Text style={styles.btnScanText}>🔍 Scanner le réseau</Text>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.btn} onPress={handleIpNext} disabled={busy || !ip}>
             {loading ? (
               <ActivityIndicator color="#fff" />
             ) : (
@@ -174,8 +208,20 @@ const styles = StyleSheet.create({
   },
   pcBadgeText: { color: '#F1F1F3', fontSize: 14, fontWeight: '600' },
   pcBadgeSub: { color: '#6C8EFF', fontSize: 11, marginTop: 4 },
-  hint: { fontSize: 11, color: '#555', marginBottom: 24, alignSelf: 'flex-start' },
+  hint: { fontSize: 11, color: '#555', marginBottom: 12, alignSelf: 'flex-start' },
+  scanStatus: { fontSize: 12, color: '#6C8EFF', marginBottom: 12, alignSelf: 'flex-start' },
   error: { color: '#F87171', fontSize: 12, marginBottom: 12 },
+  btnScan: {
+    width: '100%',
+    backgroundColor: 'rgba(108,142,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(108,142,255,0.3)',
+    borderRadius: 12,
+    padding: 14,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  btnScanText: { color: '#6C8EFF', fontWeight: '600', fontSize: 14 },
   btn: {
     width: '100%',
     backgroundColor: '#6C8EFF',
