@@ -20,6 +20,7 @@ import { useARIA } from '../hooks/useARIA';
 import { MessageBubble } from '../components/MessageBubble';
 import { VoiceButton } from '../components/VoiceButton';
 import { OrbAnimation } from '../components/OrbAnimation';
+import { QuickActions } from '../components/QuickActions';
 import { RootStackParamList } from '../App';
 
 type Message = { id: string; role: 'user' | 'assistant'; text: string; streaming?: boolean };
@@ -42,6 +43,7 @@ export default function ChatScreen({ navigation }: Props) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [connected, setConnected] = useState(true);
+  const [pcName, setPcName] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const flatRef = useRef<FlatList>(null);
   const aria = useARIA();
@@ -52,7 +54,13 @@ export default function ChatScreen({ navigation }: Props) {
     aria.getBaseUrl().then(async (url) => {
       try {
         const res = await fetch(`${url}/ping`, { method: 'GET' });
-        setConnected(res.ok);
+        if (res.ok) {
+          const data = await res.json();
+          setPcName(data.pc_name || '');
+          setConnected(true);
+        } else {
+          setConnected(false);
+        }
       } catch {
         setConnected(false);
       }
@@ -132,8 +140,13 @@ export default function ChatScreen({ navigation }: Props) {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <OrbAnimation active={loading} size={28} />
-        <Text style={styles.headerTitle}>A R I A</Text>
+        <TouchableOpacity onPress={() => Speech.stop()} style={styles.orbTap}>
+          <OrbAnimation active={loading} size={28} />
+        </TouchableOpacity>
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle}>A R I A</Text>
+          {pcName ? <Text style={styles.headerSub}>{pcName}</Text> : null}
+        </View>
         <View style={styles.headerRight}>
           <View style={[styles.dot, { backgroundColor: connected ? '#4ADE80' : '#F87171' }]} />
           <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
@@ -164,6 +177,8 @@ export default function ChatScreen({ navigation }: Props) {
           </View>
         }
       />
+
+      <QuickActions onAction={(text) => send(text)} disabled={loading} />
 
       <View style={[styles.inputBar, { paddingBottom: insets.bottom + 8 }]}>
         <VoiceButton
@@ -207,8 +222,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.06)',
   },
-  headerTitle: { fontSize: 16, fontWeight: '700', color: '#F1F1F3', letterSpacing: 5, flex: 1, textAlign: 'center' },
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  orbTap: { width: 36, alignItems: 'center' },
+  headerCenter: { flex: 1, alignItems: 'center' },
+  headerTitle: { fontSize: 16, fontWeight: '700', color: '#F1F1F3', letterSpacing: 5 },
+  headerSub: { fontSize: 10, color: '#55555F', marginTop: 2 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 12, minWidth: 36 },
   settingsBtn: { fontSize: 20, color: '#8B8B9E' },
   dot: { width: 8, height: 8, borderRadius: 4 },
   messages: { padding: 16, gap: 12, flexGrow: 1 },

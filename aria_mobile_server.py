@@ -34,10 +34,19 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 PIN_CODE = "0000"
+MOBILE_PORT = 5000
 SESSIONS: dict[str, dict] = {}
 MOBILE_MODEL = "llama3.1:8b-instruct-q8_0"
 CACHE_TTL = 300
 _response_cache: dict[str, dict] = {}
+
+
+def _apply_mobile_config(cfg: dict) -> None:
+    global PIN_CODE, MOBILE_PORT
+    if cfg.get("mobile_pin"):
+        PIN_CODE = str(cfg["mobile_pin"])
+    if cfg.get("mobile_port"):
+        MOBILE_PORT = int(cfg["mobile_port"])
 
 
 def get_cached(text: str) -> str | None:
@@ -93,6 +102,7 @@ def ping():
         "version": "2.0",
         "pc_name": socket.gethostname(),
         "local_ip": get_local_ip(),
+        "port": MOBILE_PORT,
         "ollama_running": ollama_manager.is_running(),
         "whisper_ready": stt.is_ready(),
     })
@@ -377,6 +387,7 @@ def set_volume():
 
 if __name__ == "__main__":
     cfg = _load_config()
+    _apply_mobile_config(cfg)
     ollama_manager.configure(cfg.get("ollama_path", ""))
 
     if not ollama_manager.is_running():
@@ -385,7 +396,7 @@ if __name__ == "__main__":
         ollama_manager.wait_until_ready(timeout=30)
 
     ip = get_local_ip()
-    port = 5000
+    port = MOBILE_PORT
 
     print(f"\n{'=' * 50}")
     print("  ARIA Mobile Server démarré")

@@ -107,3 +107,7 @@ presets:
 morning_briefing: true
 morning_briefing_time: "08:00"
 briefing_includes: [weather, news, calendar]
+
+# Serveur mobile (aria_mobile_server.py)
+mobile_port: 5000
+mobile_pin: "0000"

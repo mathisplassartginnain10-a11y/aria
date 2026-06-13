@@ -30,7 +30,15 @@ Assistant vocal personnel 100% local pour Windows 11.
 Pour contrôler ARIA depuis ton téléphone (même WiFi) :
 
 ```bash
+start_mobile.bat
+# ou
 .venv\Scripts\python.exe aria_mobile_server.py
+```
+
+PIN et port configurables dans `config.yaml` :
+```yaml
+mobile_port: 5000
+mobile_pin: "0000"
 ```
 
 Connecte-toi à l'URL affichée avec le code PIN par défaut `0000`.
