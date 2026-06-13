@@ -34,3 +34,34 @@ Pour contrôler ARIA depuis ton téléphone (même WiFi) :
 ```
 
 Connecte-toi à l'URL affichée avec le code PIN par défaut `0000`.
+
+Endpoints optimisés mobile :
+- `POST /ask/fast` — réponses courtes (cache + modèle rapide)
+- `POST /ask/stream` — streaming token par token
+- `POST /warmup` — pré-charge le modèle Ollama
+
+## Application Android (APK)
+
+L'app mobile Expo se trouve dans `aria-mobile/`.
+
+```bash
+# Install EAS CLI
+npm install -g eas-cli
+
+# Login to Expo
+eas login
+
+# Configure build
+cd aria-mobile
+npm install
+eas build:configure
+
+# Build APK (Android)
+eas build --platform android --profile preview
+
+# OR build locally (no Expo account needed)
+npx expo run:android
+```
+
+Prérequis : Node.js 18+, Android Studio pour build local.
+Lance `aria_mobile_server.py` sur le PC avant de connecter l'app.

@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "ARIA",
+    "slug": "aria-assistant",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "aria",
+    "userInterfaceStyle": "dark",
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0C0C0F"
+      },
+      "package": "com.aria.assistant",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET",
+        "android.permission.VIBRATE"
+      ]
+    },
+    "plugins": [
+      ["expo-av", {"microphonePermission": "ARIA needs mic for voice input"}]
+    ]
+  }
+}

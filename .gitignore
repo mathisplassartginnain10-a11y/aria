@@ -43,3 +43,8 @@ sounds/*.wav
 *.tmp
 autostart_task.xml
 crash.log
+
+# Expo / React Native
+aria-mobile/node_modules/
+aria-mobile/.expo/
+aria-mobile/dist/

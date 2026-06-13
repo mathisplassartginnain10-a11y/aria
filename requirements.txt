@@ -28,3 +28,4 @@ pyinstaller
 pywebview
 pypdf
 flask
+gevent

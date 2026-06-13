@@ -6,6 +6,7 @@ Lance avec : .venv\\Scripts\\python.exe aria_mobile_server.py
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import secrets
@@ -13,6 +14,7 @@ import socket
 import threading
 import time
 
+import requests as req
 import yaml
 from flask import Flask, Response, jsonify, request, stream_with_context
 
@@ -23,11 +25,29 @@ import ollama_manager
 from actions import apps, system
 
 app = Flask(__name__)
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 PIN_CODE = "0000"
 SESSIONS: dict[str, dict] = {}
+MOBILE_MODEL = "llama3.1:8b-instruct-q8_0"
+CACHE_TTL = 300
+_response_cache: dict[str, dict] = {}
+
+
+def get_cached(text: str) -> str | None:
+    key = hashlib.md5(text.lower().strip().encode()).hexdigest()
+    if key in _response_cache:
+        cached = _response_cache[key]
+        if time.time() - cached["time"] < CACHE_TTL:
+            return cached["response"]
+    return None
+
+
+def set_cached(text: str, response: str) -> None:
+    key = hashlib.md5(text.lower().strip().encode()).hexdigest()
+    _response_cache[key] = {"response": response, "time": time.time()}
 
 
 def _load_config() -> dict:
@@ -118,6 +138,74 @@ def ask():
         "response": result["response"],
         "executed_on": "PC",
     })
+
+
+@app.route("/ask/fast", methods=["POST"])
+def ask_fast():
+    """Réponse rapide pour mobile — cache, regex intent, modèle léger."""
+    if not check_auth(request):
+        return jsonify({"error": "Non autorisé"}), 401
+
+    data = request.get_json() or {}
+    text = data.get("text", "").strip()
+    if not text:
+        return jsonify({"error": "Texte vide"}), 400
+
+    cached = get_cached(text)
+    if cached:
+        return jsonify({"response": cached, "source": "cache"})
+
+    fast = llm._fast_intent(text) if hasattr(llm, "_fast_intent") else None
+    if fast and fast != "question_libre":
+        try:
+            params = llm._fast_intent_params(fast, text)
+            result = llm._dispatch_action(fast, params, text)
+            set_cached(text, result)
+            return jsonify({"response": result, "source": "action", "executed_on": "PC"})
+        except Exception:
+            pass
+
+    try:
+        response = req.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": MOBILE_MODEL,
+                "prompt": text,
+                "stream": False,
+                "options": {
+                    "num_predict": 150,
+                    "temperature": 0.7,
+                    "top_p": 0.9,
+                },
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        result = response.json().get("response", "")
+        set_cached(text, result)
+        return jsonify({"response": result, "source": "llm"})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/warmup", methods=["POST"])
+def warmup():
+    """Pré-charge le modèle mobile dans Ollama."""
+    if not check_auth(request):
+        return jsonify({"error": "Non autorisé"}), 401
+
+    def _warm():
+        try:
+            req.post(
+                "http://localhost:11434/api/generate",
+                json={"model": MOBILE_MODEL, "prompt": "", "keep_alive": "30m"},
+                timeout=30,
+            )
+        except Exception as exc:
+            logger.warning("Warmup Ollama échoué: %s", exc)
+
+    threading.Thread(target=_warm, daemon=True).start()
+    return jsonify({"status": "warming up"})
 
 
 @app.route("/ask/stream", methods=["POST"])
@@ -273,4 +361,10 @@ if __name__ == "__main__":
     print("\n  TOUTES les actions s'exécutent sur CE PC")
     print(f"{'=' * 50}\n")
 
-    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+    try:
+        from gevent.pywsgi import WSGIServer
+
+        server = WSGIServer(("0.0.0.0", port), app)
+        server.serve_forever()
+    except ImportError:
+        app.run(host="0.0.0.0", port=port, debug=False, threaded=True)

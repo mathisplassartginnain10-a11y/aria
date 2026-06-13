@@ -1263,6 +1263,7 @@ def _merge_extra() -> dict[str, str]:
     from scripts.aliases_batch3 import get_batch3
     from scripts.aliases_batch4 import get_batch4
     from scripts.aliases_batch5 import get_batch5
+    from scripts.aliases_batch6 import get_batch6
 
     merged = dict(EXTRA)
     for key, domain in get_batch3().items():
@@ -1270,6 +1271,8 @@ def _merge_extra() -> dict[str, str]:
     for key, domain in get_batch4().items():
         merged.setdefault(key, domain)
     for key, domain in get_batch5().items():
+        merged.setdefault(key, domain)
+    for key, domain in get_batch6().items():
         merged.setdefault(key, domain)
     return merged
 
@@ -1283,6 +1286,16 @@ def format_dict(d: dict[str, str], indent: str = "    ") -> str:
 
 
 if __name__ == "__main__":
+    from pathlib import Path
+
     merged = _merge_extra()
-    print(f"# entries: {len(merged)}")
-    print(format_dict(merged))
+    out_path = Path(__file__).resolve().parent.parent / "actions" / "site_aliases_extra.py"
+    content = (
+        "# Auto-generated site aliases (extra)\n"
+        "from __future__ import annotations\n\n"
+        + format_dict(merged)
+        + "\n"
+    )
+    out_path.write_text(content, encoding="utf-8")
+    print(f"entries: {len(merged)}")
+    print(f"wrote {out_path}")

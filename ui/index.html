@@ -628,6 +628,179 @@
     ::-webkit-scrollbar { width: 5px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+    /* === MOBILE LAYOUT === */
+    body.mobile-mode {
+      font-size: 16px;
+    }
+
+    body.mobile-mode #sidebar {
+      display: none;
+    }
+
+    body.mobile-mode #main {
+      width: 100%;
+    }
+
+    body.mobile-mode #header {
+      height: 56px;
+      padding: 0 16px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    body.mobile-mode #chat-messages {
+      padding: 16px;
+      gap: 12px;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    body.mobile-mode .bubble-user {
+      max-width: 85%;
+      font-size: 15px;
+      padding: 10px 14px;
+      border-radius: 18px 18px 4px 18px;
+    }
+
+    body.mobile-mode .bubble-aria-wrap {
+      max-width: 90%;
+    }
+
+    body.mobile-mode .bubble-content {
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    body.mobile-mode #input-bar {
+      padding: 10px 12px;
+      padding-bottom: env(safe-area-inset-bottom, 10px);
+      position: sticky;
+      bottom: 0;
+      background: var(--bg);
+      z-index: 100;
+      gap: 8px;
+    }
+
+    body.mobile-mode #text-input {
+      font-size: 16px;
+      border-radius: 22px;
+      padding: 12px 18px;
+    }
+
+    body.mobile-mode #send-btn {
+      width: 46px;
+      height: 46px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    body.mobile-mode #active-images-indicator {
+      padding: 8px 16px;
+      font-size: 13px;
+    }
+
+    body.mobile-mode #mobile-nav {
+      display: flex;
+    }
+
+    #mobile-nav {
+      display: none;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 56px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      z-index: 200;
+      align-items: center;
+      justify-content: space-around;
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
+    body.mobile-mode #input-bar {
+      margin-bottom: 56px;
+    }
+
+    .mobile-nav-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      color: var(--text3);
+      cursor: pointer;
+      padding: 6px 14px;
+      border-radius: 8px;
+      transition: all 0.15s;
+      font-size: 20px;
+      border: none;
+      background: transparent;
+    }
+
+    .mobile-nav-btn span {
+      font-size: 10px;
+      color: var(--text3);
+    }
+
+    .mobile-nav-btn.active {
+      color: var(--accent);
+    }
+    .mobile-nav-btn.active span {
+      color: var(--accent);
+    }
+
+    body.mobile-mode #stop-btn {
+      padding: 6px 10px;
+      font-size: 11px;
+    }
+
+    body.mobile-mode .hbtn {
+      width: 36px;
+      height: 36px;
+      font-size: 16px;
+    }
+
+    body.pc-mode #sidebar { display: flex; }
+    body.pc-mode #mobile-nav { display: none !important; }
+
+    body.mobile-mode #orb-canvas { display: none; }
+
+    #mobile-presets-sheet {
+      display: none;
+      position: fixed;
+      bottom: 56px;
+      left: 0;
+      right: 0;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      border-radius: 16px 16px 0 0;
+      padding: 16px;
+      z-index: 199;
+      animation: slideUp 0.25s ease-out;
+    }
+
+    #mobile-presets-sheet.open { display: block; }
+
+    @keyframes slideUp {
+      from { transform: translateY(100%); }
+      to   { transform: translateY(0); }
+    }
+
+    .mobile-preset-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 12px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.15s;
+      font-size: 15px;
+      color: var(--text);
+    }
+
+    .mobile-preset-row:hover, .mobile-preset-row:active {
+      background: var(--hover);
+    }
   </style>
 </head>
 <body class="theme-slate">
@@ -669,6 +842,7 @@
       <span id="weather-clock" class="sr-only" aria-hidden="true"></span>
       <span id="model-display" class="sr-only" aria-hidden="true"></span>
       <button type="button" id="stop-btn" onclick="aria.stopSpeaking()">Stop</button>
+      <button type="button" class="hbtn" id="device-toggle" onclick="aria.toggleDevice()" title="Basculer PC/Mobile">💻</button>
       <button type="button" class="hbtn" id="mic-btn" title="Micro" onclick="aria.toggleMic()">🎤</button>
     </div>
   </header>
@@ -740,11 +914,13 @@ const aria = {
     nuit: { label:'Nuit', icon:'🌙', apps_open:[], apps_close:['discord','steam','spotify','chrome'], volume:15, brightness:20 },
   },
   presetsCustom: {},
+  currentDevice: 'pc',
 
   init() {
     this.orbCtx = document.getElementById('orb-canvas').getContext('2d');
     this.buildSettingsPanel();
     this.loadSettings();
+    this.detectDevice();
     this.loadPresets();
     this.loadConversations();
     this.setStatus('idle');
@@ -779,6 +955,22 @@ const aria = {
 
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape') this.stopSpeaking();
+    });
+
+    const sheet = document.getElementById('mobile-presets-sheet');
+    if (sheet) {
+      let startY = 0;
+      sheet.addEventListener('touchstart', e => { startY = e.touches[0].clientY; });
+      sheet.addEventListener('touchend', e => {
+        if (e.changedTouches[0].clientY - startY > 50) this.closeMobilePresets();
+      });
+    }
+    document.addEventListener('click', e => {
+      const presetsSheet = document.getElementById('mobile-presets-sheet');
+      if (presetsSheet?.classList.contains('open') && !presetsSheet.contains(e.target) &&
+          !e.target.closest('.mobile-nav-btn')) {
+        this.closeMobilePresets();
+      }
     });
 
     requestAnimationFrame(() => this.drawOrb());
@@ -1358,6 +1550,7 @@ const aria = {
       silence_duration: document.getElementById('set-silence-dur')?.value,
       auto_mic: document.getElementById('set-auto-mic')?.checked,
       always_on_top: document.getElementById('set-always-top')?.checked,
+      device_mode: this.currentDevice,
     };
   },
 
@@ -1430,6 +1623,7 @@ const aria = {
           document.getElementById('assistant-name').textContent = d.assistant_name;
           document.getElementById('header-title').textContent = d.assistant_name;
         }
+        if (d.device_mode) this.setDevice(d.device_mode, true);
         this.applyBubbleStyles();
       } catch (e) {}
     });
@@ -1774,6 +1968,65 @@ const aria = {
     el.scrollTop = el.scrollHeight;
   },
 
+  toggleDevice() {
+    if (this.currentDevice === 'pc') {
+      this.setDevice('mobile');
+    } else {
+      this.setDevice('pc');
+    }
+  },
+
+  setDevice(mode, silent = false) {
+    this.currentDevice = mode;
+    document.body.classList.remove('pc-mode', 'mobile-mode');
+    document.body.classList.add(`${mode}-mode`);
+
+    const btn = document.getElementById('device-toggle');
+    if (btn) btn.textContent = mode === 'mobile' ? '🖥️' : '📱';
+
+    if (!silent) this.saveSettings();
+
+    if (!silent) {
+      this.showToast(
+        mode === 'mobile' ? '📱 Mode mobile activé' : '🖥️ Mode PC activé',
+        'info',
+        2000
+      );
+    }
+
+    setTimeout(() => this.scrollChat(), 100);
+  },
+
+  mobileNav(tab, el) {
+    document.querySelectorAll('.mobile-nav-btn').forEach(b => b.classList.remove('active'));
+    el?.classList.add('active');
+
+    if (tab === 'modes') {
+      this.toggleMobilePresets();
+    } else if (tab === 'chat') {
+      this.closeMobilePresets();
+      this.toggleSettings(false);
+    }
+  },
+
+  toggleMobilePresets() {
+    const sheet = document.getElementById('mobile-presets-sheet');
+    if (sheet) sheet.classList.toggle('open');
+  },
+
+  closeMobilePresets() {
+    const sheet = document.getElementById('mobile-presets-sheet');
+    if (sheet) sheet.classList.remove('open');
+    document.querySelectorAll('.mobile-nav-btn').forEach((b, i) => {
+      b.classList.toggle('active', i === 0);
+    });
+  },
+
+  detectDevice() {
+    const isMobile = window.innerWidth < 768 || /Android|iPhone|iPad/i.test(navigator.userAgent);
+    this.setDevice(isMobile ? 'mobile' : 'pc', true);
+  },
+
   esc(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   },
@@ -1783,5 +2036,33 @@ window.aria = aria;
 window.addEventListener('pywebviewready', () => aria.init());
 if (!window.pywebview) window.addEventListener('load', () => aria.init());
 </script>
+
+<!-- MOBILE BOTTOM NAV -->
+<div id="mobile-nav">
+  <button type="button" class="mobile-nav-btn active" onclick="aria.mobileNav('chat', this)">
+    💬 <span>Chat</span>
+  </button>
+  <button type="button" class="mobile-nav-btn" onclick="aria.toggleMic(); aria.mobileNav('mic', this)">
+    🎤 <span>Micro</span>
+  </button>
+  <button type="button" class="mobile-nav-btn" onclick="aria.mobileNav('modes', this)">
+    ⚡ <span>Modes</span>
+  </button>
+  <button type="button" class="mobile-nav-btn" onclick="aria.toggleSettings(); aria.mobileNav('settings', this)">
+    ⚙️ <span>Réglages</span>
+  </button>
+</div>
+
+<!-- MOBILE PRESETS SHEET -->
+<div id="mobile-presets-sheet">
+  <div style="width:36px;height:4px;background:var(--border2);border-radius:2px;margin:0 auto 16px"></div>
+  <div style="font-size:13px;font-weight:600;color:var(--text3);margin-bottom:12px;letter-spacing:0.5px">MODES</div>
+  <div class="mobile-preset-row" onclick="aria.activatePreset('vol','✈ Vol');aria.closeMobilePresets()">✈️ <span>Vol</span></div>
+  <div class="mobile-preset-row" onclick="aria.activatePreset('etude','📚 Étude');aria.closeMobilePresets()">📚 <span>Étude</span></div>
+  <div class="mobile-preset-row" onclick="aria.activatePreset('gaming','🎮 Gaming');aria.closeMobilePresets()">🎮 <span>Gaming</span></div>
+  <div class="mobile-preset-row" onclick="aria.activatePreset('detente','🎵 Détente');aria.closeMobilePresets()">🎵 <span>Détente</span></div>
+  <div class="mobile-preset-row" onclick="aria.activatePreset('nuit','🌙 Nuit');aria.closeMobilePresets()">🌙 <span>Nuit</span></div>
+</div>
+
 </body>
 </html>
