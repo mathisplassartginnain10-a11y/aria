@@ -1,25 +1,25 @@
 import React from 'react';
 import { ScrollView, TouchableOpacity, Text, StyleSheet } from 'react-native';
 
-type Action = { label: string; text: string };
+export type PresetChip = { key: string; label: string; icon: string; active?: boolean };
 
-const ACTIONS: Action[] = [
+type ExtraAction = { label: string; text: string };
+
+const EXTRAS: ExtraAction[] = [
   { label: '🌤 Météo', text: 'Quelle est la météo ?' },
-  { label: '✈ Vol', text: 'Active le preset vol' },
-  { label: '🎮 Gaming', text: 'Active le preset gaming' },
-  { label: '📚 Étude', text: 'Active le preset étude' },
-  { label: '🌙 Nuit', text: 'Active le preset nuit' },
   { label: '🔊 Vol 50', text: 'Mets le volume à 50' },
   { label: '🎵 Spotify', text: 'Lance Spotify' },
   { label: '💻 Cursor', text: 'Lance Cursor' },
 ];
 
 type Props = {
+  presets: PresetChip[];
+  onPreset: (key: string) => void;
   onAction: (text: string) => void;
   disabled?: boolean;
 };
 
-export function QuickActions({ onAction, disabled }: Props) {
+export function QuickActions({ presets, onPreset, onAction, disabled }: Props) {
   return (
     <ScrollView
       horizontal
@@ -27,7 +27,19 @@ export function QuickActions({ onAction, disabled }: Props) {
       contentContainerStyle={styles.row}
       keyboardShouldPersistTaps="handled"
     >
-      {ACTIONS.map((a) => (
+      {presets.map((p) => (
+        <TouchableOpacity
+          key={p.key}
+          style={[styles.chip, p.active && styles.chipActive, disabled && styles.chipDisabled]}
+          onPress={() => onPreset(p.key)}
+          disabled={disabled}
+        >
+          <Text style={[styles.chipText, p.active && styles.chipTextActive]}>
+            {p.icon} {p.label}
+          </Text>
+        </TouchableOpacity>
+      ))}
+      {EXTRAS.map((a) => (
         <TouchableOpacity
           key={a.label}
           style={[styles.chip, disabled && styles.chipDisabled]}
@@ -51,6 +63,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
+  chipActive: {
+    backgroundColor: 'rgba(108,142,255,0.15)',
+    borderColor: 'rgba(108,142,255,0.4)',
+  },
   chipDisabled: { opacity: 0.4 },
   chipText: { color: '#E8E8F0', fontSize: 13 },
+  chipTextActive: { color: '#6C8EFF' },
 });

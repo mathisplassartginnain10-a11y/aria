@@ -20,7 +20,7 @@ import { useARIA } from '../hooks/useARIA';
 import { MessageBubble } from '../components/MessageBubble';
 import { VoiceButton } from '../components/VoiceButton';
 import { OrbAnimation } from '../components/OrbAnimation';
-import { QuickActions } from '../components/QuickActions';
+import { QuickActions, PresetChip } from '../components/QuickActions';
 import { RootStackParamList } from '../App';
 
 type Message = { id: string; role: 'user' | 'assistant'; text: string; streaming?: boolean };
@@ -44,6 +44,7 @@ export default function ChatScreen({ navigation }: Props) {
   const [loading, setLoading] = useState(false);
   const [connected, setConnected] = useState(true);
   const [pcName, setPcName] = useState('');
+  const [presetList, setPresetList] = useState<PresetChip[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const flatRef = useRef<FlatList>(null);
   const aria = useARIA();
@@ -65,6 +66,7 @@ export default function ChatScreen({ navigation }: Props) {
         setConnected(false);
       }
     });
+    aria.getPresets().then(setPresetList).catch(() => {});
     return () => { Speech.stop(); };
   }, []);
 
@@ -119,11 +121,52 @@ export default function ChatScreen({ navigation }: Props) {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
+  const runPreset = async (key: string) => {
+    if (loading) return;
+    setLoading(true);
+    Vibration.vibrate(30);
+    const userId = Date.now().toString();
+    const ariaId = (Date.now() + 1).toString();
+    const preset = presetList.find((p) => p.key === key);
+    const label = preset ? `${preset.icon} ${preset.label}` : key;
+
+    setMessages((prev) => [
+      ...prev,
+      { id: userId, role: 'user', text: `Active ${label}` },
+      { id: ariaId, role: 'assistant', text: '', streaming: true },
+    ]);
+    scrollToEnd();
+
+    try {
+      const result = await aria.activatePreset(key);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === ariaId ? { ...m, text: result, streaming: false } : m)),
+      );
+      setPresetList((prev) => prev.map((p) => ({ ...p, active: p.key === key })));
+      setConnected(true);
+      const spoken = toSpeechText(result);
+      if (spoken && (await aria.getTtsEnabled())) {
+        Speech.speak(spoken, { language: 'fr-FR', rate: 1.0 });
+      }
+    } catch {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === ariaId ? { ...m, text: 'Erreur activation preset', streaming: false } : m,
+        ),
+      );
+      setConnected(false);
+    }
+    setLoading(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
       await aria.clearHistory();
       setMessages([]);
+      const list = await aria.getPresets();
+      setPresetList(list);
     } catch {
       /* ignore */
     }
@@ -178,7 +221,12 @@ export default function ChatScreen({ navigation }: Props) {
         }
       />
 
-      <QuickActions onAction={(text) => send(text)} disabled={loading} />
+      <QuickActions
+        presets={presetList}
+        onPreset={runPreset}
+        onAction={(text) => send(text)}
+        disabled={loading}
+      />
 
       <View style={[styles.inputBar, { paddingBottom: insets.bottom + 8 }]}>
         <VoiceButton

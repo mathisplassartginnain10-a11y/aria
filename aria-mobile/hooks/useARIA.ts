@@ -182,8 +182,30 @@ export function useARIA() {
     return data.text || '';
   };
 
+  const getPresets = async () => {
+    const [base, token] = await Promise.all([getBaseUrl(), getToken()]);
+    const res = await fetchWithTimeout(`${base}/presets`, {
+      headers: { 'X-Token': token || '' },
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.presets || [];
+  };
+
+  const activatePreset = async (name: string) => {
+    const [base, token] = await Promise.all([getBaseUrl(), getToken()]);
+    const res = await fetchWithTimeout(`${base}/presets/${encodeURIComponent(name)}/activate`, {
+      method: 'POST',
+      headers: { 'X-Token': token || '' },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Preset échoué');
+    return data.result as string;
+  };
+
   return {
     ping, pingHost, scanForPc, auth, askFast, askStream, warmup, clearHistory,
-    transcribeAudio, getTtsEnabled, setTtsEnabled, getBaseUrl, getToken,
+    transcribeAudio, getPresets, activatePreset, getTtsEnabled, setTtsEnabled,
+    getBaseUrl, getToken,
   };
 }

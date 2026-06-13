@@ -67,10 +67,11 @@ cd aria-mobile
 npm install
 eas build:configure
 
-# Build APK (Android)
-eas build --platform android --profile preview
+# Cloud (compte Expo)
+cd aria-mobile && npm run build:apk
+# ou : aria-mobile\build-apk.bat
 
-# OR build locally (no Expo account needed)
+# Local (Android Studio)
 npx expo run:android
 ```
 

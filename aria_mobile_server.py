@@ -25,7 +25,7 @@ import llm
 import memory_engine
 import ollama_manager
 import stt
-from actions import apps, system
+from actions import apps, presets, system
 
 app = Flask(__name__)
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
@@ -382,6 +382,41 @@ def set_volume():
     data = request.get_json() or {}
     level = data.get("level", 50)
     result = system.set_volume(level)
+    return jsonify({"result": result, "executed_on": "PC"})
+
+
+@app.route("/presets", methods=["GET"])
+def list_presets():
+    """Liste les presets disponibles sur le PC."""
+    if not check_auth(request):
+        return jsonify({"error": "Non autorisé"}), 401
+    merged = presets.get_merged_presets()
+    items = [
+        {
+            "key": key,
+            "label": data.get("label", key),
+            "icon": data.get("icon", "⚡"),
+            "active": presets.get_active_preset() == key,
+        }
+        for key, data in merged.items()
+    ]
+    return jsonify({"presets": items, "active": presets.get_active_preset()})
+
+
+@app.route("/presets/<name>/activate", methods=["POST"])
+def activate_preset(name: str):
+    """Active un preset sur le PC."""
+    if not check_auth(request):
+        return jsonify({"error": "Non autorisé"}), 401
+    result = presets.activate(name)
+    return jsonify({"result": result, "preset": name, "executed_on": "PC"})
+
+
+@app.route("/presets/deactivate", methods=["POST"])
+def deactivate_preset():
+    if not check_auth(request):
+        return jsonify({"error": "Non autorisé"}), 401
+    result = presets.deactivate()
     return jsonify({"result": result, "executed_on": "PC"})
 
 
