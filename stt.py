@@ -201,6 +201,35 @@ def _transcribe_audio(audio_np: np.ndarray) -> str:
     return ""
 
 
+def transcribe_file(path: str | Path, language: str = "fr") -> str:
+    """Transcrit un fichier audio (wav, m4a, mp3…) — utilisé par le serveur mobile."""
+    global _whisper_model
+
+    file_path = str(path)
+    for attempt in range(2):
+        try:
+            model = _load_whisper_model()
+            segments, _ = model.transcribe(
+                file_path,
+                language=language,
+                beam_size=5,
+                vad_filter=True,
+                vad_parameters={"min_silence_duration_ms": 500},
+            )
+            return " ".join(segment.text for segment in segments).strip()
+        except Exception as exc:
+            err = str(exc).lower()
+            if attempt == 0 and ("cublas" in err or "cuda" in err or "cudnn" in err):
+                logger.warning("Transcription fichier CUDA échouée, bascule CPU: %s", exc)
+                with _whisper_lock:
+                    _whisper_model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
+                continue
+            logger.error("Erreur Whisper (fichier): %s", exc)
+            return ""
+
+    return ""
+
+
 def _enqueue_transcript(text: str) -> None:
     _transcript_queue.put(text)
     logger.info("Transcription mise en queue: '%s'", text)
@@ -359,6 +388,10 @@ def _record_loop() -> None:
             pass
 
     logger.info("Stopped listening")
+
+
+def is_ready() -> bool:
+    return _whisper_model is not None
 
 
 def start_listening() -> None:

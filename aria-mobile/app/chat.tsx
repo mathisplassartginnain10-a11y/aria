@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StackNavigationProp } from '@react-navigation/stack';
 import * as Haptics from 'expo-haptics';
+import * as Speech from 'expo-speech';
 import { useARIA } from '../hooks/useARIA';
 import { MessageBubble } from '../components/MessageBubble';
 import { VoiceButton } from '../components/VoiceButton';
@@ -22,6 +23,15 @@ import { OrbAnimation } from '../components/OrbAnimation';
 import { RootStackParamList } from '../App';
 
 type Message = { id: string; role: 'user' | 'assistant'; text: string; streaming?: boolean };
+
+function toSpeechText(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/[#*_`>\[\]()]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 600);
+}
 
 type Props = {
   navigation: StackNavigationProp<RootStackParamList, 'Chat'>;
@@ -47,6 +57,7 @@ export default function ChatScreen({ navigation }: Props) {
         setConnected(false);
       }
     });
+    return () => { Speech.stop(); };
   }, []);
 
   const scrollToEnd = () => {
@@ -72,13 +83,15 @@ export default function ChatScreen({ navigation }: Props) {
     scrollToEnd();
 
     try {
-      await aria.askStream(text, (token) => {
+      const full = await aria.askStream(text, (token) => {
         setMessages((prev) =>
           prev.map((m) => (m.id === ariaId ? { ...m, text: m.text + token } : m)),
         );
         flatRef.current?.scrollToEnd({ animated: false });
       });
       setConnected(true);
+      const spoken = toSpeechText(full);
+      if (spoken) Speech.speak(spoken, { language: 'fr-FR', rate: 1.0 });
     } catch {
       setMessages((prev) =>
         prev.map((m) =>
@@ -151,7 +164,11 @@ export default function ChatScreen({ navigation }: Props) {
       />
 
       <View style={[styles.inputBar, { paddingBottom: insets.bottom + 8 }]}>
-        <VoiceButton onTranscript={(t) => send(t)} disabled={loading} />
+        <VoiceButton
+          transcribe={aria.transcribeAudio}
+          onVoiceMessage={(text) => send(text)}
+          disabled={loading}
+        />
         <TextInput
           style={styles.textInput}
           value={input}

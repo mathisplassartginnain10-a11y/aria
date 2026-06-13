@@ -38,6 +38,7 @@ Connecte-toi à l'URL affichée avec le code PIN par défaut `0000`.
 Endpoints optimisés mobile :
 - `POST /ask/fast` — réponses courtes (cache + modèle rapide)
 - `POST /ask/stream` — streaming token par token
+- `POST /transcribe` — transcription vocale (Whisper sur le PC)
 - `POST /warmup` — pré-charge le modèle Ollama
 
 ## Application Android (APK)

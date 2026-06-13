@@ -17,12 +17,15 @@ type Props = {
   navigation: StackNavigationProp<RootStackParamList, 'Pin'>;
 };
 
+type PcInfo = { pc_name?: string; local_ip?: string; whisper_ready?: boolean };
+
 export default function PinScreen({ navigation }: Props) {
   const [ip, setIp] = useState('');
   const [pin, setPin] = useState('');
   const [step, setStep] = useState<'ip' | 'pin'>('ip');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [pcInfo, setPcInfo] = useState<PcInfo | null>(null);
   const aria = useARIA();
 
   useEffect(() => {
@@ -38,7 +41,8 @@ export default function PinScreen({ navigation }: Props) {
     setLoading(true);
     setError('');
     try {
-      await aria.ping(ip);
+      const info = await aria.ping(ip);
+      setPcInfo(info);
       setStep('pin');
     } catch {
       setError('PC introuvable. Vérifie que ARIA tourne et que tu es sur le même WiFi.');
@@ -94,6 +98,14 @@ export default function PinScreen({ navigation }: Props) {
         </>
       ) : (
         <>
+          {pcInfo?.pc_name ? (
+            <View style={styles.pcBadge}>
+              <Text style={styles.pcBadgeText}>🖥 {pcInfo.pc_name}</Text>
+              {pcInfo.whisper_ready ? (
+                <Text style={styles.pcBadgeSub}>Micro PC prêt</Text>
+              ) : null}
+            </View>
+          ) : null}
           <Text style={styles.label}>Code PIN</Text>
           <TextInput
             style={[styles.input, styles.pinInput]}
@@ -150,6 +162,18 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   pinInput: { letterSpacing: 12, textAlign: 'center', fontSize: 24 },
+  pcBadge: {
+    width: '100%',
+    backgroundColor: 'rgba(108,142,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(108,142,255,0.2)',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 20,
+    alignItems: 'center',
+  },
+  pcBadgeText: { color: '#F1F1F3', fontSize: 14, fontWeight: '600' },
+  pcBadgeSub: { color: '#6C8EFF', fontSize: 11, marginTop: 4 },
   hint: { fontSize: 11, color: '#555', marginBottom: 24, alignSelf: 'flex-start' },
   error: { color: '#F87171', fontSize: 12, marginBottom: 12 },
   btn: {

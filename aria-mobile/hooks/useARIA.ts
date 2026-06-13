@@ -48,7 +48,7 @@ export function useARIA() {
     return res.json();
   };
 
-  const askStream = async (text: string, onToken: (t: string) => void) => {
+  const askStream = async (text: string, onToken: (t: string) => void): Promise<string> => {
     const [base, token] = await Promise.all([getBaseUrl(), getToken()]);
     const res = await fetchWithTimeout(`${base}/ask/stream`, {
       method: 'POST',
@@ -58,8 +58,9 @@ export function useARIA() {
 
     const reader = res.body?.getReader();
     const decoder = new TextDecoder();
-    if (!reader) return;
+    if (!reader) return '';
 
+    let full = '';
     let buffer = '';
     while (true) {
       const { done, value } = await reader.read();
@@ -71,14 +72,18 @@ export function useARIA() {
         if (line.startsWith('data: ')) {
           try {
             const data = JSON.parse(line.slice(6));
-            if (data.token) onToken(data.token);
-            if (data.done) return;
+            if (data.token) {
+              full += data.token;
+              onToken(data.token);
+            }
+            if (data.done) return full;
           } catch {
             /* ignore malformed chunks */
           }
         }
       }
     }
+    return full;
   };
 
   const warmup = async () => {
@@ -97,5 +102,22 @@ export function useARIA() {
     });
   };
 
-  return { ping, auth, askFast, askStream, warmup, clearHistory, getBaseUrl, getToken };
+  const transcribeAudio = async (uri: string): Promise<string> => {
+    const [base, token] = await Promise.all([getBaseUrl(), getToken()]);
+    const ext = uri.split('.').pop()?.split('?')[0] || 'm4a';
+    const mime = ext === 'wav' ? 'audio/wav' : ext === 'mp4' ? 'audio/mp4' : 'audio/m4a';
+    const form = new FormData();
+    form.append('audio', { uri, type: mime, name: `recording.${ext}` } as unknown as Blob);
+
+    const res = await fetchWithTimeout(`${base}/transcribe`, {
+      method: 'POST',
+      headers: { 'X-Token': token || '' },
+      body: form,
+    }, 90000);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Transcription échouée');
+    return data.text || '';
+  };
+
+  return { ping, auth, askFast, askStream, warmup, clearHistory, transcribeAudio, getBaseUrl, getToken };
 }

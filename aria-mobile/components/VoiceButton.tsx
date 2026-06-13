@@ -1,19 +1,21 @@
 import React, { useRef, useState } from 'react';
-import { TouchableOpacity, Text, StyleSheet, Alert } from 'react-native';
+import { TouchableOpacity, Text, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
 
 type Props = {
-  onTranscript: (text: string) => void;
+  onVoiceMessage: (text: string) => void;
+  transcribe: (uri: string) => Promise<string>;
   disabled?: boolean;
 };
 
-export function VoiceButton({ onTranscript, disabled }: Props) {
+export function VoiceButton({ onVoiceMessage, transcribe, disabled }: Props) {
   const [recording, setRecording] = useState(false);
+  const [processing, setProcessing] = useState(false);
   const recordingRef = useRef<Audio.Recording | null>(null);
 
   const startRecording = async () => {
-    if (disabled) return;
+    if (disabled || processing) return;
     try {
       const perm = await Audio.requestPermissionsAsync();
       if (!perm.granted) {
@@ -34,30 +36,43 @@ export function VoiceButton({ onTranscript, disabled }: Props) {
 
   const stopRecording = async () => {
     const rec = recordingRef.current;
-    if (!rec) return;
+    if (!rec || processing) return;
     setRecording(false);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     try {
       await rec.stopAndUnloadAsync();
       const uri = rec.getURI();
       recordingRef.current = null;
-      if (uri) {
-        // STT côté PC — pour l'instant placeholder local
-        onTranscript('[Message vocal enregistré — transcription à venir]');
+      if (!uri) return;
+
+      setProcessing(true);
+      const text = await transcribe(uri);
+      if (text.trim()) {
+        onVoiceMessage(text.trim());
+      } else {
+        Alert.alert('ARIA', 'Je n\'ai rien entendu — réessaie.');
       }
     } catch {
-      recordingRef.current = null;
+      Alert.alert('Erreur', 'Transcription impossible. Vérifie la connexion au PC.');
+    } finally {
+      setProcessing(false);
     }
   };
 
+  const busy = disabled || processing;
+
   return (
     <TouchableOpacity
-      style={[styles.btn, recording && styles.btnActive, disabled && styles.btnDisabled]}
+      style={[styles.btn, recording && styles.btnActive, busy && styles.btnDisabled]}
       onPressIn={startRecording}
       onPressOut={stopRecording}
-      disabled={disabled}
+      disabled={busy}
     >
-      <Text style={styles.icon}>{recording ? '⏹' : '🎤'}</Text>
+      {processing ? (
+        <ActivityIndicator size="small" color="#6C8EFF" />
+      ) : (
+        <Text style={styles.icon}>{recording ? '⏹' : '🎤'}</Text>
+      )}
     </TouchableOpacity>
   );
 }
@@ -77,6 +92,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(248,113,113,0.15)',
     borderColor: '#F87171',
   },
-  btnDisabled: { opacity: 0.4 },
+  btnDisabled: { opacity: 0.5 },
   icon: { fontSize: 20 },
 });

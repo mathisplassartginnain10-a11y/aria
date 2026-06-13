@@ -11,8 +11,10 @@ import json
 import logging
 import secrets
 import socket
+import tempfile
 import threading
 import time
+from pathlib import Path
 
 import requests as req
 import yaml
@@ -22,10 +24,12 @@ import app_paths
 import llm
 import memory_engine
 import ollama_manager
+import stt
 from actions import apps, system
 
 app = Flask(__name__)
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
+app.config["MAX_CONTENT_LENGTH"] = 15 * 1024 * 1024
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
@@ -88,7 +92,9 @@ def ping():
         "name": "ARIA",
         "version": "2.0",
         "pc_name": socket.gethostname(),
+        "local_ip": get_local_ip(),
         "ollama_running": ollama_manager.is_running(),
+        "whisper_ready": stt.is_ready(),
     })
 
 
@@ -206,6 +212,39 @@ def warmup():
 
     threading.Thread(target=_warm, daemon=True).start()
     return jsonify({"status": "warming up"})
+
+
+@app.route("/transcribe", methods=["POST"])
+def transcribe():
+    """Transcrit un enregistrement vocal du mobile via Whisper sur le PC."""
+    if not check_auth(request):
+        return jsonify({"error": "Non autorisé"}), 401
+
+    upload = request.files.get("audio")
+    if not upload or not upload.filename:
+        return jsonify({"error": "Fichier audio manquant"}), 400
+
+    suffix = Path(upload.filename).suffix or ".m4a"
+    tmp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            upload.save(tmp.name)
+            tmp_path = tmp.name
+
+        logger.info("Transcription mobile — fichier %s (%.1f Ko)", suffix, Path(tmp_path).stat().st_size / 1024)
+        text = stt.transcribe_file(tmp_path)
+        if not text:
+            return jsonify({"error": "Transcription vide — réessaie en parlant plus fort"}), 422
+        return jsonify({"text": text, "transcribed_on": "PC"})
+    except Exception as exc:
+        logger.exception("Erreur /transcribe")
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        if tmp_path:
+            try:
+                Path(tmp_path).unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 @app.route("/ask/stream", methods=["POST"])
