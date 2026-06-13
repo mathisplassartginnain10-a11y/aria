@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { useARIA } from '../hooks/useARIA';
 import { RootStackParamList } from '../App';
+import QrScanner from '../components/QrScanner';
 
 type Props = {
   navigation: StackNavigationProp<RootStackParamList, 'Pin'>;
@@ -28,15 +29,52 @@ export default function PinScreen({ navigation }: Props) {
   const [pcInfo, setPcInfo] = useState<PcInfo | null>(null);
   const [scanning, setScanning] = useState(false);
   const [scanStatus, setScanStatus] = useState('');
+  const [showQr, setShowQr] = useState(false);
+  const autoScanDone = useRef(false);
   const aria = useARIA();
+  const ariaRef = useRef(aria);
+  ariaRef.current = aria;
 
   useEffect(() => {
+    let cancelled = false;
+
     AsyncStorage.getItem('aria_token').then((token) => {
       if (token) navigation.replace('Chat');
     });
-    AsyncStorage.getItem('aria_ip').then((savedIp) => {
-      if (savedIp) setIp(savedIp);
+
+    AsyncStorage.getItem('aria_ip').then(async (savedIp) => {
+      if (savedIp) {
+        setIp(savedIp);
+        return;
+      }
+      if (autoScanDone.current || cancelled) return;
+      autoScanDone.current = true;
+      setScanning(true);
+      setScanStatus('Recherche automatique du PC…');
+      try {
+        const found = await ariaRef.current.scanForPc((msg) => {
+          if (!cancelled) setScanStatus(msg);
+        });
+        if (cancelled) return;
+        if (found) {
+          setIp(found.ip);
+          setPcInfo(found);
+          setStep('pin');
+          Vibration.vibrate(50);
+        }
+      } catch {
+        /* scan silencieux */
+      } finally {
+        if (!cancelled) {
+          setScanning(false);
+          setScanStatus('');
+        }
+      }
     });
+
+    return () => {
+      cancelled = true;
+    };
   }, [navigation]);
 
   const handleIpNext = async () => {
@@ -83,7 +121,7 @@ export default function PinScreen({ navigation }: Props) {
         setStep('pin');
         Vibration.vibrate(50);
       } else {
-        setError('Aucun PC ARIA trouvé. Lance aria_mobile_server.py sur ton PC.');
+        setError('Aucun PC ARIA trouvé. Lance ARIA sur ton PC (même WiFi).');
         Vibration.vibrate(300);
       }
     } catch {
@@ -93,10 +131,31 @@ export default function PinScreen({ navigation }: Props) {
     setScanStatus('');
   };
 
+  const handleQrScan = async (data: string) => {
+    setShowQr(false);
+    setLoading(true);
+    setError('');
+    try {
+      const info = await aria.connectFromQr(data);
+      setIp(info.ip);
+      setPcInfo(info);
+      setStep('pin');
+      Vibration.vibrate(50);
+    } catch {
+      setError('QR invalide ou PC introuvable.');
+      Vibration.vibrate(300);
+    }
+    setLoading(false);
+  };
+
   const busy = loading || scanning;
 
   return (
     <View style={styles.container}>
+      {showQr ? (
+        <QrScanner onScan={handleQrScan} onClose={() => setShowQr(false)} />
+      ) : null}
+
       <Text style={styles.logo}>A R I A</Text>
       <Text style={styles.subtitle}>Assistant Personnel</Text>
 
@@ -110,9 +169,9 @@ export default function PinScreen({ navigation }: Props) {
             placeholder="192.168.1.XX"
             placeholderTextColor="#555"
             keyboardType="numeric"
-            autoFocus
+            autoFocus={!scanning}
           />
-          <Text style={styles.hint}>Lance aria_mobile_server.py sur ton PC (même WiFi)</Text>
+          <Text style={styles.hint}>ARIA démarre le serveur mobile automatiquement (même WiFi)</Text>
           {scanStatus ? <Text style={styles.scanStatus}>{scanStatus}</Text> : null}
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <TouchableOpacity style={styles.btnScan} onPress={handleScan} disabled={busy}>
@@ -121,6 +180,9 @@ export default function PinScreen({ navigation }: Props) {
             ) : (
               <Text style={styles.btnScanText}>🔍 Scanner le réseau</Text>
             )}
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.btnQr} onPress={() => setShowQr(true)} disabled={busy}>
+            <Text style={styles.btnQrText}>📷 Scanner le QR du PC</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.btn} onPress={handleIpNext} disabled={busy || !ip}>
             {loading ? (
@@ -222,6 +284,17 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   btnScanText: { color: '#6C8EFF', fontWeight: '600', fontSize: 14 },
+  btnQr: {
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    padding: 14,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  btnQrText: { color: '#8B8B9E', fontWeight: '600', fontSize: 14 },
   btn: {
     width: '100%',
     backgroundColor: '#6C8EFF',

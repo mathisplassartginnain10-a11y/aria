@@ -27,7 +27,8 @@ Assistant vocal personnel 100% local pour Windows 11.
 
 ## Serveur mobile
 
-Pour contrôler ARIA depuis ton téléphone (même WiFi) :
+Le serveur démarre **automatiquement** avec ARIA (`mobile_auto_start: true` dans `config.yaml`).
+Tu peux aussi le lancer manuellement :
 
 ```bash
 start_mobile.bat
@@ -37,13 +38,15 @@ start_mobile.bat
 
 PIN et port configurables dans `config.yaml` :
 ```yaml
+mobile_auto_start: true
 mobile_port: 5000
 mobile_pin: "0000"
 ```
 
-Connecte-toi à l'URL affichée avec le code PIN par défaut `0000`.
-
-L'app mobile peut **scanner le réseau local** pour trouver automatiquement le PC (bouton sur l'écran de connexion).
+**Connexion depuis le téléphone** (même WiFi) :
+- Scan réseau automatique au premier lancement de l'app
+- Scanner le **QR code** affiché dans Paramètres → App mobile sur le PC
+- Saisir l'IP manuellement si besoin, puis le PIN
 
 Endpoints optimisés mobile :
 - `POST /ask/fast` — réponses courtes (cache + modèle rapide)
@@ -76,4 +79,4 @@ npx expo run:android
 ```
 
 Prérequis : Node.js 18+, Android Studio pour build local.
-Lance `aria_mobile_server.py` sur le PC avant de connecter l'app.
+Lance ARIA sur le PC (serveur mobile inclus) avant de connecter l'app.

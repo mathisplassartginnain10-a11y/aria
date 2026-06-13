@@ -94,18 +94,45 @@ def after_request(response):
     return cors_headers(response)
 
 
+def get_connect_info() -> dict:
+    ip = get_local_ip()
+    return {
+        "ip": ip,
+        "local_ip": ip,
+        "port": MOBILE_PORT,
+        "pc_name": socket.gethostname(),
+        "qr_payload": f"aria://{ip}:{MOBILE_PORT}",
+    }
+
+
+_server_thread: threading.Thread | None = None
+
+
+def is_server_running() -> bool:
+    return _server_thread is not None and _server_thread.is_alive()
+
+
 @app.route("/ping", methods=["GET"])
 def ping():
+    info = get_connect_info()
     return jsonify({
         "status": "ok",
         "name": "ARIA",
         "version": "2.0",
-        "pc_name": socket.gethostname(),
-        "local_ip": get_local_ip(),
-        "port": MOBILE_PORT,
+        "pc_name": info["pc_name"],
+        "local_ip": info["ip"],
+        "port": info["port"],
+        "qr_payload": info["qr_payload"],
         "ollama_running": ollama_manager.is_running(),
         "whisper_ready": stt.is_ready(),
     })
+
+
+@app.route("/connect-info", methods=["GET"])
+def connect_info():
+    """Infos de connexion pour l'app mobile (sans auth)."""
+    info = get_connect_info()
+    return jsonify({"status": "ok", **info})
 
 
 @app.route("/auth", methods=["POST"])
@@ -420,32 +447,24 @@ def deactivate_preset():
     return jsonify({"result": result, "executed_on": "PC"})
 
 
-if __name__ == "__main__":
-    cfg = _load_config()
-    _apply_mobile_config(cfg)
-    ollama_manager.configure(cfg.get("ollama_path", ""))
-
-    if not ollama_manager.is_running():
-        logger.info("Démarrage Ollama...")
-        ollama_manager.start()
-        ollama_manager.wait_until_ready(timeout=30)
-
-    ip = get_local_ip()
-    port = MOBILE_PORT
-
+def _print_startup_banner() -> None:
+    info = get_connect_info()
     print(f"\n{'=' * 50}")
     print("  ARIA Mobile Server démarré")
-    print(f"  IP locale  : {ip}")
-    print(f"  Port       : {port}")
+    print(f"  IP locale  : {info['ip']}")
+    print(f"  Port       : {info['port']}")
     print(f"  PIN        : {PIN_CODE}")
-    print(f"  URL mobile : http://{ip}:{port}")
+    print(f"  QR         : {info['qr_payload']}")
+    print(f"  URL mobile : http://{info['ip']}:{info['port']}")
     print(f"{'=' * 50}")
     print("\n  Depuis ton téléphone (même WiFi) :")
-    print(f"  Connecte-toi à http://{ip}:{port}")
+    print(f"  Scanne le QR ou connecte-toi à http://{info['ip']}:{info['port']}")
     print(f"  Code PIN : {PIN_CODE}")
     print("\n  TOUTES les actions s'exécutent sur CE PC")
     print(f"{'=' * 50}\n")
 
+
+def _serve_forever(port: int) -> None:
     try:
         from gevent.pywsgi import WSGIServer
 
@@ -453,3 +472,47 @@ if __name__ == "__main__":
         server.serve_forever()
     except ImportError:
         app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+
+
+def start_mobile_server(
+    config: dict | None = None,
+    *,
+    block: bool = False,
+    ensure_ollama: bool = False,
+    banner: bool = True,
+) -> bool:
+    """Démarre le serveur mobile (thread daemon ou bloquant)."""
+    global _server_thread
+
+    if is_server_running():
+        return True
+
+    cfg = config or _load_config()
+    _apply_mobile_config(cfg)
+    ollama_manager.configure(cfg.get("ollama_path", ""))
+
+    if ensure_ollama and not ollama_manager.is_running():
+        logger.info("Démarrage Ollama pour le serveur mobile...")
+        ollama_manager.start()
+        ollama_manager.wait_until_ready(timeout=30)
+
+    port = MOBILE_PORT
+
+    def _run() -> None:
+        if banner:
+            _print_startup_banner()
+        _serve_forever(port)
+
+    if block:
+        _run()
+        return True
+
+    _server_thread = threading.Thread(
+        target=_run, daemon=True, name="aria-mobile-server"
+    )
+    _server_thread.start()
+    return True
+
+
+if __name__ == "__main__":
+    start_mobile_server(block=True, ensure_ollama=True, banner=True)

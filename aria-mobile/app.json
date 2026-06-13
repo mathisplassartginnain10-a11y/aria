@@ -22,11 +22,13 @@
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.INTERNET",
-        "android.permission.VIBRATE"
+        "android.permission.VIBRATE",
+        "android.permission.CAMERA"
       ]
     },
     "plugins": [
-      ["expo-av", {"microphonePermission": "ARIA needs mic for voice input"}]
+      ["expo-av", {"microphonePermission": "ARIA needs mic for voice input"}],
+      ["expo-camera", {"cameraPermission": "ARIA scanne le QR affiché sur ton PC pour se connecter."}]
     ]
   }
 }

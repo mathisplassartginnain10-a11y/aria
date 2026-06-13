@@ -9,7 +9,7 @@ import requests
 import yaml
 from playwright.sync_api import Browser, Page, Playwright, sync_playwright
 import app_paths
-from actions.site_aliases_extra import _ALIASES_EXTRA
+from actions.alias_store import lookup as lookup_extra_alias
 
 logger = logging.getLogger(__name__)
 
@@ -393,10 +393,13 @@ def resolve_site_url(site_name: str) -> str:
         "impero-game": "impero-game.fr",
         "impero game": "impero-game.fr",
     }
-    aliases.update(_ALIASES_EXTRA)
 
     if name in aliases:
         return f"https://{aliases[name]}"
+
+    extra = lookup_extra_alias(name)
+    if extra:
+        return f"https://{extra}"
 
     for alias, domain in aliases.items():
         if alias in name or name in alias:

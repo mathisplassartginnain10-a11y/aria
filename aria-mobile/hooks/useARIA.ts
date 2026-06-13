@@ -9,7 +9,34 @@ export type PingResult = {
   local_ip?: string;
   whisper_ready?: boolean;
   ollama_running?: boolean;
+  qr_payload?: string;
 };
+
+export type ConnectPayload = { ip: string; port: string };
+
+export function parseConnectPayload(data: string): ConnectPayload | null {
+  const trimmed = data.trim();
+  if (trimmed.startsWith('aria://')) {
+    const rest = trimmed.slice(7);
+    const colon = rest.lastIndexOf(':');
+    if (colon > 0) {
+      return { ip: rest.slice(0, colon), port: rest.slice(colon + 1) };
+    }
+  }
+  if (/^\d+\.\d+\.\d+\.\d+:\d+$/.test(trimmed)) {
+    const [ip, port] = trimmed.split(':');
+    return { ip, port };
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed?.ip) {
+      return { ip: String(parsed.ip), port: String(parsed.port || DEFAULT_PORT) };
+    }
+  } catch {
+    /* not JSON */
+  }
+  return null;
+}
 
 function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 8000) {
   const controller = new AbortController();
@@ -203,9 +230,17 @@ export function useARIA() {
     return data.result as string;
   };
 
+  const connectFromQr = async (payload: string) => {
+    const parsed = parseConnectPayload(payload);
+    if (!parsed) throw new Error('QR invalide');
+    await AsyncStorage.setItem('aria_port', parsed.port);
+    const info = await ping(parsed.ip);
+    return { ...info, ip: parsed.ip, port: parsed.port };
+  };
+
   return {
     ping, pingHost, scanForPc, auth, askFast, askStream, warmup, clearHistory,
     transcribeAudio, getPresets, activatePreset, getTtsEnabled, setTtsEnabled,
-    getBaseUrl, getToken,
+    getBaseUrl, getToken, connectFromQr, parseConnectPayload,
   };
 }

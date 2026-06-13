@@ -19,6 +19,13 @@ data/ui_state.json
 data/memory.json
 data/history.json
 data/webview_cache/
+data/site_aliases.db
+data/site_aliases.db-wal
+data/site_aliases.db-shm
+data/site_aliases.stamp
+data/site_aliases.tmp
+data/site_aliases.old
+data/site_aliases_prefixes.txt
 
 # Clés API et config sensible
 config.yaml

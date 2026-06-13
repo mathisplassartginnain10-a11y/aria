@@ -1344,6 +1344,36 @@ const aria = {
     if (open) {
       this.loadMemoryStats();
       this.loadTrainingStats();
+      this.loadMobileConnectInfo();
+    }
+  },
+
+  loadMobileConnectInfo() {
+    try {
+      let raw = this.api('get_mobile_connect_info');
+      const info = JSON.parse(raw || '{}');
+      const status = document.getElementById('mobile-connect-status');
+      const qr = document.getElementById('mobile-connect-qr');
+      const hint = document.getElementById('mobile-connect-hint');
+      if (!status) return;
+      if (!info.ip) {
+        status.textContent = 'Serveur mobile inactif';
+        if (qr) qr.style.display = 'none';
+        if (hint) hint.textContent = 'Active mobile_auto_start dans config.yaml ou lance start_mobile.bat';
+        return;
+      }
+      status.textContent = info.running
+        ? `🖥 ${info.pc_name || 'PC'} — ${info.ip}:${info.port}`
+        : `Serveur arrêté (${info.ip}:${info.port})`;
+      if (qr && info.qr_payload) {
+        qr.src = `https://quickchart.io/qr?text=${encodeURIComponent(info.qr_payload)}&size=180&margin=1&dark=00D4FF&light=111116`;
+        qr.style.display = 'block';
+      }
+      if (hint) {
+        hint.textContent = 'Scanne avec l’app ARIA (même WiFi), puis entre le PIN configuré sur le PC.';
+      }
+    } catch (e) {
+      /* ignore */
     }
   },
 
@@ -1830,6 +1860,13 @@ const aria = {
           onclick="if(confirm('Effacer toute la mémoire ?')) { const p = aria.api('reset_memory'); if (p?.then) p.then(() => { aria.loadMemoryStats(); aria.showToast('Mémoire effacée','success'); }); else { aria.loadMemoryStats(); aria.showToast('Mémoire effacée','success'); } }">
           Réinitialiser la mémoire
         </button>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-title">App mobile</div>
+        <div id="mobile-connect-status" style="font-size:13px;color:var(--text);margin-bottom:8px">Chargement…</div>
+        <img id="mobile-connect-qr" alt="QR connexion mobile" style="display:none;width:160px;height:160px;border-radius:8px;margin:0 auto 10px;border:1px solid var(--border)">
+        <div id="mobile-connect-hint" style="font-size:11px;color:var(--text3);line-height:1.4"></div>
       </div>
 
       <div class="settings-section">

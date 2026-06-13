@@ -5,7 +5,7 @@ App React Native / Expo pour contrôler ARIA sur ton PC via WiFi.
 ## Prérequis
 
 - Node.js 18+
-- `aria_mobile_server.py` lancé sur le PC (`start_mobile.bat`)
+- ARIA lancé sur le PC (serveur mobile auto) ou `start_mobile.bat`
 - Téléphone et PC sur le **même réseau WiFi**
 
 ## Développement
@@ -41,7 +41,8 @@ Nécessite Android Studio + SDK installés.
 
 ## Fonctionnalités
 
-- Scan réseau automatique pour trouver le PC
+- **Scan réseau automatique** au premier lancement (sans IP enregistrée)
+- **Scanner QR** du PC (Paramètres → App mobile dans ARIA)
 - Chat texte + vocal (Whisper sur le PC)
 - Presets synchronisés depuis le PC (Vol, Gaming, Étude…)
 - Actions rapides (météo, lancer apps, volume)
@@ -52,15 +53,19 @@ Nécessite Android Studio + SDK installés.
 Dans `config.yaml` :
 
 ```yaml
+mobile_auto_start: true
 mobile_port: 5000
 mobile_pin: "0000"
 ```
+
+Format QR : `aria://192.168.x.x:5000`
 
 ## API utilisée
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /ping` | Détection PC |
+| `GET /ping` | Détection PC (+ `qr_payload`) |
+| `GET /connect-info` | Infos connexion sans auth |
 | `POST /auth` | Connexion PIN |
 | `POST /transcribe` | Audio → texte (Whisper PC) |
 | `POST /ask/stream` | Chat streaming |

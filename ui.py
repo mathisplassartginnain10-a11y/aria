@@ -104,6 +104,17 @@ class AriaAPI:
             logger.exception("Erreur chargement presets")
         return "{}"
 
+    def get_mobile_connect_info(self) -> str:
+        try:
+            import aria_mobile_server as mobile_server
+
+            info = mobile_server.get_connect_info()
+            info["running"] = mobile_server.is_server_running()
+            return json.dumps(info, ensure_ascii=False)
+        except Exception:
+            logger.exception("Erreur info mobile")
+            return "{}"
+
     def get_installed_apps(self) -> str:
         import json
         import os

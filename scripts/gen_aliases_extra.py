@@ -1260,20 +1260,24 @@ EXTRA.update({
 
 
 def _merge_extra() -> dict[str, str]:
-    from scripts.aliases_batch3 import get_batch3
-    from scripts.aliases_batch4 import get_batch4
-    from scripts.aliases_batch5 import get_batch5
-    from scripts.aliases_batch6 import get_batch6
+    import importlib
+    import re
+    from pathlib import Path
 
     merged = dict(EXTRA)
-    for key, domain in get_batch3().items():
-        merged.setdefault(key, domain)
-    for key, domain in get_batch4().items():
-        merged.setdefault(key, domain)
-    for key, domain in get_batch5().items():
-        merged.setdefault(key, domain)
-    for key, domain in get_batch6().items():
-        merged.setdefault(key, domain)
+    scripts_dir = Path(__file__).resolve().parent
+    batch_nums = sorted(
+        int(m.group(1))
+        for p in scripts_dir.glob("aliases_batch*.py")
+        if (m := re.fullmatch(r"aliases_batch(\d+)", p.stem))
+    )
+    for n in batch_nums:
+        mod = importlib.import_module(f"scripts.aliases_batch{n}")
+        if getattr(mod, "SQL_DOUBLED", False):
+            continue
+        fn = getattr(mod, f"get_batch{n}")
+        for key, domain in fn().items():
+            merged.setdefault(key, domain)
     return merged
 
 
@@ -1289,13 +1293,24 @@ if __name__ == "__main__":
     from pathlib import Path
 
     merged = _merge_extra()
+    count = len(merged)
     out_path = Path(__file__).resolve().parent.parent / "actions" / "site_aliases_extra.py"
-    content = (
-        "# Auto-generated site aliases (extra)\n"
+    sys_path = Path(__file__).resolve().parent.parent
+    import sys
+
+    if str(sys_path) not in sys.path:
+        sys.path.insert(0, str(sys_path))
+    from actions.alias_store import count as db_count, sync_missing_prefixes
+
+    sync_missing_prefixes()
+    total = db_count()
+    out_path.write_text(
+        "# Auto-generated — alias stockés dans data/site_aliases.db\n"
         "from __future__ import annotations\n\n"
-        + format_dict(merged)
-        + "\n"
+        f"ALIAS_COUNT = {total}\n"
+        "_ALIASES_EXTRA: dict[str, str] = {}  # voir actions/alias_store.py\n",
+        encoding="utf-8",
     )
-    out_path.write_text(content, encoding="utf-8")
-    print(f"entries: {len(merged)}")
-    print(f"wrote {out_path}")
+    print(f"entries: {total}")
+    print(f"wrote {out_path.name} (stub)")
+    print(f"index: data/site_aliases.db")

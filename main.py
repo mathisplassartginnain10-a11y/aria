@@ -304,6 +304,20 @@ try:
         ollama_thread.start()
         ollama_thread.join(timeout=35)
 
+        if _config.get("mobile_auto_start", True):
+            import aria_mobile_server as mobile_server
+
+            mobile_server.start_mobile_server(
+                config=_config, block=False, ensure_ollama=False, banner=False
+            )
+            info = mobile_server.get_connect_info()
+            _logger.info(
+                "Serveur mobile actif — http://%s:%s (PIN config)",
+                info["ip"],
+                info["port"],
+            )
+            ui.show_toast(f"📱 Mobile : {info['ip']}:{info['port']}", toast_type="info")
+
         threading.Thread(target=_keyboard_thread, args=(debug_keys,), daemon=True).start()
 
         def _auto_start_mic() -> None:
