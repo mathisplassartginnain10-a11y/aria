@@ -55,6 +55,9 @@ BLOCK_SIZE: int = int(_config.get("chunk_size", 2048))
 SILENCE_THRESHOLD: float = float(_config.get("silence_threshold", 500))
 SILENCE_DURATION: float = float(_config.get("silence_duration", 2.0))
 WHISPER_MODEL: str = _config["whisper_model"]
+# beam=1 (greedy) = transcription nettement plus rapide (idéal pour parler en direct).
+# Monter à 5 si tu veux un peu plus de précision au prix de la latence.
+WHISPER_BEAM: int = int(_config.get("whisper_beam", 1))
 ACTUAL_RATE: int = SAMPLE_RATE
 ACTUAL_BLOCKSIZE: int = BLOCK_SIZE
 
@@ -84,6 +87,10 @@ _is_recording = False
 _current_rms = 0.0
 _rms_lock = threading.Lock()
 _transcript_queue: queue.Queue[str] = queue.Queue()
+# Vrai pendant qu'ARIA réfléchit/parle : on suspend la capture (anti-écho).
+_responding = threading.Event()
+# Mode de conversation : "auto" => ARIA répond toute seule après chaque phrase.
+VOICE_AUTO_SEND: bool = str(_config.get("voice_mode", "auto")).lower() in ("auto", "conversation", "live")
 
 _whisper_model: Any | None = None
 _whisper_lock = threading.Lock()
@@ -139,7 +146,28 @@ def _hostapi_name(device_info: dict) -> str:
 
 
 def _find_input_device() -> int | None:
-    """Sélectionne un vrai micro physique (évite Voicemeeter/Steam/virtual)."""
+    """Sélectionne un vrai micro physique (évite Voicemeeter/Steam/virtual).
+
+    Peut être forcé via config `mic_device` (index numérique ou bout de nom)."""
+    forced = _config.get("mic_device")
+    if forced not in (None, "", "auto", "default"):
+        try:
+            devices = sd.query_devices()
+            if isinstance(forced, int) or str(forced).strip().isdigit():
+                idx = int(forced)
+                if 0 <= idx < len(devices) and devices[idx].get("max_input_channels", 0) > 0:
+                    logger.info("Micro forcé (config): [%d] %s", idx, devices[idx]["name"])
+                    return idx
+            else:
+                needle = str(forced).lower()
+                for i, device in enumerate(devices):
+                    if device.get("max_input_channels", 0) > 0 and needle in device.get("name", "").lower():
+                        logger.info("Micro forcé (config '%s'): [%d] %s", forced, i, device["name"])
+                        return i
+            logger.warning("mic_device='%s' introuvable — retour à la sélection auto", forced)
+        except Exception as exc:
+            logger.warning("mic_device invalide (%s) — sélection auto", exc)
+
     candidates: list[tuple[int, int, str]] = []
 
     for i, device in enumerate(sd.query_devices()):
@@ -264,7 +292,7 @@ def _transcribe_audio(audio_np: np.ndarray, actual_rate: int) -> str:
             segments, info = model.transcribe(
                 audio_16k,
                 language="fr",
-                beam_size=5,
+                beam_size=WHISPER_BEAM,
                 vad_filter=True,
                 vad_parameters={"min_silence_duration_ms": 500},
             )
@@ -283,7 +311,7 @@ def _transcribe_audio(audio_np: np.ndarray, actual_rate: int) -> str:
             if lang_prob < 0.4:
                 segments2, _ = model.transcribe(
                     audio_16k,
-                    beam_size=5,
+                    beam_size=WHISPER_BEAM,
                     vad_filter=True,
                     vad_parameters={"min_silence_duration_ms": 500},
                 )
@@ -319,7 +347,7 @@ def transcribe_file(path: str | Path, language: str = "fr") -> str:
             segments, _ = model.transcribe(
                 file_path,
                 language=language,
-                beam_size=5,
+                beam_size=WHISPER_BEAM,
                 vad_filter=True,
                 vad_parameters={"min_silence_duration_ms": 500},
             )
@@ -342,6 +370,28 @@ def transcribe_file(path: str | Path, language: str = "fr") -> str:
 def _enqueue_transcript(text: str) -> None:
     _transcript_queue.put(text)
     logger.info("Transcription mise en queue: '%s'", text)
+
+
+def _dispatch_to_assistant(text: str) -> None:
+    """Conversation auto : ARIA répond directement à la transcription.
+
+    La capture est suspendue (_responding) le temps de la réponse + TTS pour que
+    le micro ne réentende pas la voix d'ARIA (anti-écho / anti-boucle)."""
+    _responding.set()
+
+    def _run() -> None:
+        try:
+            import llm
+            llm.ask(text, show_user=True)
+        except Exception as exc:
+            logger.error("Conversation auto échouée: %s", exc)
+        finally:
+            time.sleep(float(_config.get("voice_resume_delay", 0.6)))
+            _responding.clear()
+            if not _stop_event.is_set():
+                ui.set_status("listening")
+
+    threading.Thread(target=_run, daemon=True, name="aria-respond").start()
 
 
 def _record_loop() -> None:
@@ -395,14 +445,25 @@ def _record_loop() -> None:
                 _current_rms = rms
             ui.update_waveform(rms)
 
-        ambient = float(np.mean(cal_rms)) if cal_rms else 0.0
-        threshold = max(float(SILENCE_THRESHOLD), ambient * 3.5, 200.0)
-        logger.info("Seuil adaptatif: %.0f (ambiant: %.0f)", threshold, ambient)
+        # Estimation ROBUSTE du bruit de fond : 75e percentile (englobe les pics de
+        # fond) plutôt que la moyenne. Sur ce micro (Intel Smart Sound) le plancher
+        # de bruit est haut (~1500-2000), donc le seuil doit se poser JUSTE au-dessus.
+        ambient = float(np.percentile(cal_rms, 75)) if cal_rms else 0.0
+        floor = float(_config.get("silence_floor", 200))
+        ceil = float(_config.get("silence_ceiling", 4000))
+        margin = float(_config.get("silence_margin", 1.6))
+        threshold = min(max(ambient * margin, floor), ceil)
+        logger.info(
+            "Seuil vocal: %.0f (bruit p75: %.0f, marge x%.2f, plancher %.0f, plafond %.0f)",
+            threshold, ambient, margin, floor, ceil,
+        )
 
         if ambient < 1.0:
-            logger.error("Micro silencieux — vérifie Windows > Son > Micro")
-            ui.show_toast("Micro silencieux — vérifie les paramètres Windows", toast_type="error")
-            return
+            # On ne coupe PAS le micro : l'utilisateur était peut-être simplement
+            # silencieux pendant la calibration. Le seuil plancher (200) suffit à
+            # déclencher sur la parole réelle.
+            logger.warning("Niveau ambiant très faible (%.2f) — on continue avec le seuil plancher", ambient)
+            ui.show_toast("Micro faible — vérifie le volume d'entrée Windows si ARIA ne t'entend pas", toast_type="warning")
 
         buffer: list[np.ndarray] = []
         silence_frames = 0
@@ -425,6 +486,18 @@ def _record_loop() -> None:
             except Exception as exc:
                 logger.warning("Erreur lecture micro: %s", exc)
                 time.sleep(0.1)
+                continue
+
+            # Anti-écho : tant qu'ARIA réfléchit/parle, on vide le flux sans l'analyser.
+            if _responding.is_set():
+                buffer = []
+                speaking = False
+                silence_frames = 0
+                with _rms_lock:
+                    _current_rms = 0.0
+                if frame_count % 3 == 0:
+                    ui.update_waveform(0.0)
+                frame_count += 1
                 continue
 
             flat = data.flatten()
@@ -450,15 +523,21 @@ def _record_loop() -> None:
                     if len(buffer) >= min_speech:
                         audio_np = np.concatenate(buffer).astype(np.float32)
                         ui.set_status("transcribing")
+                        text = ""
                         try:
                             text = _transcribe_audio(audio_np, actual_rate)
-                            if text:
-                                _enqueue_transcript(text)
-                            else:
-                                ui.show_toast("Je n'ai rien entendu — réessaie", toast_type="warning")
                         except Exception as exc:
                             logger.error("Erreur transcription: %s", exc)
-                        finally:
+                        if text:
+                            if VOICE_AUTO_SEND:
+                                # Conversation auto : ARIA répond directement (gère
+                                # le statut et l'anti-écho via _responding).
+                                _dispatch_to_assistant(text)
+                            else:
+                                _enqueue_transcript(text)
+                                ui.set_status("listening")
+                        else:
+                            ui.show_toast("Je n'ai rien entendu — réessaie", toast_type="warning")
                             ui.set_status("listening")
 
                     buffer = []

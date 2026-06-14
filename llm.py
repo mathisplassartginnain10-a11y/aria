@@ -59,6 +59,11 @@ MODEL_HEAVY: str = _config.get("model_heavy", MODELS["heavy"])
 MODEL_CODE: str = _config.get("model_code", MODELS["code"])
 VISION_MODEL: str = _config.get("vision_model", "minicpm-v")
 INTENT_MODEL: str = MODEL_FAST
+# Modèle de CONVERSATION : rapide par défaut (latence faible pour parler en direct).
+# Mets "qwen3:14b" dans config (chat_model) si tu préfères la qualité à la vitesse.
+CHAT_MODEL: str = _config.get("chat_model", MODEL_FAST)
+# Garde le modèle chargé en VRAM entre deux requêtes -> pas de cold start.
+OLLAMA_KEEP_ALIVE: str = str(_config.get("ollama_keep_alive", "30m"))
 MAX_HISTORY: int = _config["max_history"]
 BASE_SYSTEM_PROMPT: str = """Tu es ARIA, l'assistant personnel de Mathi, lycéen en Première à Couëron.
 Tu le connais intimement : ses projets (ARIA l'assistant vocal, IMPERO, PPL DR400 à LFRS),
@@ -198,7 +203,7 @@ _BROWSER_LAUNCH_SKIP = re.compile(
     re.I,
 )
 
-BROWSER_NAMES = r"(?:chrome|edge|firefox|opera|navigateur|le navigateur)"
+BROWSER_NAMES = r"(?:microsoft\s+edge|google\s+chrome|opera\s+gx|chrome|edge|firefox|opera|navigateur|le navigateur)"
 SITE_OPEN_PATTERN = re.compile(
     rf"(?:ouvre|lance|va sur|ouvre-moi|mets)\s+(.+?)\s+(?:sur|dans)\s+({BROWSER_NAMES})\b",
     re.IGNORECASE,
@@ -210,6 +215,11 @@ _BROWSER_APP_NAMES = frozenset({
 _SEARCH_BROWSER_NAMES = frozenset({
     "chrome", "edge", "firefox", "opera", "le navigateur", "navigateur",
 })
+# Fichier de code/config — même liste d'extensions que cursor_open_file
+_CODE_FILE_RE = re.compile(
+    r"([\w./\\-]+\.(?:py|ts|tsx|js|jsx|json|ya?ml|md))\b",
+    re.IGNORECASE,
+)
 
 
 def _is_browser_app_name(name: str) -> bool:
@@ -234,12 +244,24 @@ def _fast_intent(text: str) -> tuple[str, dict] | None:
             return "search_web", {"query": query}
         return "browser_search_in_site", {"site": site, "query": query}
 
+    # PRIORITY 2.5: « ferme l'onglet » → onglet navigateur, pas une app nommée "onglet"
+    if re.search(r"\bferme\b.*\b(onglet|tab)\b", text_lower):
+        return "browser_close_tab", {}
+
     # PRIORITY 3: « ouvre [cible] » sans navigateur explicite
     m = re.search(r"(?:ouvre|va sur|navigue vers)\s+(.+)", text_lower)
     if m:
         target = m.group(1).strip()
         if _is_browser_app_name(target):
             return "lancer_app", {"app": target}
+        # Cible Cursor ou fichier de code → ouvrir dans Cursor, pas dans le navigateur
+        if "cursor" in target or _CODE_FILE_RE.search(target):
+            file_m = _CODE_FILE_RE.search(text_lower)
+            if file_m:
+                return "cursor_open_file", {"path": file_m.group(1)}
+            if "projet" in target:
+                return "cursor_open_project", {"name": text}
+            return "cursor_open", {}
         return "browser_open_site", {"site": target}
 
     for pattern, intent in FAST_BROWSER_REGEX:
@@ -332,7 +354,12 @@ def _ollama_request(
         "model": model or MODEL,
         "messages": messages,
         "stream": stream,
-        "options": {"num_predict": num_predict},
+        "keep_alive": OLLAMA_KEEP_ALIVE,
+        "options": {
+            "num_predict": num_predict,
+            "temperature": 0.6,
+            "top_p": 0.9,
+        },
     }
     for attempt in range(retries):
         try:
@@ -419,8 +446,34 @@ def _extract_page_search_query(text: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+def _extract_doc_content(text: str) -> str:
+    """Extrait ce qu'ARIA doit écrire depuis « écris X dans un google doc »."""
+    m = re.search(
+        r"(?:[ée]cris|ecris|note|r[ée]dige|redige|tape|met[s]?|ajoute)\s+(.+?)\s+"
+        r"(?:dans|sur)\s+(?:un\s+|le\s+|mon\s+|ce\s+)?(?:nouveau\s+)?"
+        r"(?:google\s+)?(?:doc|document|drive)",
+        text,
+        re.I,
+    )
+    if m:
+        return m.group(1).strip(" :,'\"")
+    # Repli : on retire juste le verbe d'amorce.
+    cleaned = re.sub(
+        r"^(?:[ée]cris|ecris|note|r[ée]dige|redige|tape|met[s]?|ajoute)\s+",
+        "",
+        text.strip(),
+        flags=re.I,
+    )
+    return cleaned.strip(" :,'\"") or text
+
+
 def _handle_drive_intent(intent: str, params: dict, original_text: str) -> str:
-    """Route les intents Drive vers le MCP Google Drive (fallback navigateur)."""
+    """Route les intents Drive. Écriture/création de doc -> automatisation navigateur
+    (on écrit réellement dedans). Recherche/liste -> MCP avec repli navigateur."""
+    if intent in ("drive_write_doc", "drive_create_doc"):
+        content = _extract_doc_content(original_text)
+        return browser.write_in_google_doc(content)
+
     mcp_prompt = f"""Use the Google Drive MCP tools to: {original_text}
 
 Available operations:
@@ -962,12 +1015,12 @@ def _execute_action(intent: str, params: dict, text: str) -> str | None:
 
         if intent in ("browser_open_site", "browser_open_url", "ouvrir_site"):
             site = params.get("site") or _extract_site_for_browser(params, text)
-            browser = params.get("browser")
+            browser_param = params.get("browser")
             if not site:
                 return "Quel site veux-tu ouvrir ?"
             if site.startswith("http"):
-                return browser.open_url(site, browser=browser)
-            return browser.open_site(site, browser=browser)
+                return browser.open_url(site, browser=browser_param)
+            return browser.open_site(site, browser=browser_param)
 
         if intent == "browser_youtube_search":
             match = re.search(r"(?:cherche|lance|mets|youtube)\s+(.+?)(?:\s+sur youtube)?$", text, re.I)
@@ -1330,7 +1383,7 @@ def _conversation(text: str, stream_to_ui: bool = True) -> tuple[str, bool]:
     _history.append({"role": "user", "content": text})
     _trim_history()
 
-    response = _ollama_request(_history, stream=True)
+    response = _ollama_request(_history, stream=True, model=CHAT_MODEL, num_predict=600)
     if response is None:
         _history.pop()
         msg = "Ollama n'est pas disponible."
@@ -1397,14 +1450,27 @@ def ask(text: str, *, show_user: bool = True) -> None:
 
     custom = memory.match_custom_command(text)
     if custom:
-        logger.info("Custom command matched: %s", custom)
+        logger.info("Custom command matched: %s -> %s", text, custom)
         if show_user:
             ui.show_user_text(text)
         ui.set_status("thinking")
-        response, _ = _conversation(custom, stream_to_ui=show_user)
-        if response:
-            return
-        _present_action_result(custom)
+        sounds.play("thinking")
+        # L'action personnalisée (ex: « dodo » -> « éteins le pc ») doit être routée
+        # comme un vrai prompt (intent + exécution), pas envoyée telle quelle au chat.
+        c_intent, c_params, _ = _resolve_intent_for_routing(custom)
+        logger.info("Custom command routing intent: %s", c_intent)
+        try:
+            response = _route_with_intelligence(c_intent, c_params, custom, stream_to_ui=True)
+            if response:
+                _history.append({"role": "user", "content": text.strip()})
+                _history.append({"role": "assistant", "content": response})
+                _trim_history()
+                _save_history()
+        except Exception as exc:
+            logger.error("Custom command error: %s", exc)
+            sounds.play("error")
+            _speak_response(f"Désolé, une erreur s'est produite: {exc}")
+        ui.set_status("idle")
         return
 
     if show_user:
@@ -1421,7 +1487,10 @@ def ask(text: str, *, show_user: bool = True) -> None:
     memory_engine.add_to_conversation("user", text)
 
     try:
-        response = _route_with_intelligence(intent, params, text, stream_to_ui=show_user)
+        # stream_to_ui doit toujours afficher la réponse de l'assistant dans le chat.
+        # show_user ne contrôle QUE l'affichage de la bulle utilisateur (déjà ajoutée
+        # côté JS pour la saisie texte), pas le streaming de la réponse.
+        response = _route_with_intelligence(intent, params, text, stream_to_ui=True)
         if response:
             _history.append({"role": "user", "content": text.strip()})
             _history.append({"role": "assistant", "content": response})

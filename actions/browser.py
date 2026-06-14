@@ -59,6 +59,90 @@ def get_page() -> Page:
     return _page
 
 
+# --- Contexte persistant authentifié (session Google conservée) -------------
+_persist_pw: Playwright | None = None
+_persist_ctx = None
+_persist_page: Page | None = None
+
+
+def get_authenticated_page() -> Page:
+    """Page Playwright avec profil PERSISTANT dédié à ARIA.
+
+    La session Google (et autres logins) est conservée dans data/browser_profile,
+    donc l'utilisateur ne se connecte qu'une seule fois. Profil séparé du Chrome
+    principal -> pas de conflit de verrou de profil."""
+    global _persist_pw, _persist_ctx, _persist_page
+    if _persist_ctx is None:
+        _persist_pw = sync_playwright().start()
+        profile_dir = str(app_paths.data_dir() / "browser_profile")
+        os.makedirs(profile_dir, exist_ok=True)
+        kwargs = {
+            "headless": False,
+            "args": ["--no-first-run", "--no-default-browser-check", "--start-maximized"],
+            "no_viewport": True,
+        }
+        try:
+            _persist_ctx = _persist_pw.chromium.launch_persistent_context(
+                profile_dir, channel="chrome", **kwargs
+            )
+        except Exception:
+            logger.warning("Chrome indisponible pour le profil persistant, fallback chromium")
+            _persist_ctx = _persist_pw.chromium.launch_persistent_context(profile_dir, **kwargs)
+        _persist_page = _persist_ctx.pages[0] if _persist_ctx.pages else _persist_ctx.new_page()
+    elif _persist_page is None or _persist_page.is_closed():
+        _persist_page = _persist_ctx.new_page()
+    return _persist_page
+
+
+def _needs_google_login(page: Page) -> bool:
+    url = page.url or ""
+    return "accounts.google.com" in url or "ServiceLogin" in url or "signin" in url
+
+
+def write_in_google_doc(content: str, title: str | None = None) -> str:
+    """Crée un nouveau Google Doc et y écrit `content`.
+
+    Nécessite d'être connecté à Google (1re fois : la fenêtre s'ouvre sur la page
+    de connexion, l'utilisateur se connecte, puis la session est mémorisée)."""
+    if not content or not content.strip():
+        return "Que veux-tu que j'écrive dans le doc ?"
+    try:
+        page = get_authenticated_page()
+        page.goto("https://docs.google.com/document/create",
+                  wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(1500)
+
+        if _needs_google_login(page):
+            return ("Connecte-toi à ton compte Google dans la fenêtre qui vient de s'ouvrir, "
+                    "puis redemande-moi d'écrire dans le doc (je m'en souviendrai ensuite).")
+
+        try:
+            page.wait_for_selector(".kix-appview-editor", timeout=30000)
+        except Exception:
+            logger.warning("Éditeur Google Docs non détecté, tentative de saisie quand même")
+        page.wait_for_timeout(800)
+
+        # Focus le corps du document
+        try:
+            page.locator(".kix-appview-editor").click(timeout=5000)
+        except Exception:
+            vp = page.viewport_size or {"width": 1280, "height": 800}
+            page.mouse.click(vp["width"] // 2, vp["height"] // 3)
+        page.wait_for_timeout(300)
+
+        if title:
+            page.keyboard.type(title, delay=8)
+            page.keyboard.press("Enter")
+            page.keyboard.press("Enter")
+        page.keyboard.type(content, delay=6)
+        logger.info("Texte écrit dans Google Docs (%d caractères)", len(content))
+        short = content[:60] + ("…" if len(content) > 60 else "")
+        return f"C'est écrit dans Google Docs : « {short} »"
+    except Exception as exc:
+        logger.error("write_in_google_doc error: %s", exc)
+        return f"Erreur Google Docs : {exc}"
+
+
 def resolve_site_url(site_name: str) -> str:
     """
     Résout n'importe quel nom de site en URL.

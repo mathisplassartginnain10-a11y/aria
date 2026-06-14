@@ -37,17 +37,28 @@ def _default_data() -> dict[str, Any]:
 def init() -> None:
     global _data
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    need_save = False
     with _lock:
+        data = _default_data()
         if MEMORY_PATH.exists():
             try:
                 with MEMORY_PATH.open("r", encoding="utf-8") as f:
-                    _data = json.load(f)
+                    loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    data.update(loaded)
             except (json.JSONDecodeError, OSError):
                 logger.exception("Failed to load memory, using defaults")
-                _data = _default_data()
+                need_save = True
         else:
-            _data = _default_data()
-            save()
+            need_save = True
+        # Rétro-compat : garantit que toutes les clés attendues existent même
+        # si memory.json provient d'un ancien format (évite les KeyError ensuite).
+        for key, default_value in _default_data().items():
+            data.setdefault(key, default_value)
+        _data = data
+    # save() reprend _lock (non réentrant) : on l'appelle hors du with.
+    if need_save:
+        save()
 
 
 def save() -> None:
@@ -114,7 +125,7 @@ def add_custom_command(trigger: str, action: str) -> None:
 
 def get_custom_commands() -> dict[str, str]:
     with _lock:
-        return dict(_data["custom_commands"])
+        return dict(_data.get("custom_commands", {}))
 
 
 def match_custom_command(text: str) -> str | None:
