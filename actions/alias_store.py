@@ -49,12 +49,25 @@ def _write_prefixes(prefixes: list[str]) -> None:
     PREFIXES_PATH.write_text("\n".join(prefixes) + "\n", encoding="utf-8")
 
 
+MAX_DB_GB = 20.0
+
+
+def _applied_sql_batch_nums() -> list[int]:
+    nums = [n for n in _batch_numbers() if n >= 8]
+    return nums[: len(_read_prefixes())]
+
+
 def _compute_stamp() -> str:
     parts: list[str] = []
     gen_path = SCRIPTS_DIR / "gen_aliases_extra.py"
     if gen_path.exists():
         parts.append(f"gen:{gen_path.stat().st_mtime_ns}")
     for n in _batch_numbers():
+        if n >= 8:
+            continue
+        p = SCRIPTS_DIR / f"aliases_batch{n}.py"
+        parts.append(f"{n}:{p.stat().st_mtime_ns}:{p.stat().st_size}")
+    for n in _applied_sql_batch_nums():
         p = SCRIPTS_DIR / f"aliases_batch{n}.py"
         parts.append(f"{n}:{p.stat().st_mtime_ns}:{p.stat().st_size}")
     if PREFIXES_PATH.exists():
@@ -162,7 +175,8 @@ def _remove_sidecars(path: Path) -> None:
             sidecar.unlink(missing_ok=True)
 
 
-def rebuild_db() -> int:
+def rebuild_db(*, sql_batches: int | None = None) -> int:
+    """Reconstruit la base. sql_batches=0 → catalogue de base uniquement."""
     merged = _merge_base()
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = DB_PATH.with_suffix(".tmp")
@@ -197,15 +211,67 @@ def rebuild_db() -> int:
     tmp.replace(DB_PATH)
     _remove_sidecars(tmp)
 
+    nums = [n for n in _batch_numbers() if n >= 8]
+    if sql_batches is not None:
+        nums = nums[:sql_batches]
     prefixes: list[str] = []
-    for prefix in expected_prefixes():
+    for n in nums:
+        prefix = prefix_for_batch(n)
         apply_prefix(prefix, _skip_ensure=True)
         prefixes.append(prefix)
 
     _write_prefixes(prefixes)
     _write_stamp()
     _checkpoint_wal()
-    return raw_count()
+    return fast_count()
+
+
+def shrink_db(max_gb: float = 20.0) -> int:
+    """Supprime la base gonflée et reconstruit sous la limite de taille."""
+    merged = _merge_base()
+    _remove_sidecars(DB_PATH)
+    for path in (DB_PATH, DB_PATH.with_suffix(".old"), DB_PATH.with_suffix(".tmp")):
+        if path.exists():
+            path.unlink(missing_ok=True)
+
+    if PREFIXES_PATH.exists():
+        PREFIXES_PATH.unlink(missing_ok=True)
+
+    tmp = DB_PATH.with_suffix(".tmp")
+    conn = sqlite3.connect(tmp)
+    try:
+        conn.execute("PRAGMA journal_mode=OFF")
+        conn.execute(
+            "CREATE TABLE aliases (key TEXT PRIMARY KEY NOT NULL, domain TEXT NOT NULL)"
+        )
+        conn.executemany(
+            "INSERT INTO aliases(key, domain) VALUES (?, ?)", merged.items()
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    tmp.replace(DB_PATH)
+    _remove_sidecars(DB_PATH)
+
+    nums = [n for n in _batch_numbers() if n >= 8]
+    prefixes: list[str] = []
+    max_bytes = int(max_gb * 1024**3)
+
+    for n in nums:
+        if DB_PATH.stat().st_size * 2 > max_bytes * 0.9:
+            break
+        prefix = prefix_for_batch(n)
+        apply_prefix(prefix, _skip_ensure=True)
+        prefixes.append(prefix)
+        _checkpoint_wal()
+        if DB_PATH.stat().st_size > max_bytes:
+            break
+
+    _write_prefixes(prefixes)
+    _write_stamp()
+    _checkpoint_wal()
+    return fast_count()
 
 
 def sync_missing_prefixes() -> int:
@@ -239,6 +305,16 @@ def ensure_db() -> None:
     applied = _read_prefixes()
 
     if len(expected) > len(applied):
+        if _db_is_large():
+            import logging
+
+            logging.getLogger(__name__).debug(
+                "Sync alias différée (%d/%d préfixes, base volumineuse)",
+                len(applied),
+                len(expected),
+            )
+            _write_stamp()
+            return
         sync_missing_prefixes()
         return
 

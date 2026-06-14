@@ -198,14 +198,53 @@ _BROWSER_LAUNCH_SKIP = re.compile(
     re.I,
 )
 
+BROWSER_NAMES = r"(?:chrome|edge|firefox|opera|navigateur|le navigateur)"
+SITE_OPEN_PATTERN = re.compile(
+    rf"(?:ouvre|lance|va sur|ouvre-moi|mets)\s+(.+?)\s+(?:sur|dans)\s+({BROWSER_NAMES})\b",
+    re.IGNORECASE,
+)
+_BROWSER_APP_NAMES = frozenset({
+    "chrome", "google chrome", "edge", "microsoft edge",
+    "firefox", "opera", "opera gx", "le navigateur", "navigateur",
+})
+_SEARCH_BROWSER_NAMES = frozenset({
+    "chrome", "edge", "firefox", "opera", "le navigateur", "navigateur",
+})
 
-def _fast_intent(text: str) -> str | None:
-    """Détecte l'intent sans appel LLM via regex — latence 0ms."""
-    text_lower = text.lower()
+
+def _is_browser_app_name(name: str) -> bool:
+    return name.strip().lower() in _BROWSER_APP_NAMES
+
+
+def _fast_intent(text: str) -> tuple[str, dict] | None:
+    """Détecte l'intent + params via regex — latence 0ms."""
+    text_lower = text.lower().strip()
+
+    # PRIORITY 1: « ouvre [site] sur/dans [navigateur] » → site, pas le navigateur
+    m = SITE_OPEN_PATTERN.search(text_lower)
+    if m:
+        site, browser_name = m.group(1).strip(), m.group(2).strip()
+        return "browser_open_site", {"site": site, "browser": browser_name}
+
+    # PRIORITY 2: « cherche [query] sur [site] »
+    m = re.search(r"(?:cherche|recherche|trouve)\s+(.+?)\s+sur\s+(.+)", text_lower)
+    if m:
+        query, site = m.group(1).strip(), m.group(2).strip()
+        if site in _SEARCH_BROWSER_NAMES:
+            return "search_web", {"query": query}
+        return "browser_search_in_site", {"site": site, "query": query}
+
+    # PRIORITY 3: « ouvre [cible] » sans navigateur explicite
+    m = re.search(r"(?:ouvre|va sur|navigue vers)\s+(.+)", text_lower)
+    if m:
+        target = m.group(1).strip()
+        if _is_browser_app_name(target):
+            return "lancer_app", {"app": target}
+        return "browser_open_site", {"site": target}
 
     for pattern, intent in FAST_BROWSER_REGEX:
         if re.search(pattern, text_lower):
-            return intent
+            return intent, {}
 
     if _BROWSER_LAUNCH_SKIP.search(text_lower) and re.search(
         r"\b(lance|ouvre|démarre|demarre|start|mets)\b", text_lower
@@ -214,7 +253,7 @@ def _fast_intent(text: str) -> str | None:
 
     for pattern, intent in FAST_REGEX.items():
         if re.search(pattern, text_lower):
-            return intent
+            return intent, _fast_intent_params(intent, text)
     return None
 
 
@@ -314,8 +353,9 @@ def _ollama_request(
 def _detect_intent(text: str) -> dict:
     fast = _fast_intent(text)
     if fast:
-        logger.info("Fast intent (regex): %s", fast)
-        return {"intent": fast, "params": _fast_intent_params(fast, text), "confidence": 0.95}
+        intent, params = fast
+        logger.info("Fast intent (regex): %s", intent)
+        return {"intent": intent, "params": params, "confidence": 0.95}
 
     rule = _rule_based_intent(text)
     if rule.get("intent") != "question_libre" and rule.get("confidence", 0) >= 0.85:
@@ -704,14 +744,11 @@ def _extract_site_for_browser(params: dict, original_text: str) -> str:
 
 def _resolve_intent_for_routing(text: str) -> tuple[str, dict, float]:
     """Résout l'intent : regex rapide puis détection complète."""
-    intent = _fast_intent(text)
-    params: dict = {}
-    confidence = 0.95
-
-    if intent:
-        params = _fast_intent_params(intent, text)
+    fast = _fast_intent(text)
+    if fast:
+        intent, params = fast
         logger.info("Fast intent (regex): %s", intent)
-        return intent, params, confidence
+        return intent, params, 0.95
 
     try:
         detected = _detect_intent(text)
@@ -924,8 +961,13 @@ def _execute_action(intent: str, params: dict, text: str) -> str | None:
             return f"Il est {now.strftime('%H:%M')}, le {now.strftime('%d/%m/%Y')}"
 
         if intent in ("browser_open_site", "browser_open_url", "ouvrir_site"):
-            target = _extract_site_for_browser(params, text)
-            return browser.open_url(target) if target.startswith("http") else browser.open_site(target)
+            site = params.get("site") or _extract_site_for_browser(params, text)
+            browser = params.get("browser")
+            if not site:
+                return "Quel site veux-tu ouvrir ?"
+            if site.startswith("http"):
+                return browser.open_url(site, browser=browser)
+            return browser.open_site(site, browser=browser)
 
         if intent == "browser_youtube_search":
             match = re.search(r"(?:cherche|lance|mets|youtube)\s+(.+?)(?:\s+sur youtube)?$", text, re.I)
@@ -936,6 +978,10 @@ def _execute_action(intent: str, params: dict, text: str) -> str | None:
             return browser.search_google(params.get("query", text))
 
         if intent == "browser_search_in_site":
+            site = params.get("site")
+            query = params.get("query")
+            if site and query:
+                return browser.search_within_site(site, query)
             parsed = _extract_in_site_search(text)
             if parsed:
                 return browser.search_within_site(parsed[1], parsed[0])
@@ -1166,10 +1212,13 @@ def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
         payload = _extract_browser_text(original_text, "browser_type_claude")
         return browser.type_in_claude(payload or original_text)
     if intent in ("browser_open_site", "browser_open_url", "ouvrir_site"):
-        site = _extract_site_for_browser(params, original_text)
+        site = params.get("site") or _extract_site_for_browser(params, original_text)
+        browser_param = params.get("browser")
+        if not site:
+            return "Quel site veux-tu ouvrir ?"
         if site.startswith("http"):
-            return browser.open_url(site)
-        return browser.open_site(site)
+            return browser.open_url(site, browser=browser_param)
+        return browser.open_site(site, browser=browser_param)
     if intent == "browser_search_google":
         query = params.get("query", original_text)
         return browser.search_google(query)

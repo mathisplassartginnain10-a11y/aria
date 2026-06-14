@@ -3,8 +3,6 @@
 import logging
 from pathlib import Path
 
-import numpy as np
-from scipy.io import wavfile
 import app_paths
 
 logger = logging.getLogger(__name__)
@@ -13,7 +11,9 @@ SOUNDS_DIR = app_paths.app_dir() / "sounds"
 SAMPLE_RATE = 22050
 
 
-def _tone(freq: float, duration: float, volume: float = 0.3) -> np.ndarray:
+def _tone(freq: float, duration: float, volume: float = 0.3):
+    import numpy as np
+
     t = np.linspace(0, duration, int(SAMPLE_RATE * duration), False)
     wave = np.sin(2 * np.pi * freq * t) * volume
     fade = int(SAMPLE_RATE * 0.02)
@@ -22,16 +22,20 @@ def _tone(freq: float, duration: float, volume: float = 0.3) -> np.ndarray:
     return (wave * 32767).astype(np.int16)
 
 
-def _save(name: str, data: np.ndarray) -> None:
+def _save(name: str, data) -> None:
     path = SOUNDS_DIR / f"{name}.wav"
     if path.exists():
         return
     SOUNDS_DIR.mkdir(parents=True, exist_ok=True)
+    from scipy.io import wavfile
+
     wavfile.write(str(path), SAMPLE_RATE, data)
     logger.info("Generated sound: %s", path.name)
 
 
 def ensure_sounds() -> None:
+    import numpy as np
+
     SOUNDS_DIR.mkdir(parents=True, exist_ok=True)
     _save("activate", _tone(880, 0.15))
     _save("deactivate", _tone(440, 0.2))

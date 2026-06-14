@@ -3,16 +3,46 @@ import queue
 import threading
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import scipy.signal
-import sounddevice as sd
 import yaml
-from faster_whisper import WhisperModel
 
 import sounds
 import ui
 import app_paths
+
+if TYPE_CHECKING:
+    from faster_whisper import WhisperModel
+
+
+class _LazyModule:
+    """Import paresseux — évite blocage audio/Whisper au démarrage."""
+
+    def __init__(self, import_fn):
+        self._import_fn = import_fn
+        self._mod = None
+
+    def __getattr__(self, name: str):
+        if self._mod is None:
+            self._mod = self._import_fn()
+        return getattr(self._mod, name)
+
+
+def _import_sounddevice():
+    import sounddevice as sd_mod
+
+    return sd_mod
+
+
+def _import_scipy_signal():
+    import scipy.signal as signal_mod
+
+    return signal_mod
+
+
+sd = _LazyModule(_import_sounddevice)
+scipy_signal = _LazyModule(_import_scipy_signal)
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +85,11 @@ _current_rms = 0.0
 _rms_lock = threading.Lock()
 _transcript_queue: queue.Queue[str] = queue.Queue()
 
-_whisper_model: WhisperModel | None = None
+_whisper_model: Any | None = None
 _whisper_lock = threading.Lock()
 
 
-def _load_whisper_model() -> WhisperModel:
+def _load_whisper_model():
     global _whisper_model
     with _whisper_lock:
         if _whisper_model is not None:
@@ -77,6 +107,8 @@ def _load_whisper_model() -> WhisperModel:
         last_error: Exception | None = None
         for device, compute_type in attempts:
             try:
+                from faster_whisper import WhisperModel
+
                 logger.info("Chargement Whisper '%s' sur %s (%s)…", WHISPER_MODEL, device, compute_type)
                 start = time.monotonic()
                 _whisper_model = WhisperModel(WHISPER_MODEL, device=device, compute_type=compute_type)
@@ -88,14 +120,6 @@ def _load_whisper_model() -> WhisperModel:
                 _whisper_model = None
 
         raise RuntimeError(f"Impossible de charger Whisper: {last_error}")
-
-
-_load_start = time.monotonic()
-try:
-    _load_whisper_model()
-    logger.info("Whisper prêt en %.1fs", time.monotonic() - _load_start)
-except Exception as exc:
-    logger.error("Whisper non chargé au démarrage: %s", exc)
 
 
 def get_audio_level() -> float:
@@ -171,7 +195,7 @@ def _get_device_native_rate(device_index: int | None) -> int:
 
 def _open_mic_stream(
     device_index: int | None,
-) -> tuple[sd.InputStream, int, int]:
+) -> tuple[Any, int, int]:
     """Ouvre le stream micro avec le meilleur sample rate disponible."""
     global ACTUAL_RATE, ACTUAL_BLOCKSIZE
 
@@ -182,7 +206,7 @@ def _open_mic_stream(
     last_error: Exception | None = None
     for rate in rates_to_try:
         for blocksize in blocksizes:
-            stream: sd.InputStream | None = None
+            stream: Any | None = None
             try:
                 stream = sd.InputStream(
                     samplerate=rate,
@@ -216,7 +240,7 @@ def _resample_to_16k(audio: np.ndarray, original_rate: int) -> np.ndarray:
     target_samples = int(len(audio) * 16000 / original_rate)
     if target_samples < 1:
         return audio.astype(np.float32)
-    resampled = scipy.signal.resample(audio, target_samples)
+    resampled = scipy_signal.resample(audio, target_samples)
     return resampled.astype(np.float32)
 
 
@@ -273,6 +297,8 @@ def _transcribe_audio(audio_np: np.ndarray, actual_rate: int) -> str:
             if attempt == 0 and ("cublas" in err or "cuda" in err or "cudnn" in err):
                 logger.warning("Transcription CUDA échouée, bascule CPU: %s", exc)
                 with _whisper_lock:
+                    from faster_whisper import WhisperModel
+
                     _whisper_model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
                 continue
             logger.error("Erreur Whisper: %s", exc)
@@ -303,6 +329,8 @@ def transcribe_file(path: str | Path, language: str = "fr") -> str:
             if attempt == 0 and ("cublas" in err or "cuda" in err or "cudnn" in err):
                 logger.warning("Transcription fichier CUDA échouée, bascule CPU: %s", exc)
                 with _whisper_lock:
+                    from faster_whisper import WhisperModel
+
                     _whisper_model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
                 continue
             logger.error("Erreur Whisper (fichier): %s", exc)
@@ -320,7 +348,7 @@ def _record_loop() -> None:
     global _is_recording, _current_rms
 
     logger.info("Démarrage _record_loop")
-    stream: sd.InputStream | None = None
+    stream: Any | None = None
     actual_rate = ACTUAL_RATE
     blocksize = ACTUAL_BLOCKSIZE
     device_index = _find_input_device()
@@ -467,6 +495,14 @@ def start_listening() -> None:
 
     sounds.play("listening")
     logger.info("Listening for speech…")
+
+    def _bootstrap() -> None:
+        try:
+            _load_whisper_model()
+        except Exception as exc:
+            logger.error("Whisper non chargé: %s", exc)
+
+    threading.Thread(target=_bootstrap, daemon=True).start()
 
     record_thread = threading.Thread(target=_record_loop, daemon=True)
     record_thread.start()

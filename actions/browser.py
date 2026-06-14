@@ -428,10 +428,10 @@ def resolve_site_url(site_name: str) -> str:
     return f"https://{clean}.com"
 
 
-def open_site(site_name: str) -> str:
-    """Ouvre n'importe quel site par son nom — supporte des millions de sites."""
+def open_site(site_name: str, browser: str | None = None) -> str:
+    """Ouvre un site par son nom — optionnellement dans un navigateur spécifique."""
     url = resolve_site_url(site_name)
-    return open_url(url)
+    return open_url(url, browser=browser)
 
 
 def search_within_site(site: str, query: str) -> str:
@@ -515,27 +515,46 @@ def _get_browser_exe() -> str:
     for path in CHROME_PATHS:
         if os.path.exists(path):
             return path
-    for path in (EDGE_PATH, EDGE_PATH64):
+    for path in (EDGE_PATH64, EDGE_PATH):
         if os.path.exists(path):
             return path
     return "start"
 
 
-def open_url(url: str) -> str:
-    """Ouvre une URL dans Chrome/Edge."""
+def _resolve_browser_exe(browser: str | None = None) -> str:
+    """Retourne l'exécutable du navigateur demandé, ou Chrome/Edge par défaut."""
+    if browser:
+        browser_lower = browser.lower()
+        if "edge" in browser_lower:
+            for path in (EDGE_PATH64, EDGE_PATH):
+                if os.path.exists(path):
+                    return path
+        elif "firefox" in browser_lower:
+            firefox = r"C:\Program Files\Mozilla Firefox\firefox.exe"
+            if os.path.exists(firefox):
+                return firefox
+        elif "opera" in browser_lower:
+            opera = os.path.expandvars(r"%LOCALAPPDATA%\Programs\Opera GX\opera.exe")
+            if os.path.exists(opera):
+                return opera
+    return _get_browser_exe()
+
+
+def open_url(url: str, browser: str | None = None) -> str:
+    """Ouvre une URL dans Chrome/Edge ou le navigateur demandé."""
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
 
-    browser = _get_browser_exe()
+    exe = _resolve_browser_exe(browser)
     try:
-        if browser == "start":
+        if exe == "start":
             os.startfile(url)
         else:
             subprocess.Popen(
-                [browser, url],
+                [exe, url],
                 creationflags=CREATE_NO_WINDOW,
             )
-        logger.info("URL ouverte dans %s: %s", browser, url)
+        logger.info("URL ouverte: %s (%s)", url, exe)
         return f"Page ouverte : {url}"
     except Exception as exc:
         logger.error("open_url error: %s", exc)

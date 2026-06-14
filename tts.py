@@ -8,8 +8,6 @@ import threading
 import time
 from pathlib import Path
 
-import edge_tts
-import pygame
 import yaml
 import app_paths
 
@@ -31,7 +29,28 @@ _saved_sessions: list[tuple] = []
 # Global TTS enabled flag — disabled by default
 TTS_ENABLED = False
 
-pygame.mixer.init()
+_mixer_ready = False
+_mixer_lock = threading.Lock()
+
+
+def _ensure_mixer() -> None:
+    """Initialise pygame.mixer à la demande (évite blocage au import)."""
+    global _mixer_ready
+    if _mixer_ready:
+        return
+    with _mixer_lock:
+        if _mixer_ready:
+            return
+        import pygame
+
+        pygame.mixer.init()
+        _mixer_ready = True
+
+
+def _pygame():
+    import pygame
+
+    return pygame
 
 
 def mute_other_apps() -> None:
@@ -97,6 +116,8 @@ def _split_sentences(text: str) -> list[str]:
 
 
 async def _generate_audio(text: str, output_path: Path, voice: str, rate: str) -> None:
+    import edge_tts
+
     communicate = edge_tts.Communicate(text, voice, rate=rate)
     await communicate.save(str(output_path))
 
@@ -116,10 +137,12 @@ def _run_async(coro) -> None:
 
 
 def _play_music() -> None:
+    _ensure_mixer()
     mute_other_apps()
     try:
-        pygame.mixer.music.play()
-        while pygame.mixer.music.get_busy() and not _stop_event.is_set():
+        pg = _pygame()
+        pg.mixer.music.play()
+        while pg.mixer.music.get_busy() and not _stop_event.is_set():
             time.sleep(0.05)
     finally:
         restore_other_apps()
@@ -145,8 +168,12 @@ def set_enabled(enabled: bool) -> None:
 
 def stop() -> None:
     _stop_event.set()
+    if not _mixer_ready:
+        restore_other_apps()
+        return
     try:
-        pygame.mixer.music.stop()
+        pg = _pygame()
+        pg.mixer.music.stop()
     except Exception:
         pass
     restore_other_apps()
@@ -159,9 +186,11 @@ def speak_sound(sound_name: str) -> None:
         return
     with _lock:
         try:
-            pygame.mixer.music.load(str(path))
-            pygame.mixer.music.play()
-            while pygame.mixer.music.get_busy() and not _stop_event.is_set():
+            _ensure_mixer()
+            pg = _pygame()
+            pg.mixer.music.load(str(path))
+            pg.mixer.music.play()
+            while pg.mixer.music.get_busy() and not _stop_event.is_set():
                 time.sleep(0.05)
         except Exception:
             logger.exception("Failed to play sound %s", sound_name)
@@ -193,7 +222,9 @@ def speak(text: str) -> None:
 
                 _run_async(_generate_audio(sentence, tmp_path, TTS_VOICE, TTS_RATE))
 
-                pygame.mixer.music.load(str(tmp_path))
+                _ensure_mixer()
+                pg = _pygame()
+                pg.mixer.music.load(str(tmp_path))
                 _play_music()
             except Exception:
                 logger.exception("TTS playback failed for: %s", sentence)

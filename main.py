@@ -1,3 +1,14 @@
+# ─── Correctif Python 3.13 : platform._wmi_query() se bloque indéfiniment ───
+# Sur ce poste (Python du Microsoft Store + WMI bloqué), platform.system()/uname()
+# interrogent WMI (Win32_OperatingSystem) et ne répondent jamais. pywebview appelle
+# platform.system() dans guilib.initialize() → la fenêtre ne s'ouvre jamais, le micro
+# semblait en cause à tort. On neutralise la branche WMI : platform retombe alors sur
+# sys.getwindowsversion() + registre (rapide, fiable). DOIT s'exécuter avant tout
+# import susceptible d'appeler platform.system()/uname().
+import platform as _platform
+
+_platform._wmi = None
+
 import ctypes
 import sys
 
@@ -35,13 +46,11 @@ try:
     from logging.handlers import RotatingFileHandler
     from pathlib import Path
 
-    import keyboard
     import yaml
 
     import app_paths
     import briefing
     import generate_sounds
-    import llm  # noqa: F401
     import memory
     import memory_engine
     import ollama_manager
@@ -111,11 +120,16 @@ try:
 
         logger.info("Config chargée : %s", CONFIG_PATH.name)
 
-        try:
-            import keyboard as kb  # noqa: F401
-            logger.info("Bibliothèque keyboard : OK")
-        except ImportError:
-            logger.error("Bibliothèque keyboard non installée")
+        def _check_keyboard() -> None:
+            try:
+                import keyboard as kb  # noqa: F401
+                logger.info("Bibliothèque keyboard : OK")
+            except ImportError:
+                logger.error("Bibliothèque keyboard non installée")
+            except Exception as exc:
+                logger.error("Bibliothèque keyboard indisponible : %s", exc)
+
+        threading.Thread(target=_check_keyboard, daemon=True).start()
 
         if ollama_manager.is_running():
             logger.info("Ollama : accessible")
@@ -207,13 +221,13 @@ try:
         ollama_manager.start()
         if ollama_manager.wait_until_ready(timeout=30):
             ui.show_toast("Ollama démarré")
-            model = str(_config.get("model", "qwen3:14b"))
-            threading.Thread(target=ollama_manager.warmup_model, args=(model,), daemon=True).start()
+            fast_model = str(_config.get("model_fast", "llama3.1:8b-instruct-q8_0"))
             threading.Thread(
                 target=ollama_manager.warmup_model,
-                args=(str(_config.get("model_fast", "llama3.1:8b-instruct-q8_0")),),
+                args=(fast_model,),
                 daemon=True,
             ).start()
+            # qwen3:14b — chargement lazy à la première utilisation
         else:
             ui.show_toast("Ollama non disponible")
 
@@ -234,7 +248,7 @@ try:
         )
 
 
-    def _register_hotkeys(debug_keys: bool) -> None:
+    def _register_hotkeys(keyboard, debug_keys: bool) -> None:
         logger = logging.getLogger(__name__)
 
         keyboard.add_hotkey("f24", _on_hotkey, suppress=False)
@@ -253,8 +267,11 @@ try:
 
     def _keyboard_thread(debug_keys: bool) -> None:
         logger = logging.getLogger(__name__)
+        logger.info("Chargement du hook clavier (keyboard)…")
         try:
-            _register_hotkeys(debug_keys)
+            import keyboard
+
+            _register_hotkeys(keyboard, debug_keys)
             logger.info("En attente : F24 (Copilot) ou Ctrl+Shift+A…")
             keyboard.wait()
         except Exception:
@@ -285,6 +302,14 @@ try:
         memory_engine.get_engine().update_active_hours()
         ollama_manager.configure(_config["ollama_path"])
 
+        def _load_llm() -> None:
+            import llm  # noqa: F401
+
+            if _logger:
+                _logger.info("Module llm chargé")
+
+        threading.Thread(target=_load_llm, daemon=True).start()
+
         atexit.register(lambda: memory_engine.get_engine().save_session())
         atexit.register(lambda: memory_engine.get_engine().save_current_conversation())
         atexit.register(lambda: memory_engine.get_engine()._save_all())
@@ -300,23 +325,29 @@ try:
 
         _startup_checks(_logger, _config)
 
-        ollama_thread = threading.Thread(target=_start_ollama, daemon=True)
-        ollama_thread.start()
-        ollama_thread.join(timeout=35)
+        def _start_mobile() -> None:
+            try:
+                _logger.info("Démarrage serveur mobile (arrière-plan)…")
+                import aria_mobile_server as mobile_server
+
+                mobile_server.start_mobile_server(
+                    config=_config, block=False, ensure_ollama=False, banner=False
+                )
+                info = mobile_server.get_connect_info()
+                _logger.info(
+                    "Serveur mobile actif — http://%s:%s (PIN config)",
+                    info["ip"],
+                    info["port"],
+                )
+                ui.show_toast(f"📱 Mobile : {info['ip']}:{info['port']}", toast_type="info")
+            except Exception:
+                _logger.exception("Serveur mobile indisponible")
+
+        _logger.info("Services Ollama en arrière-plan…")
+        threading.Thread(target=_start_ollama, daemon=True).start()
 
         if _config.get("mobile_auto_start", True):
-            import aria_mobile_server as mobile_server
-
-            mobile_server.start_mobile_server(
-                config=_config, block=False, ensure_ollama=False, banner=False
-            )
-            info = mobile_server.get_connect_info()
-            _logger.info(
-                "Serveur mobile actif — http://%s:%s (PIN config)",
-                info["ip"],
-                info["port"],
-            )
-            ui.show_toast(f"📱 Mobile : {info['ip']}:{info['port']}", toast_type="info")
+            threading.Thread(target=_start_mobile, daemon=True).start()
 
         threading.Thread(target=_keyboard_thread, args=(debug_keys,), daemon=True).start()
 
@@ -333,8 +364,14 @@ try:
         _logger.info(
             "PowerToys : assurez-vous que la touche Copilot est remappée vers F24."
         )
+        _logger.info("Lancement fenêtre pywebview (ui.run)…")
 
-        ui.run()
+        try:
+            ui.run()
+        except Exception as exc:
+            _logger.error("Erreur fatale dans ui.run(): %s", exc, exc_info=True)
+            traceback.print_exc()
+            raise
 
 
     if __name__ == "__main__":

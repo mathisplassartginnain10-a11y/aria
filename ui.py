@@ -596,6 +596,9 @@ class UI:
         if not html.exists():
             raise FileNotFoundError(f"Interface introuvable : {html}")
 
+        logger.info("Création de la fenêtre pywebview...")
+        logger.info("HTML: %s", html.resolve())
+
         _window = webview.create_window(
             title="ARIA",
             url=str(html.resolve()) + "?v=" + str(int(time.time())),
@@ -613,13 +616,27 @@ class UI:
             background_color="#1C1C1E",
             transparent=False,
         )
-        webview.start(
-            _on_webview_ready,
-            args=(_window,),
-            debug=False,
-            private_mode=False,
-            storage_path=str(app_paths.data_dir() / "webview_cache"),
-        )
+        logger.info("Fenêtre créée: %s", _window)
+
+        gui_backend = getattr(webview, "platforms", None)
+        if gui_backend is None:
+            gui_backend = getattr(getattr(webview, "guilib", None), "__name__", webview.guilib)
+        logger.info("Backends GUI disponibles: %s", gui_backend)
+
+        logger.info("Appel de webview.start()...")
+        try:
+            webview.start(
+                _on_webview_ready,
+                args=(_window,),
+                debug=True,
+                http_server=False,
+                private_mode=False,
+                storage_path=str(app_paths.data_dir() / "webview_cache"),
+            )
+            logger.info("webview.start() terminé normalement")
+        except Exception as exc:
+            logger.error("webview.start() a levé une exception: %s", exc, exc_info=True)
+            raise
 
     def _js(self, code: str) -> None:
         if not _window:
