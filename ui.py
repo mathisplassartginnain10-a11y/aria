@@ -95,6 +95,17 @@ class AriaAPI:
         except Exception:
             logger.exception("Erreur sauvegarde settings")
 
+    def save_wallpaper(self, base64_data: str, filename: str) -> str:
+        import base64
+        from pathlib import Path
+
+        wp_dir = app_paths.data_dir() / "wallpapers"
+        wp_dir.mkdir(parents=True, exist_ok=True)
+        ext = Path(filename).suffix or ".jpg"
+        out_path = wp_dir / f"custom{ext}"
+        out_path.write_bytes(base64.b64decode(base64_data))
+        return f"file:///{out_path.as_posix()}"
+
     def get_presets(self) -> str:
         try:
             state_path = app_paths.data_dir() / "ui_state.json"
@@ -227,6 +238,74 @@ class AriaAPI:
             "available": nexus.is_available() if nexus.is_enabled() else False,
         })
 
+    def _update_config_field(self, key: str, value) -> None:
+        import yaml
+
+        cfg_path = app_paths.config_path()
+        with cfg_path.open("r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        cfg[key] = value
+        with cfg_path.open("w", encoding="utf-8") as f:
+            yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
+
+    def set_wake_word(self, enabled: bool) -> None:
+        self._update_config_field("wake_word_enabled", enabled)
+
+    def set_realtime_stt(self, enabled: bool) -> None:
+        self._update_config_field("realtime_transcription", enabled)
+
+    def set_daily_brief(self, enabled: bool) -> None:
+        self._update_config_field("daily_brief_enabled", enabled)
+
+    def is_focus_active(self) -> bool:
+        import focus
+
+        return focus.is_focus_active()
+
+    def export_current_conversation(self) -> str:
+        from actions.export_pdf import export_conversation
+        import memory_engine
+
+        messages = memory_engine.get_current_conversation_messages()
+        title = memory_engine.get_current_conversation_title()
+        return export_conversation(messages, title=title)
+
+    def show_partial_transcription(self, text: str) -> None:
+        self._js(
+            f"if(window.aria) aria.showPartialTranscription({json.dumps(text)})"
+        )
+
+    def show_final_transcription(self, text: str) -> None:
+        self._js(
+            f"if(window.aria) aria.showFinalTranscription({json.dumps(text)})"
+        )
+
+    def update_checklist_ui(self, section: str, item: int, total: int) -> None:
+        self._js(
+            f"if(window.aria) aria.showChecklistProgress({json.dumps(section)}, {item}, {total})"
+        )
+
+    def hide_checklist_ui(self) -> None:
+        self._js("if(window.aria) aria.hideChecklistProgress()")
+
+    def update_focus_indicator(self, active: bool) -> None:
+        self._js(f"if(window.aria) aria.updateFocusIndicator({json.dumps(active)})")
+
+    def get_config_flags(self) -> str:
+        import yaml
+
+        with app_paths.config_path().open("r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        return json.dumps({
+            "wake_word_enabled": cfg.get("wake_word_enabled", False),
+            "realtime_transcription": cfg.get("realtime_transcription", False),
+            "daily_brief_enabled": cfg.get("daily_brief_enabled", True),
+            "german_mode": cfg.get("german_mode", False),
+        })
+
+    def set_german_mode(self, enabled: bool) -> None:
+        self._update_config_field("german_mode", enabled)
+
     def get_conversations(self) -> str:
         import json
         import memory_engine
@@ -353,6 +432,14 @@ class AriaAPI:
                     llm.ask_with_video(question, tmp_path)
                 elif mime_type == "application/pdf" or filename.endswith(".pdf"):
                     llm.ask_with_pdf(question, tmp_path)
+                elif filename.lower().endswith((".csv", ".xlsx", ".xls")):
+                    from actions.data_analysis import analyze_file
+
+                    result = analyze_file(tmp_path, question)
+                    if _instance:
+                        _instance.append_assistant_text(result)
+                        _instance.finalize_assistant_message()
+                        _instance.set_status("idle")
                 else:
                     llm.ask_with_file(question, tmp_path, filename)
             except Exception as e:
@@ -432,8 +519,40 @@ class AriaAPI:
                         if os.path.exists(tmp_path):
                             os.unlink(tmp_path)
 
+                csv_files = [f for f in files if f.get("name", "").lower().endswith((".csv", ".xlsx", ".xls"))]
+                if csv_files and not images_b64:
+                    from actions.data_analysis import analyze_file
+                    import base64 as b64mod
+
+                    tmp_csv = tempfile.NamedTemporaryFile(
+                        suffix=Path(csv_files[0]["name"]).suffix, delete=False
+                    )
+                    tmp_csv.write(b64mod.b64decode(csv_files[0]["b64"]))
+                    tmp_csv.close()
+                    try:
+                        result = analyze_file(tmp_csv.name, prompt)
+                        if _instance:
+                            _instance.append_assistant_text(result)
+                            _instance.finalize_assistant_message()
+                            _instance.set_status("idle")
+                        return
+                    finally:
+                        if os.path.exists(tmp_csv.name):
+                            os.unlink(tmp_csv.name)
+
                 if images_b64:
-                    llm.ask_with_images_and_text(prompt, images_b64, text_contents)
+                    homework = any(
+                        kw in prompt.lower()
+                        for kw in ("devoir", "corrige", "correction", "exercice", "bac", "note")
+                    )
+                    if homework and len(images_b64) == 1:
+                        result = llm.analyze_homework_image(images_b64[0], prompt)
+                        if _instance:
+                            _instance.append_assistant_text(result)
+                            _instance.finalize_assistant_message()
+                            _instance.set_status("idle")
+                    else:
+                        llm.ask_with_images_and_text(prompt, images_b64, text_contents)
                 elif text_contents:
                     combined = "\n\n".join(text_contents)
                     llm.ask(f"{prompt}\n\nContenu des fichiers:\n{combined}", show_user=False)
@@ -857,3 +976,28 @@ def show_toast(message: str, duration: int = 3000, toast_type: str = "info") -> 
 def show_error(text: str) -> None:
     if _instance:
         _instance.show_error(text)
+
+
+def show_partial_transcription(text: str) -> None:
+    if _instance:
+        _instance.show_partial_transcription(text)
+
+
+def show_final_transcription(text: str) -> None:
+    if _instance:
+        _instance.show_final_transcription(text)
+
+
+def update_focus_indicator(active: bool) -> None:
+    if _instance:
+        _instance.update_focus_indicator(active)
+
+
+def update_checklist_ui(section: str, item: int, total: int) -> None:
+    if _instance:
+        _instance.update_checklist_ui(section, item, total)
+
+
+def hide_checklist_ui() -> None:
+    if _instance:
+        _instance.hide_checklist_ui()

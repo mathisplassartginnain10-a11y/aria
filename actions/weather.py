@@ -12,7 +12,6 @@ _CONFIG_PATH = app_paths.config_path()
 with _CONFIG_PATH.open("r", encoding="utf-8") as f:
     _config = yaml.safe_load(f)
 
-API_KEY = _config.get("openweather_api_key", "")
 DEFAULT_CITY = _config.get("city", "Couëron")
 CACHE: dict[str, tuple[float, dict]] = {}
 CACHE_TTL = 1800
@@ -37,10 +36,19 @@ def get_current_free(city: str = "Coueron") -> dict:
         return {"error": str(e)}
 
 
+def _api_key() -> str:
+    import api_keys
+
+    return api_keys.get_key("openweather")
+
+
 def _get_current_owm(city: str) -> dict | None:
+    api_key = _api_key()
+    if not api_key:
+        return None
     url = (
         f"https://api.openweathermap.org/data/2.5/weather"
-        f"?q={city}&appid={API_KEY}&units=metric&lang=fr"
+        f"?q={city}&appid={api_key}&units=metric&lang=fr"
     )
     try:
         response = requests.get(url, timeout=10)
@@ -76,7 +84,7 @@ def get_current(city: str | None = None) -> dict:
         return CACHE[cache_key][1]
 
     result = None
-    if API_KEY:
+    if _api_key():
         result = _get_current_owm(city)
     if result is None:
         result = get_current_free(city)
@@ -88,12 +96,13 @@ def get_current(city: str | None = None) -> dict:
 
 def get_forecast(city: str | None = None, days: int = 3) -> dict:
     city = city or DEFAULT_CITY
-    if not API_KEY:
+    api_key = _api_key()
+    if not api_key:
         return {"error": "Clé API OpenWeatherMap non configurée."}
 
     url = (
         f"https://api.openweathermap.org/data/2.5/forecast"
-        f"?q={city}&appid={API_KEY}&units=metric&lang=fr&cnt={days * 8}"
+        f"?q={city}&appid={api_key}&units=metric&lang=fr&cnt={days * 8}"
     )
     data = _fetch(url)
     if data is None:

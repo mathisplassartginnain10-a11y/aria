@@ -691,3 +691,39 @@ def export_fine_tune_dataset():
 
 def reset_memory() -> None:
     get_engine().reset_all()
+
+
+def should_show_daily_brief() -> bool:
+    from datetime import date
+
+    engine = get_engine()
+    last_brief = engine.profile.get("preferences", {}).get("last_brief_date")
+    return last_brief != date.today().isoformat()
+
+
+def mark_brief_shown() -> None:
+    from datetime import date
+
+    engine = get_engine()
+    engine.profile.setdefault("preferences", {})["last_brief_date"] = date.today().isoformat()
+    save_json(PROFILE_PATH, engine.profile)
+
+
+def get_current_conversation_messages() -> list[dict]:
+    engine = get_engine()
+    out = []
+    for m in engine.current_conversation.get("messages", []):
+        out.append({
+            "role": m.get("role", "user"),
+            "content": m.get("text", ""),
+            "timestamp": m.get("time", ""),
+        })
+    return out
+
+
+def get_current_conversation_title() -> str:
+    return get_engine().current_conversation.get("title", "Conversation")
+
+
+def get_preferences() -> dict:
+    return get_engine().profile.get("preferences", {})

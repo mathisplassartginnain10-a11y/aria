@@ -204,6 +204,15 @@ def speak(text: str) -> None:
     if not text or not text.strip():
         return
 
+    voice = TTS_VOICE
+    try:
+        import german_mode
+
+        if german_mode.is_german_mode_active():
+            voice = "de-DE-KatjaNeural"
+    except Exception:
+        pass
+
     cleaned = _clean_text(text)
     if not cleaned:
         return
@@ -220,7 +229,7 @@ def speak(text: str) -> None:
                 with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_file:
                     tmp_path = Path(tmp_file.name)
 
-                _run_async(_generate_audio(sentence, tmp_path, TTS_VOICE, TTS_RATE))
+                _run_async(_generate_audio(sentence, tmp_path, voice, TTS_RATE))
 
                 _ensure_mixer()
                 pg = _pygame()

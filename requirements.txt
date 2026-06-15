@@ -29,3 +29,8 @@ pywebview
 pypdf
 flask
 gevent
+openwakeword
+fpdf2
+dateparser
+pandas
+openpyxl

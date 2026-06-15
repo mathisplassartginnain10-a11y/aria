@@ -21,6 +21,12 @@ LAT = _config.get("lat", 47.2167)
 LON = _config.get("lon", -1.7333)
 
 
+def _avwx_key() -> str:
+    import api_keys
+
+    return api_keys.get_key("avwx") or AVWX_KEY
+
+
 def decode_cloud_cover(code: str) -> str:
     mapping = {
         "SKC": "ciel dégagé",
@@ -48,9 +54,9 @@ def decode_wind(wind_string: str) -> str:
 
 def get_metar(icao: str | None = None) -> dict:
     icao = (icao or DEFAULT_ICAO).upper()
-    if AVWX_KEY:
+    if _avwx_key():
         try:
-            url = f"https://avwx.rest/api/metar/{icao}?token={AVWX_KEY}"
+            url = f"https://avwx.rest/api/metar/{icao}?token={_avwx_key()}"
             response = requests.get(url, timeout=10)
             response.raise_for_status()
             data = response.json()
@@ -96,9 +102,9 @@ def decode_metar_to_speech(raw: str) -> str:
 
 def get_taf(icao: str | None = None) -> dict:
     icao = (icao or DEFAULT_ICAO).upper()
-    if AVWX_KEY:
+    if _avwx_key():
         try:
-            url = f"https://avwx.rest/api/taf/{icao}?token={AVWX_KEY}"
+            url = f"https://avwx.rest/api/taf/{icao}?token={_avwx_key()}"
             response = requests.get(url, timeout=10)
             response.raise_for_status()
             data = response.json()

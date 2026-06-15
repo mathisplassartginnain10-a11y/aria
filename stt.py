@@ -394,8 +394,107 @@ def _dispatch_to_assistant(text: str) -> None:
     threading.Thread(target=_run, daemon=True, name="aria-respond").start()
 
 
+_realtime_model = None
+
+
+def _get_realtime_model():
+    global _realtime_model
+    if _realtime_model is None:
+        from faster_whisper import WhisperModel
+
+        _realtime_model = WhisperModel("tiny", device="cuda", compute_type="int8")
+    return _realtime_model
+
+
+def _record_loop_realtime() -> None:
+    """Transcription par fenêtres glissantes (master-doc §3.2)."""
+    global _is_recording, _current_rms
+
+    logger.info("Démarrage _record_loop_realtime")
+    stream = None
+    actual_rate = ACTUAL_RATE
+    blocksize = ACTUAL_BLOCKSIZE
+    try:
+        stream, actual_rate, blocksize = _open_mic_stream(_find_input_device())
+    except Exception as exc:
+        logger.error("Micro indisponible (realtime): %s", exc)
+        ui.show_toast("Microphone indisponible", toast_type="error")
+        return
+
+    _is_recording = True
+    ui.set_status("listening")
+    window_size = int(actual_rate * 1.5)
+    slide_size = int(actual_rate * 0.5)
+    rolling = np.zeros(0, dtype=np.float32)
+    full_buffer: list[np.ndarray] = []
+    speaking = False
+    silence_frames = 0
+    silence_limit = int(actual_rate / blocksize * SILENCE_DURATION)
+    threshold = float(_config.get("silence_threshold", SILENCE_THRESHOLD))
+
+    try:
+        rt_model = _get_realtime_model()
+    except Exception as exc:
+        logger.warning("Modèle realtime indisponible: %s", exc)
+        ui.show_toast("Transcription temps réel indisponible", toast_type="warning")
+        return
+
+    while not _stop_event.is_set():
+        if _responding.is_set():
+            continue
+        try:
+            data, _ = stream.read(blocksize)
+        except Exception:
+            time.sleep(0.1)
+            continue
+        flat = data.flatten()
+        rms = _chunk_rms(flat)
+        with _rms_lock:
+            _current_rms = rms
+        ui.update_waveform(rms)
+
+        if rms > threshold:
+            speaking = True
+            silence_frames = 0
+            full_buffer.append(flat.copy())
+            rolling = np.concatenate([rolling, flat])
+            if len(rolling) >= window_size:
+                window = rolling[-window_size:]
+                audio_16k = _resample_to_16k(window, actual_rate)
+                segments, _ = rt_model.transcribe(audio_16k, language="fr", beam_size=1)
+                partial = " ".join(s.text for s in segments).strip()
+                if partial:
+                    ui.show_partial_transcription(partial)
+                rolling = rolling[-slide_size:]
+        elif speaking:
+            silence_frames += 1
+            full_buffer.append(flat.copy())
+            if silence_frames >= silence_limit:
+                if full_buffer:
+                    audio_np = np.concatenate(full_buffer).astype(np.float32)
+                    text = _transcribe_audio(audio_np, actual_rate)
+                    if text:
+                        ui.show_final_transcription(text)
+                        if VOICE_AUTO_SEND:
+                            _dispatch_to_assistant(text)
+                        else:
+                            _enqueue_transcript(text)
+                full_buffer = []
+                rolling = np.zeros(0, dtype=np.float32)
+                speaking = False
+                silence_frames = 0
+    if stream:
+        stream.stop()
+        stream.close()
+    _is_recording = False
+
+
 def _record_loop() -> None:
     global _is_recording, _current_rms
+
+    if _config.get("realtime_transcription", False):
+        _record_loop_realtime()
+        return
 
     logger.info("Démarrage _record_loop")
     stream: Any | None = None

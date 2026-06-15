@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1,
+    "category": "météo",
+    "question": "Qu'est-ce que la brume ?",
+    "choices": ["Brouillard avec visibilité > 1 km", "Brouillard avec visibilité < 1 km", "Nuages bas", "Pluie fine"],
+    "answer": "b",
+    "explanation": "La brume est un brouillard avec une visibilité supérieure à 1 km."
+  },
+  {
+    "id": 2,
+    "category": "réglementation",
+    "question": "Quelle est la fréquence d'urgence aéronautique en VHF ?",
+    "choices": ["121.5 MHz", "118.7 MHz", "123.45 MHz", "130.0 MHz"],
+    "answer": "a",
+    "explanation": "121.5 MHz est la fréquence internationale de détresse aéronautique."
+  }
+]

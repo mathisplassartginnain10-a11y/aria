@@ -244,6 +244,23 @@ try:
             daemon=True,
         ).start()
 
+        if _config.get("wake_word_enabled", False):
+            def _on_wake():
+                if _logger:
+                    _logger.info("Activation par wake word")
+                if _mic_active:
+                    _pause_mic()
+                else:
+                    _resume_mic()
+
+            import wake_word
+
+            threading.Thread(
+                target=wake_word.start,
+                args=(_on_wake, str(_config.get("wake_word_model", "hey_jarvis_v0.1"))),
+                daemon=True,
+            ).start()
+
 
     def _on_hotkey(_event=None) -> None:
         global _last_hotkey_time
@@ -367,6 +384,32 @@ try:
         def _auto_start_mic() -> None:
             time.sleep(2)
             _start_mic()
+            _maybe_daily_brief()
+
+        def _maybe_daily_brief() -> None:
+            try:
+                import focus
+                import llm
+
+                if not _config.get("daily_brief_enabled", True):
+                    return
+                if focus.is_focus_active():
+                    return
+                if not memory_engine.should_show_daily_brief():
+                    return
+
+                def _run_brief():
+                    time.sleep(3)
+                    brief_text = llm.generate_daily_brief()
+                    ui.append_assistant_text(brief_text)
+                    ui.finalize_assistant_message()
+                    tts.speak(brief_text)
+                    memory_engine.mark_brief_shown()
+
+                threading.Thread(target=_run_brief, daemon=True).start()
+            except Exception:
+                if _logger:
+                    _logger.exception("Brief quotidien indisponible")
 
         threading.Thread(target=_auto_start_mic, daemon=True).start()
 

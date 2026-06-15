@@ -34,6 +34,9 @@
       --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
       --shadow-md: 0 6px 22px rgba(0,0,0,0.38);
       --shadow-lg: 0 18px 50px rgba(0,0,0,0.50);
+      --glass-blur: 24px;
+      --glass-alpha: 0.06;
+      --surface-solid: rgba(20,20,28,0.88);
     }
 
     body.theme-warm { --accent:#F59E0B; --accent-bg:rgba(245,158,11,0.12); }
@@ -50,39 +53,66 @@
 
     body {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-      background:
-        radial-gradient(900px 500px at 78% -8%, rgba(110,123,242,0.10), transparent 60%),
-        radial-gradient(700px 600px at -5% 108%, rgba(110,123,242,0.06), transparent 55%),
-        var(--bg);
+      background: transparent;
       color: var(--text);
       height: 100vh;
       overflow: hidden;
       display: flex;
+      position: relative;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
       text-rendering: optimizeLegibility;
       letter-spacing: -0.01em;
     }
 
-    /* Aurora vivante derrière le verre (Liquid Glass) */
-    body::before {
-      content: "";
+    /* ── Wallpaper layer (Liquid Glass v13) ── */
+    #wallpaper-layer {
       position: fixed;
-      inset: -25%;
+      inset: 0;
       z-index: -1;
+      overflow: hidden;
       pointer-events: none;
+    }
+    #wallpaper-image {
+      position: absolute;
+      inset: 0;
+      background-size: cover;
+      background-position: center;
+      filter: blur(0px) brightness(0.9);
+    }
+    #wallpaper-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.15);
+    }
+    .wp-aurora    { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 35%, #0f3460 70%, #533483 100%); }
+    .wp-sunset    { background: linear-gradient(135deg, #2d1b2e 0%, #5e2750 40%, #a8456b 75%, #e8845a 100%); }
+    .wp-forest    { background: linear-gradient(135deg, #0b1e14 0%, #163d2c 50%, #1f5c3d 100%); }
+    .wp-midnight  { background: linear-gradient(135deg, #050510 0%, #0a0a20 50%, #14143a 100%); }
+    .wp-mono      { background: #0C0C0F; }
+    .wp-mesh {
       background:
-        radial-gradient(38% 44% at 22% 18%, rgba(110,123,242,0.24), transparent 60%),
-        radial-gradient(34% 40% at 82% 26%, rgba(142,151,248,0.18), transparent 62%),
-        radial-gradient(46% 52% at 62% 96%, rgba(74,200,245,0.13), transparent 60%);
-      filter: blur(30px) saturate(1.35);
-      animation: auroraDrift 26s ease-in-out infinite alternate;
+        radial-gradient(at 20% 30%, rgba(108,142,255,0.25) 0px, transparent 50%),
+        radial-gradient(at 80% 20%, rgba(167,139,250,0.2) 0px, transparent 50%),
+        radial-gradient(at 50% 80%, rgba(74,222,128,0.15) 0px, transparent 50%),
+        #0C0C0F;
     }
-    @keyframes auroraDrift {
-      0%   { transform: translate3d(-3%, -2%, 0) scale(1.05) rotate(0deg); }
-      50%  { transform: translate3d(4%, 3%, 0) scale(1.13) rotate(4deg); }
-      100% { transform: translate3d(-2%, 4%, 0) scale(1.08) rotate(-3deg); }
+    .wp-mesh-animated {
+      background:
+        radial-gradient(at 20% 30%, rgba(108,142,255,0.25) 0px, transparent 50%),
+        radial-gradient(at 80% 20%, rgba(167,139,250,0.2) 0px, transparent 50%),
+        radial-gradient(at 50% 80%, rgba(74,222,128,0.15) 0px, transparent 50%),
+        #0C0C0F;
+      background-size: 200% 200%;
+      animation: meshShift 30s ease-in-out infinite alternate;
     }
+    @keyframes meshShift {
+      0%   { background-position: 0% 0%, 100% 0%, 50% 100%; }
+      100% { background-position: 30% 20%, 70% 30%, 60% 80%; }
+    }
+    .wallpaper-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+    .wp-thumb { height: 60px; border-radius: 12px; cursor: pointer; border: 2px solid transparent; transition: border-color 0.15s; }
+    .wp-thumb:hover, .wp-thumb.active { border-color: var(--accent); }
 
     /* Scrollbars premium (fines, discrètes) */
     *::-webkit-scrollbar { width: 9px; height: 9px; }
@@ -99,43 +129,32 @@
 
     body.reduced-motion * { animation: none !important; transition: none !important; }
 
-    /* ===== Liquid Glass (iOS 26 / macOS Tahoe) — activable/désactivable ===== */
-    body:not(.no-glass) #sidebar,
-    body:not(.no-glass) #header,
-    body:not(.no-glass) #input-bar,
-    body:not(.no-glass) #settings-panel,
-    body:not(.no-glass) .bubble-user,
-    body:not(.no-glass) .hbtn,
-    body:not(.no-glass) #quit-modal > div {
-      /* vibrance : on tire la couleur de l'aurora à travers le verre */
-      backdrop-filter: blur(50px) saturate(220%) brightness(1.12) contrast(1.05);
-      -webkit-backdrop-filter: blur(50px) saturate(220%) brightness(1.12) contrast(1.05);
-      /* fin reflet lumineux qui glisse du haut (lumière captée par le verre) */
-      background-image: linear-gradient(180deg,
-                          rgba(255,255,255,0.10) 0%,
-                          rgba(255,255,255,0.025) 16%,
-                          rgba(255,255,255,0) 42%);
-      box-shadow:
-        inset 0 1px 0.5px rgba(255,255,255,0.45),     /* liseré spéculaire haut */
-        inset 0 0 0 0.5px rgba(255,255,255,0.08),       /* hairline border */
-        inset 0 -14px 32px -16px rgba(0,0,0,0.34),      /* profondeur basse */
-        0 16px 50px -12px rgba(0,0,0,0.50),             /* ombre ambiante portée */
-        0 2px 10px -3px rgba(0,0,0,0.38);               /* ombre de contact */
-    }
-    /* Le liseré spéculaire suit le coin arrondi de chaque surface */
-    body:not(.no-glass) .bubble-user { border: 0.5px solid rgba(255,255,255,0.10); }
-    body:not(.no-glass) .hbtn:hover {
-      background-image: linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0.04) 50%, transparent);
-    }
-
-    /* OFF : verre désactivé partout (rendu plat, opaque) */
+    /* ===== Liquid Glass (iOS 26/27) — activable/désactivable ===== */
     body.no-glass *, body.no-glass *::before, body.no-glass *::after {
       backdrop-filter: none !important;
       -webkit-backdrop-filter: none !important;
     }
     body.no-glass #sidebar, body.no-glass #header,
-    body.no-glass #input-bar, body.no-glass #settings-panel {
+    body.no-glass #input-zone, body.no-glass #settings-panel {
+      background: var(--surface) !important;
       background-image: none !important;
+    }
+
+    .glass-btn {
+      background: rgba(255,255,255,0.08);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border: 0.5px solid rgba(255,255,255,0.12);
+      border-radius: 14px;
+      transition: all 0.25s cubic-bezier(0.34, 1.2, 0.64, 1);
+    }
+    .glass-btn:hover {
+      background: rgba(255,255,255,0.14);
+      transform: scale(1.03);
+    }
+    .glass-btn:active {
+      transform: scale(0.97);
+      background: rgba(255,255,255,0.18);
     }
 
     /* ===== Hover « touches » — micro-interactions Liquid Glass (spring) ===== */
@@ -187,44 +206,74 @@
     /* ── Sidebar ── */
     #sidebar {
       width: 264px;
-      background: rgba(22,22,28,0.55);
-      backdrop-filter: blur(40px) saturate(180%) brightness(1.08);
-      -webkit-backdrop-filter: blur(40px) saturate(180%) brightness(1.08);
-      border-right: 1px solid rgba(255,255,255,0.10);
-      box-shadow: inset -1px 0 0 rgba(255,255,255,0.05), inset 1px 0 0 rgba(255,255,255,0.04);
+      background: rgba(20,20,28, var(--glass-alpha));
+      backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+      border-right: 0.5px solid rgba(255,255,255,0.1);
       display: flex;
       flex-direction: column;
       flex-shrink: 0;
     }
 
     .sidebar-brand {
-      padding: 20px 18px 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 16px 20px;
+      border-bottom: 0.5px solid rgba(255,255,255,0.08);
     }
+
+    .sidebar-brand-text { flex: 1; min-width: 0; }
 
     .sidebar-brand #assistant-name {
-      font-size: 19px;
-      font-weight: 700;
+      font-size: 16px;
+      font-weight: 600;
       color: var(--text);
-      letter-spacing: -0.03em;
+      letter-spacing: 1px;
     }
 
-    .sidebar-sub {
-      font-size: 12px;
+    .sidebar-brand #status-text {
+      font-size: 11px;
       color: var(--text3);
       margin-top: 2px;
+      text-align: left;
+      padding: 0;
     }
+
+    /* ── Logo JARVIS (v14) ── */
+    #aria-logo {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      filter: drop-shadow(0 0 8px rgba(108,142,255,0.3));
+      flex-shrink: 0;
+    }
+    .logo-arc-1 { transform-origin: 32px 32px; animation: logoRotate 12s linear infinite; }
+    .logo-arc-2 { transform-origin: 32px 32px; animation: logoRotate 8s linear infinite reverse; }
+    .logo-arc-3 { transform-origin: 32px 32px; animation: logoRotate 5s linear infinite; }
+    @keyframes logoRotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .logo-core { animation: logoPulse 3s ease-in-out infinite; transform-origin: 32px 32px; }
+    @keyframes logoPulse { 0%,100% { opacity:0.85; transform:scale(1); } 50% { opacity:1; transform:scale(1.08); } }
+    .logo-scan { transform-origin: 32px 32px; animation: logoScan 6s linear infinite; opacity:0.8; }
+    @keyframes logoScan { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .tick { stroke: rgba(108,142,255,0.25); stroke-width:1.5; stroke-linecap:round; animation: tickGlow 4s ease-in-out infinite; animation-delay: calc(var(--i) * 0.3s); }
+    @keyframes tickGlow { 0%,80%,100% { stroke: rgba(108,142,255,0.15); } 10% { stroke: rgba(108,142,255,0.8); } }
+    .logo-listening .logo-arc-1 { animation-duration: 4s; }
+    .logo-listening .logo-arc-2 { animation-duration: 3s; }
+    .logo-listening .logo-arc-3 { animation-duration: 2s; }
+    .logo-listening { filter: drop-shadow(0 0 12px rgba(0,212,255,0.45)) !important; }
+    .logo-thinking .logo-arc-1 { animation-duration: 2s; }
+    .logo-thinking .logo-arc-2 { animation-duration: 1.6s; animation-direction: normal; }
+    .logo-thinking .logo-arc-3 { animation-duration: 1.2s; }
+    .logo-thinking { filter: drop-shadow(0 0 14px rgba(167,139,250,0.5)) !important; }
+    .logo-speaking .logo-core { animation: logoPulseFast 0.6s ease-in-out infinite; fill: #4ADE80; }
+    @keyframes logoPulseFast { 0%,100% { opacity:0.8; transform:scale(1); } 50% { opacity:1; transform:scale(1.15); } }
+    .logo-speaking { filter: drop-shadow(0 0 14px rgba(74,222,128,0.45)) !important; }
 
     #orb-canvas {
       display: block;
       margin: 4px auto 0;
       opacity: 1;
-    }
-
-    #status-text {
-      text-align: center;
-      font-size: 11px;
-      color: var(--text3);
-      padding: 4px 12px 12px;
     }
 
     .sidebar-sep {
@@ -337,11 +386,10 @@
       align-items: center;
       padding: 0 24px;
       flex-shrink: 0;
-      border-bottom: 1px solid var(--border);
-      background: rgba(20,20,26,0.42);
-      backdrop-filter: blur(24px) saturate(1.7);
-      -webkit-backdrop-filter: blur(24px) saturate(1.7);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), var(--shadow-sm);
+      border-bottom: 0.5px solid rgba(255,255,255,0.08);
+      background: rgba(20,20,28, calc(var(--glass-alpha) + 0.02));
+      backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
       z-index: 5;
     }
 
@@ -458,20 +506,35 @@
     .hbtn {
       width: 36px;
       height: 36px;
-      border-radius: 12px;
-      background: rgba(255,255,255,0.06);
-      backdrop-filter: blur(16px) saturate(180%) brightness(1.1);
-      -webkit-backdrop-filter: blur(16px) saturate(180%) brightness(1.1);
-      border: 1px solid rgba(255,255,255,0.14);
-      box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.40), inset 0 -1px 1px rgba(0,0,0,0.15), 0 4px 14px rgba(0,0,0,0.22);
+      border-radius: 50%;
+      background: rgba(255,255,255,0.08);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 0.5px solid rgba(255,255,255,0.12);
       color: var(--text2);
       cursor: pointer;
       font-size: 16px;
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: all 0.15s;
+      transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
       padding: 0;
+    }
+
+    #mic-btn.listening, #input-mic-btn.listening {
+      background: rgba(108,142,255,0.25);
+      color: var(--accent);
+      box-shadow: 0 0 0 0 rgba(108,142,255,0.4);
+      animation: glassPulse 2s ease-in-out infinite;
+    }
+    @keyframes glassPulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(108,142,255,0.3); }
+      50%      { box-shadow: 0 0 0 12px rgba(108,142,255,0); }
+    }
+    #mic-btn.speaking, #input-mic-btn.speaking {
+      background: rgba(74,222,128,0.25);
+      border-color: rgba(74,222,128,0.4);
+      color: var(--success);
     }
 
     .hbtn:hover { background: var(--hover); border-color: var(--border2); color: var(--text); }
@@ -553,19 +616,19 @@
     .bubble-user {
       align-self: flex-end;
       max-width: 85%;
-      background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.045));
-      backdrop-filter: blur(22px) saturate(180%) brightness(1.1);
-      -webkit-backdrop-filter: blur(22px) saturate(180%) brightness(1.1);
-      border: 1px solid rgba(255,255,255,0.16);
-      border-radius: var(--user-radius) var(--user-radius) 5px var(--user-radius);
+      background: rgba(108,142,255, 0.18);
+      backdrop-filter: blur(20px) saturate(160%);
+      -webkit-backdrop-filter: blur(20px) saturate(160%);
+      border: 0.5px solid rgba(108,142,255,0.3);
+      border-radius: 20px 20px 6px 20px;
       padding: 13px 17px;
       font-size: var(--user-font);
       line-height: 1.7;
-      animation: fadeIn 0.34s cubic-bezier(0.32, 0.72, 0, 1);
+      animation: glassMorphIn 0.4s cubic-bezier(0.34, 1.4, 0.64, 1);
       white-space: pre-wrap;
       word-break: break-word;
       color: var(--text);
-      box-shadow: inset 0 1.5px 1px rgba(255,255,255,0.40), inset 0 -1px 1px rgba(255,255,255,0.05), 0 8px 26px rgba(0,0,0,0.32);
+      box-shadow: 0 1px 0 rgba(255,255,255,0.1) inset, 0 4px 16px rgba(0,0,0,0.15);
     }
 
     .bubble-user.center { align-self: center; }
@@ -575,7 +638,7 @@
       max-width: 100%;
       display: flex;
       gap: 14px;
-      animation: fadeIn 0.34s cubic-bezier(0.32, 0.72, 0, 1);
+      animation: glassMorphIn 0.4s cubic-bezier(0.34, 1.4, 0.64, 1);
     }
 
     .bubble-aria-wrap.center { align-self: center; }
@@ -585,17 +648,15 @@
       width: 28px;
       height: 28px;
       border-radius: 9px;
-      background: linear-gradient(135deg, var(--accent-2), var(--accent));
+      background: rgba(255,255,255,0.06);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 12px;
       flex-shrink: 0;
-      color: #fff;
       margin-top: 2px;
-      font-weight: 700;
-      box-shadow: 0 2px 12px var(--accent-glow);
+      border: 0.5px solid rgba(255,255,255,0.1);
     }
+    .bubble-avatar svg { width: 20px; height: 20px; }
 
     .bubble-body { flex: 1; min-width: 0; }
 
@@ -603,7 +664,12 @@
       font-size: var(--aria-font);
       line-height: 1.75;
       color: var(--text);
-      padding-top: 2px;
+      background: rgba(255,255,255, 0.05);
+      backdrop-filter: blur(16px) saturate(150%);
+      -webkit-backdrop-filter: blur(16px) saturate(150%);
+      border: 0.5px solid rgba(255,255,255,0.08);
+      border-radius: 6px 20px 20px 20px;
+      padding: 14px 18px;
       white-space: pre-wrap;
       word-break: break-word;
     }
@@ -663,88 +729,93 @@
       animation: blink 1s step-end infinite;
     }
 
-    /* ── Input bar ── */
+    /* ── Input zone (Dynamic Island) ── */
     #input-bar {
       position: sticky;
       bottom: 0;
-      background: linear-gradient(to top, var(--bg) 55%, rgba(11,11,13,0));
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      padding: 20px 20px 24px;
+      background: linear-gradient(to top, rgba(11,11,13,0.85) 55%, transparent);
+      padding: 12px 0 24px;
       max-width: 720px;
       margin: 0 auto;
       width: 100%;
       flex-shrink: 0;
     }
 
-    .input-wrapper {
-      position: relative;
-      width: 100%;
+    #input-zone {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      background: rgba(255,255,255,0.07);
+      backdrop-filter: blur(28px) saturate(180%);
+      -webkit-backdrop-filter: blur(28px) saturate(180%);
+      border: 0.5px solid rgba(255,255,255,0.12);
+      border-radius: 26px;
+      padding: 8px 8px 8px 12px;
+      margin: 0 20px;
+      transition: border-radius 0.3s, transform 0.2s, border-color 0.2s;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.2);
+    }
+
+    #input-zone:focus-within {
+      border-radius: 20px;
+      transform: scale(1.01);
+      border-color: rgba(108,142,255,0.4);
     }
 
     #text-input {
-      width: 100%;
-      background: rgba(255,255,255,0.055);
-      backdrop-filter: blur(20px) saturate(190%) brightness(1.12);
-      -webkit-backdrop-filter: blur(20px) saturate(190%) brightness(1.12);
-      border: 1px solid rgba(255,255,255,0.14);
-      border-radius: 24px;
-      padding: 16px 96px 16px 50px;
+      flex: 1;
+      min-width: 0;
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      padding: 10px 4px;
       font-size: 15px;
       color: var(--text);
       font-family: inherit;
       outline: none;
       resize: none;
-      min-height: 54px;
+      min-height: 38px;
       max-height: 200px;
       line-height: 1.5;
-      box-shadow:
-        inset 0 1.5px 1px rgba(255,255,255,0.40),
-        inset 0 -1px 1px rgba(255,255,255,0.05),
-        0 10px 34px rgba(0,0,0,0.42);
-      transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+      box-shadow: none;
     }
 
     #text-input:focus {
-      border-color: rgba(142,151,248,0.55);
-      background: rgba(255,255,255,0.08);
-      box-shadow:
-        inset 0 1.5px 1px rgba(255,255,255,0.50),
-        0 10px 34px rgba(0,0,0,0.42),
-        0 0 0 4px var(--accent-bg);
+      border: none;
+      background: transparent;
+      box-shadow: none;
     }
 
     #text-input::placeholder { color: var(--text3); }
 
     #input-mic-btn {
-      position: absolute;
-      left: 10px;
-      bottom: 10px;
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
-      background: transparent;
-      border: none;
+      position: static;
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.08);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 0.5px solid rgba(255,255,255,0.12);
       color: var(--text3);
       cursor: pointer;
       font-size: 16px;
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: color 0.15s, background 0.15s;
+      flex-shrink: 0;
+      transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
     }
 
-    #input-mic-btn:hover { color: var(--text); background: var(--hover); }
+    #input-mic-btn:hover { color: var(--text); background: rgba(255,255,255,0.14); }
     #input-mic-btn.active { color: var(--accent); background: var(--accent-bg); }
 
     #send-btn {
-      position: absolute;
-      right: 10px;
-      bottom: 11px;
-      width: 34px;
-      height: 34px;
-      border-radius: 11px;
-      background: linear-gradient(135deg, var(--accent-2), var(--accent));
+      position: static;
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      background: var(--accent);
       border: none;
       color: #fff;
       cursor: pointer;
@@ -752,22 +823,21 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      flex-shrink: 0;
       box-shadow: 0 4px 14px var(--accent-glow);
-      transition: filter 0.15s, transform 0.1s, box-shadow 0.15s;
+      transition: filter 0.15s, transform 0.25s cubic-bezier(0.34, 1.2, 0.64, 1), box-shadow 0.15s;
     }
 
-    #send-btn:hover { filter: brightness(1.08); box-shadow: 0 6px 22px var(--accent-glow); }
-    #send-btn:active { transform: scale(0.94); }
+    #send-btn:hover { filter: brightness(1.08); transform: scale(1.03); box-shadow: 0 6px 22px var(--accent-glow); }
+    #send-btn:active { transform: scale(0.97); }
 
     #file-btn {
-      position: absolute;
-      right: 48px;
-      bottom: 10px;
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
-      background: var(--card);
-      border: 1px solid var(--border);
+      position: static;
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.06);
+      border: 0.5px solid rgba(255,255,255,0.1);
       color: var(--text2);
       cursor: pointer;
       display: flex;
@@ -775,10 +845,10 @@
       justify-content: center;
       font-size: 16px;
       flex-shrink: 0;
-      transition: all 0.15s;
+      transition: all 0.25s cubic-bezier(0.34, 1.2, 0.64, 1);
     }
 
-    #file-btn:hover { color: var(--text); background: var(--hover); }
+    #file-btn:hover { color: var(--accent); background: rgba(255,255,255,0.12); transform: scale(1.03); }
 
     /* ── Settings panel ── */
     #settings-panel {
@@ -787,10 +857,11 @@
       right: -440px;
       width: 440px;
       height: 100vh;
-      background: rgba(20,20,23,0.82);
-      backdrop-filter: blur(40px) saturate(1.8);
-      -webkit-backdrop-filter: blur(40px) saturate(1.8);
-      border-left: 1px solid var(--border);
+      background: rgba(18,18,26, calc(var(--glass-alpha) + 0.08));
+      backdrop-filter: blur(40px) saturate(180%);
+      -webkit-backdrop-filter: blur(40px) saturate(180%);
+      border-left: 0.5px solid rgba(255,255,255,0.1);
+      box-shadow: -8px 0 40px rgba(0,0,0,0.3);
       z-index: 1000;
       transition: right 0.32s cubic-bezier(0.32, 0.72, 0, 1);
       overflow-y: auto;
@@ -838,38 +909,39 @@
       display: none;
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,0.6);
+      background: rgba(0,0,0,0.4);
       z-index: 9999;
       align-items: center;
       justify-content: center;
-      backdrop-filter: blur(4px);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
     }
 
     #quit-modal.open { display: flex !important; }
 
     .modal-box {
-      background: rgba(255,255,255,0.07);
-      backdrop-filter: blur(40px) saturate(180%) brightness(1.1);
-      -webkit-backdrop-filter: blur(40px) saturate(180%) brightness(1.1);
-      border: 1px solid rgba(255,255,255,0.16);
-      border-radius: 22px;
+      background: rgba(30,30,38,0.7);
+      backdrop-filter: blur(40px) saturate(180%);
+      -webkit-backdrop-filter: blur(40px) saturate(180%);
+      border: 0.5px solid rgba(255,255,255,0.15);
+      border-radius: 24px;
       padding: 28px;
       text-align: center;
       max-width: 300px;
-      box-shadow: inset 0 1.5px 1px rgba(255,255,255,0.40), 0 24px 60px rgba(0,0,0,0.55);
+      box-shadow: 0 16px 48px rgba(0,0,0,0.4);
     }
 
     .toast {
-      background: rgba(255,255,255,0.07);
-      backdrop-filter: blur(24px) saturate(180%) brightness(1.12);
-      -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.12);
-      border: 1px solid rgba(255,255,255,0.16);
-      border-radius: 14px;
+      background: rgba(40,40,50,0.5);
+      backdrop-filter: blur(30px) saturate(200%);
+      -webkit-backdrop-filter: blur(30px) saturate(200%);
+      border: 0.5px solid rgba(255,255,255,0.15);
+      border-radius: 18px;
       padding: 11px 16px;
       font-size: 12px;
       color: var(--text);
-      box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.40), 0 10px 30px rgba(0,0,0,0.45);
-      animation: toastIn 0.25s ease-out;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+      animation: toastDropIn 0.4s cubic-bezier(0.34, 1.4, 0.64, 1);
       max-width: 320px;
     }
 
@@ -880,8 +952,8 @@
 
     #toast-container {
       position: fixed;
-      bottom: 24px;
-      left: 280px;
+      top: 24px;
+      right: 24px;
       display: flex;
       flex-direction: column;
       gap: 8px;
@@ -900,8 +972,15 @@
     }
 
     @keyframes fadeIn { from { opacity: 0; transform: translateY(10px) scale(0.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
+    @keyframes glassMorphIn {
+      from { opacity: 0; transform: translateY(20px) scale(0.92); backdrop-filter: blur(0px); }
+      to { opacity: 1; transform: translateY(0) scale(1); backdrop-filter: blur(16px); }
+    }
     @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
-    @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes toastDropIn {
+      from { opacity: 0; transform: translateY(-20px) scale(0.9); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
 
     /* === MOBILE LAYOUT === */
     body.mobile-mode {
@@ -947,19 +1026,21 @@
     }
 
     body.mobile-mode #input-bar {
-      padding: 10px 12px;
+      padding: 10px 0;
       padding-bottom: env(safe-area-inset-bottom, 10px);
       position: sticky;
       bottom: 0;
-      background: var(--bg);
+      background: linear-gradient(to top, rgba(11,11,13,0.9) 60%, transparent);
       z-index: 100;
-      gap: 8px;
+    }
+
+    body.mobile-mode #input-zone {
+      margin: 0 12px;
     }
 
     body.mobile-mode #text-input {
       font-size: 16px;
-      border-radius: 22px;
-      padding: 12px 18px;
+      padding: 12px 4px;
     }
 
     body.mobile-mode #send-btn {
@@ -1080,15 +1161,52 @@
 </head>
 <body class="theme-slate">
 
+<div id="wallpaper-layer">
+  <div id="wallpaper-image" class="wp-mesh-animated"></div>
+  <div id="wallpaper-overlay"></div>
+</div>
+
 <!-- Sidebar -->
 <aside id="sidebar">
   <div class="sidebar-brand">
-    <div id="assistant-name">ARIA</div>
-    <div class="sidebar-sub">Assistant local</div>
+    <div id="aria-logo" class="logo-idle">
+      <svg viewBox="0 0 64 64" width="44" height="44" aria-hidden="true">
+        <defs>
+          <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#6C8EFF"/>
+            <stop offset="100%" stop-color="#A78BFA"/>
+          </linearGradient>
+          <linearGradient id="scanGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="rgba(108,142,255,0)"/>
+            <stop offset="50%" stop-color="rgba(108,142,255,0.9)"/>
+            <stop offset="100%" stop-color="rgba(108,142,255,0)"/>
+          </linearGradient>
+        </defs>
+        <g class="logo-ticks">
+          <line x1="32" y1="2" x2="32" y2="6" class="tick" style="--i:0"/>
+          <line x1="32" y1="58" x2="32" y2="62" class="tick" style="--i:1"/>
+          <line x1="2" y1="32" x2="6" y2="32" class="tick" style="--i:2"/>
+          <line x1="58" y1="32" x2="62" y2="32" class="tick" style="--i:3"/>
+          <line x1="11" y1="11" x2="14" y2="14" class="tick" style="--i:4"/>
+          <line x1="53" y1="11" x2="50" y2="14" class="tick" style="--i:5"/>
+          <line x1="11" y1="53" x2="14" y2="50" class="tick" style="--i:6"/>
+          <line x1="53" y1="53" x2="50" y2="50" class="tick" style="--i:7"/>
+        </g>
+        <circle class="logo-scan" cx="32" cy="32" r="29" fill="none" stroke="url(#scanGrad)" stroke-width="2" stroke-dasharray="15 200" stroke-linecap="round"/>
+        <circle class="logo-arc logo-arc-1" cx="32" cy="32" r="29" fill="none" stroke="url(#logoGrad)" stroke-width="1.5" stroke-dasharray="100 82" stroke-linecap="round"/>
+        <circle class="logo-arc logo-arc-2" cx="32" cy="32" r="23" fill="none" stroke="rgba(108,142,255,0.5)" stroke-width="1.5" stroke-dasharray="70 75" stroke-linecap="round"/>
+        <circle class="logo-arc logo-arc-3" cx="32" cy="32" r="17" fill="none" stroke="rgba(167,139,250,0.4)" stroke-width="1" stroke-dasharray="50 56" stroke-linecap="round"/>
+        <circle class="logo-core" cx="32" cy="32" r="9" fill="url(#logoGrad)"/>
+        <path class="logo-mark" d="M32 26 L37 38 L34 38 L32.5 34 L31.5 34 L30 38 L27 38 Z" fill="rgba(12,12,15,0.9)"/>
+      </svg>
+    </div>
+    <div class="sidebar-brand-text">
+      <div id="assistant-name">ARIA</div>
+      <div id="status-text">En veille</div>
+    </div>
   </div>
 
   <canvas id="orb-canvas" width="200" height="80"></canvas>
-  <div id="status-text">En veille</div>
 
   <div class="sidebar-sep"></div>
 
@@ -1124,11 +1242,16 @@
     <div class="header-actions">
       <span id="weather-clock" class="sr-only" aria-hidden="true"></span>
       <span id="model-display" class="sr-only" aria-hidden="true"></span>
+      <button type="button" class="hbtn glass-btn" title="Exporter en PDF" onclick="aria.exportCurrentConversation()">📄</button>
       <button type="button" id="stop-btn" onclick="aria.stopSpeaking()">Stop</button>
       <button type="button" class="hbtn" id="device-toggle" onclick="aria.toggleDevice()" title="Basculer PC/Mobile">💻</button>
       <button type="button" class="hbtn" id="mic-btn" title="Micro" onclick="aria.toggleMic()">🎤</button>
     </div>
   </header>
+
+  <div id="focus-indicator" style="display:none;position:fixed;top:12px;right:12px;background:rgba(167,139,250,0.15);border:1px solid rgba(167,139,250,0.3);color:#A78BFA;font-size:11px;padding:4px 10px;border-radius:8px;z-index:50">
+    🎯 Mode focus
+  </div>
 
   <div id="chat-column">
     <div id="chat-messages">
@@ -1140,10 +1263,10 @@
     </div>
 
     <div id="input-bar">
-      <div class="input-wrapper">
+      <div id="input-zone">
         <button type="button" id="input-mic-btn" title="Micro" onclick="aria.toggleMic()">🎤</button>
         <textarea id="text-input" rows="1" placeholder="Envoyer un message à ARIA…"></textarea>
-        <label id="file-btn" title="Joindre des fichiers" style="width:42px;height:42px;border-radius:10px;background:var(--card);border:1px solid var(--border);color:var(--text2);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;transition:all 0.15s">
+        <label id="file-btn" title="Joindre des fichiers">
           📎
           <input
             type="file"
@@ -1177,6 +1300,8 @@
 
 <script>
 const aria = {
+  _focusActive: false,
+  _partialTranscription: false,
   status: 'idle',
   theme: 'slate',
   themes: ['slate','warm','forest','rose','mono','contrast'],
@@ -1204,6 +1329,9 @@ const aria = {
     nuit: { label:'Nuit', icon:'🌙', apps_open:[], apps_close:['discord','steam','spotify','chrome'], volume:15, brightness:20 },
   },
   presetsCustom: {},
+  wallpaperType: 'mesh-animated',
+  wallpaperPath: '',
+  glassIntensity: 60,
   currentDevice: 'pc',
   _modelPickerData: null,
 
@@ -1274,6 +1402,7 @@ const aria = {
 
   async init() {
     await this.checkPin();
+    this.setGlassIntensity(60);
     this.orbCtx = document.getElementById('orb-canvas').getContext('2d');
     this.buildSettingsPanel();
     this.loadSettings();
@@ -1336,6 +1465,9 @@ const aria = {
     });
 
     requestAnimationFrame(() => this.drawOrb());
+    this.loadConfigFlags();
+    this.refreshFocusState();
+    setInterval(() => this.refreshFocusState(), 15000);
   },
 
   api(name, ...args) {
@@ -1414,11 +1546,76 @@ const aria = {
     const labels = { idle:'En veille', inactive:'En veille', listening:'Écoute…', transcribing:'Transcription…', thinking:'Réflexion…', speaking:'ARIA parle…' };
     document.getElementById('status-text').textContent = labels[state] || 'En veille';
     const active = ['listening','thinking','speaking','transcribing'].includes(state);
-    document.getElementById('mic-btn')?.classList.toggle('active', active);
-    document.getElementById('input-mic-btn')?.classList.toggle('active', active);
+    const micBtn = document.getElementById('mic-btn');
+    const inputMic = document.getElementById('input-mic-btn');
+    [micBtn, inputMic].forEach(btn => {
+      if (!btn) return;
+      btn.classList.remove('active', 'listening', 'speaking');
+      if (state === 'listening' || state === 'transcribing') btn.classList.add('listening');
+      else if (state === 'speaking') btn.classList.add('speaking');
+      else if (active) btn.classList.add('active');
+    });
+    const logo = document.getElementById('aria-logo');
+    if (logo) {
+      logo.classList.remove('logo-idle', 'logo-listening', 'logo-thinking', 'logo-speaking');
+      const map = { idle:'logo-idle', inactive:'logo-idle', listening:'logo-listening', transcribing:'logo-listening', thinking:'logo-thinking', speaking:'logo-speaking' };
+      logo.classList.add(map[state] || 'logo-idle');
+    }
     const stopBtn = document.getElementById('stop-btn');
     if (stopBtn) {
       stopBtn.style.display = ['speaking', 'thinking'].includes(state) ? 'inline-flex' : 'none';
+    }
+  },
+
+  logoAvatarHtml() {
+    return `<svg viewBox="0 0 64 64" width="20" height="20" aria-hidden="true">
+      <circle cx="32" cy="32" r="29" fill="none" stroke="#6C8EFF" stroke-width="1.5" stroke-dasharray="100 82"/>
+      <circle cx="32" cy="32" r="17" fill="none" stroke="rgba(167,139,250,0.4)" stroke-width="1"/>
+      <circle cx="32" cy="32" r="9" fill="#6C8EFF"/>
+      <path d="M32 26 L37 38 L34 38 L32.5 34 L31.5 34 L30 38 L27 38 Z" fill="rgba(12,12,15,0.9)"/>
+    </svg>`;
+  },
+
+  setGlassIntensity(value) {
+    const v = Math.max(0, Math.min(100, Number(value) || 0));
+    const blur = 4 + (v / 100) * 36;
+    const alpha = 0.18 - (v / 100) * 0.16;
+    document.documentElement.style.setProperty('--glass-blur', `${blur}px`);
+    document.documentElement.style.setProperty('--glass-alpha', String(alpha));
+    this.glassIntensity = v;
+  },
+
+  setWallpaper(type, path, skipSave) {
+    const layer = document.getElementById('wallpaper-image');
+    if (!layer) return;
+    layer.className = '';
+    layer.style.background = '';
+    if (type === 'custom' && path) {
+      layer.style.background = `url("${path}") center/cover no-repeat`;
+    } else if (type) {
+      layer.className = 'wp-' + type;
+    }
+    this.wallpaperType = type || 'mesh-animated';
+    this.wallpaperPath = path || '';
+    document.querySelectorAll('.wp-thumb').forEach(t => {
+      t.classList.toggle('active', t.dataset.wp === this.wallpaperType);
+    });
+    if (!skipSave) this.saveSettings();
+  },
+
+  async uploadWallpaper(file) {
+    if (!file) return;
+    try {
+      const b64 = await this.fileToBase64(file);
+      let path = this.api('save_wallpaper', b64, file.name);
+      if (path?.then) path = await path;
+      if (path) {
+        const p = String(path).replace(/^"|"$/g, '');
+        this.setWallpaper('custom', p);
+        this.showToast('Fond d\'écran mis à jour', 'success');
+      }
+    } catch (e) {
+      this.showToast('Erreur upload fond d\'écran', 'error');
     }
   },
 
@@ -1453,9 +1650,8 @@ const aria = {
     if (!this.currentWrap) {
       const wrap = document.createElement('div');
       wrap.className = 'bubble-aria-wrap' + (this.ariaAlign === 'center' ? ' center' : '') + (this.showAvatars ? '' : ' no-avatar');
-      const name = document.getElementById('assistant-name').textContent || 'A';
       wrap.innerHTML = `
-        <div class="bubble-avatar">${this.esc(name[0])}</div>
+        <div class="bubble-avatar">${this.logoAvatarHtml()}</div>
         <div class="bubble-body">
           <div class="bubble-content"></div>
           <button type="button" class="copy-btn" onclick="aria.copyBubble(this)">Copier</button>
@@ -1490,6 +1686,7 @@ const aria = {
   },
 
   showToast(msg, type = 'info', duration = 3000) {
+    if (this._focusActive && type !== 'error') return;
     const c = document.getElementById('toast-container');
     const t = document.createElement('div');
     t.className = `toast ${type}`;
@@ -1500,6 +1697,111 @@ const aria = {
   },
 
   showError(text) { this.showToast(text, 'error', 5000); },
+
+  showPartialTranscription(text) {
+    const input = document.getElementById('text-input');
+    if (!input) return;
+    input.value = text;
+    input.style.color = 'var(--text3)';
+    this._partialTranscription = true;
+    input.dispatchEvent(new Event('input'));
+  },
+
+  showFinalTranscription(text) {
+    const input = document.getElementById('text-input');
+    if (!input) return;
+    input.value = text;
+    input.style.color = 'var(--text)';
+    this._partialTranscription = false;
+    input.focus();
+    input.dispatchEvent(new Event('input'));
+  },
+
+  showChecklistProgress(section, item, total) {
+    const chat = document.getElementById('chat-messages');
+    let bar = document.getElementById('checklist-progress');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'checklist-progress';
+      bar.className = 'glass';
+      bar.style.cssText = 'position:sticky;top:0;margin:8px 16px;padding:10px 16px;border-radius:14px;font-size:13px;z-index:10';
+      chat.prepend(bar);
+    }
+    bar.innerHTML = `📋 ${this.esc(section)} — item ${item}/${total}`;
+  },
+
+  hideChecklistProgress() {
+    document.getElementById('checklist-progress')?.remove();
+  },
+
+  updateFocusIndicator(active) {
+    this._focusActive = !!active;
+    const el = document.getElementById('focus-indicator');
+    if (el) el.style.display = active ? 'block' : 'none';
+  },
+
+  async refreshFocusState() {
+    try {
+      let raw = this.api('is_focus_active');
+      if (raw?.then) raw = await raw;
+      this.updateFocusIndicator(raw === true || raw === 'true');
+    } catch (e) { /* ignore */ }
+  },
+
+  async loadConfigFlags() {
+    try {
+      let raw = this.api('get_config_flags');
+      if (raw?.then) raw = await raw;
+      const d = JSON.parse(raw || '{}');
+      const ww = document.getElementById('set-wake-word');
+      const rt = document.getElementById('set-realtime-stt');
+      const db = document.getElementById('set-daily-brief');
+      const gm = document.getElementById('set-german-mode');
+      if (ww) ww.checked = !!d.wake_word_enabled;
+      if (rt) rt.checked = !!d.realtime_transcription;
+      if (db) db.checked = d.daily_brief_enabled !== false;
+      if (gm) gm.checked = !!d.german_mode;
+    } catch (e) { console.warn('loadConfigFlags', e); }
+  },
+
+  async toggleWakeWord(enabled) {
+    const p = this.api('set_wake_word', enabled);
+    if (p?.then) await p;
+    this.showToast(enabled ? 'Activation vocale activée' : 'Activation vocale désactivée', 'success');
+    if (enabled) this.showToast('Redémarre ARIA pour activer le wake word', 'info', 5000);
+  },
+
+  async toggleRealtimeSTT(enabled) {
+    const p = this.api('set_realtime_stt', enabled);
+    if (p?.then) await p;
+    this.showToast(
+      enabled ? 'Transcription temps réel activée' : 'Transcription temps réel désactivée',
+      'info'
+    );
+    if (enabled) this.showToast('Redémarre ARIA pour appliquer le changement STT', 'info', 5000);
+  },
+
+  async toggleDailyBrief(enabled) {
+    const p = this.api('set_daily_brief', enabled);
+    if (p?.then) await p;
+    this.showToast(enabled ? 'Brief quotidien activé' : 'Brief quotidien désactivé', 'info');
+  },
+
+  async toggleGermanMode(enabled) {
+    const p = this.api('set_german_mode', enabled);
+    if (p?.then) await p;
+    this.showToast(enabled ? 'Mode allemand activé 🇩🇪' : 'Mode allemand désactivé', 'info');
+  },
+
+  async exportCurrentConversation() {
+    try {
+      let path = this.api('export_current_conversation');
+      if (path?.then) path = await path;
+      this.showToast('PDF exporté : ' + (path || 'ok'), 'success', 5000);
+    } catch (e) {
+      this.showToast('Erreur export PDF', 'error');
+    }
+  },
 
   updateWeather(text) {
     this.weatherText = text || '';
@@ -1799,6 +2101,7 @@ const aria = {
       this.loadMemoryStats();
       this.loadTrainingStats();
       this.loadMobileConnectInfo();
+      this.checkNexusStatus();
     }
   },
 
@@ -2012,6 +2315,9 @@ const aria = {
       opacity: (document.getElementById('set-opacity')?.value ?? 100) / 100,
       reduced_motion: document.getElementById('set-reduced-motion')?.checked ?? false,
       liquid_glass: document.getElementById('set-liquid-glass')?.checked ?? true,
+      glass_intensity: document.getElementById('set-glass-intensity')?.value ?? 60,
+      wallpaper_type: this.wallpaperType || 'mesh-animated',
+      wallpaper_path: this.wallpaperPath || '',
       user_bubble_bg: document.getElementById('set-user-bg')?.value,
       user_bubble_radius: document.getElementById('set-user-radius')?.value,
       user_bubble_font: document.getElementById('set-user-font')?.value,
@@ -2029,7 +2335,6 @@ const aria = {
       memory_enabled: document.getElementById('set-memory')?.checked,
       model_fast: document.getElementById('set-model-fast')?.value,
       model_heavy: document.getElementById('set-model-heavy')?.value,
-      model_code: document.getElementById('set-model-code')?.value,
       auto_routing: document.getElementById('set-auto-route')?.checked,
       silence_threshold: document.getElementById('set-silence-th')?.value,
       silence_duration: document.getElementById('set-silence-dur')?.value,
@@ -2050,6 +2355,7 @@ const aria = {
     this.reducedMotion = s.reduced_motion;
     document.body.classList.toggle('reduced-motion', this.reducedMotion);
     document.body.classList.toggle('no-glass', !s.liquid_glass);
+    this.setGlassIntensity(s.glass_intensity ?? 60);
     this.api('save_settings', JSON.stringify(s));
     this.api('set_voice', s.tts_voice);
     this.api('set_tts_rate', s.tts_rate);
@@ -2086,12 +2392,24 @@ const aria = {
           if (g) g.checked = d.liquid_glass;
           document.body.classList.toggle('no-glass', !d.liquid_glass);
         }
+        if (d.glass_intensity != null) {
+          const gi = document.getElementById('set-glass-intensity');
+          if (gi) gi.value = d.glass_intensity;
+          this.setGlassIntensity(d.glass_intensity);
+        } else {
+          this.setGlassIntensity(60);
+        }
+        if (d.wallpaper_type) {
+          this.setWallpaper(d.wallpaper_type, d.wallpaper_path || '', true);
+        } else {
+          this.setWallpaper('mesh-animated', '', true);
+        }
         const fields = [
           ['user_bubble_bg','set-user-bg'], ['user_bubble_radius','set-user-radius'],
           ['user_bubble_font','set-user-font'], ['aria_bubble_font','set-aria-font'],
           ['tts_voice','set-voice'], ['tts_volume','set-tts-vol','number'],
           ['assistant_name','set-name'], ['model_fast','set-model-fast'],
-          ['model_heavy','set-model-heavy'], ['model_code','set-model-code'],
+          ['model_heavy','set-model-heavy'],
           ['silence_threshold','set-silence-th'], ['silence_duration','set-silence-dur'],
           ['aria_align','set-aria-align'],
         ];
@@ -2178,18 +2496,32 @@ const aria = {
     let raw = this.api('check_nexus');
     if (raw?.then) raw = await raw;
     const status = JSON.parse(raw || '{}');
-    const el = document.getElementById('nexus-status');
-    if (!el) return;
-    if (status.enabled && status.available) {
-      el.textContent = '✓ Connecté';
-      el.style.color = 'var(--success)';
-    } else if (status.enabled) {
-      el.textContent = '✗ Inaccessible';
-      el.style.color = 'var(--error)';
-    } else {
-      el.textContent = 'Non activé';
-      el.style.color = 'var(--text3)';
-    }
+    const apply = (el, modelEl) => {
+      if (!el) return;
+      if (status.enabled && status.available) {
+        el.textContent = '✓ Connecté';
+        el.style.color = 'var(--success)';
+        if (modelEl) {
+          modelEl.textContent = '✓ Nexus actif';
+          modelEl.style.color = 'var(--success)';
+        }
+      } else if (status.enabled) {
+        el.textContent = '✗ Inaccessible';
+        el.style.color = 'var(--error)';
+        if (modelEl) {
+          modelEl.textContent = '✗ Nexus inaccessible';
+          modelEl.style.color = 'var(--error)';
+        }
+      } else {
+        el.textContent = 'Non activé';
+        el.style.color = 'var(--text3)';
+        if (modelEl) {
+          modelEl.textContent = 'En attente de Nexus';
+          modelEl.style.color = 'var(--text3)';
+        }
+      }
+    };
+    apply(document.getElementById('nexus-status'), document.getElementById('nexus-model-status'));
   },
 
   async refreshInstalledApps() {
@@ -2331,6 +2663,23 @@ const aria = {
         <div class="setting-row"><label>Opacité</label><input type="range" id="set-opacity" min="70" max="100" value="100" oninput="aria.saveSettings()"></div>
         <div class="setting-row"><label>Réduction animations</label><input type="checkbox" id="set-reduced-motion" onchange="aria.saveSettings()"></div>
         <div class="setting-row"><label>Effet verre (Liquid Glass)</label><input type="checkbox" id="set-liquid-glass" checked onchange="aria.saveSettings()"></div>
+        <div class="setting-row"><label>Intensité Liquid Glass</label><input type="range" id="set-glass-intensity" min="0" max="100" value="60" oninput="aria.setGlassIntensity(this.value); aria.saveSettings()"></div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-title">Fond d'écran</div>
+        <div class="wallpaper-grid">
+          <div class="wp-thumb wp-aurora" data-wp="aurora" onclick="aria.setWallpaper('aurora')"></div>
+          <div class="wp-thumb wp-sunset" data-wp="sunset" onclick="aria.setWallpaper('sunset')"></div>
+          <div class="wp-thumb wp-forest" data-wp="forest" onclick="aria.setWallpaper('forest')"></div>
+          <div class="wp-thumb wp-midnight" data-wp="midnight" onclick="aria.setWallpaper('midnight')"></div>
+          <div class="wp-thumb wp-mesh-animated active" data-wp="mesh-animated" onclick="aria.setWallpaper('mesh-animated')"></div>
+          <div class="wp-thumb wp-mono" data-wp="mono" onclick="aria.setWallpaper('mono')"></div>
+        </div>
+        <label class="settings-btn" style="text-align:center;cursor:pointer;display:block">
+          📷 Choisir une image personnelle
+          <input type="file" accept="image/*" style="display:none" onchange="aria.uploadWallpaper(this.files[0]); this.value=''">
+        </label>
       </div>
 
       <div class="settings-section">
@@ -2368,6 +2717,24 @@ const aria = {
         <div class="setting-row"><label>Vitesse</label><input type="range" id="set-tts-rate" min="-50" max="50" value="0" oninput="aria.saveSettings()"></div>
         <div class="setting-row"><label>Volume</label><input type="range" id="set-tts-vol" min="0" max="100" value="90" oninput="aria.saveSettings()"></div>
         <div class="setting-row"><label>Sons ambiance</label><input type="checkbox" id="set-sounds" checked onchange="aria.saveSettings()"></div>
+        <div class="setting-row">
+          <label style="font-weight:500;color:var(--text)">Activation vocale (« Hey Jarvis »)</label>
+          <input type="checkbox" id="set-wake-word" onchange="aria.toggleWakeWord(this.checked)">
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin:-6px 0 10px 0">Dis « Hey Jarvis » pour activer le micro sans clavier</div>
+        <div class="setting-row">
+          <label style="font-weight:500;color:var(--text)">Transcription temps réel</label>
+          <input type="checkbox" id="set-realtime-stt" onchange="aria.toggleRealtimeSTT(this.checked)">
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin:-6px 0 10px 0">Affiche le texte au fur et à mesure (plus de ressources GPU)</div>
+        <div class="setting-row">
+          <label style="font-weight:500;color:var(--text)">Brief quotidien automatique</label>
+          <input type="checkbox" id="set-daily-brief" checked onchange="aria.toggleDailyBrief(this.checked)">
+        </div>
+        <div class="setting-row">
+          <label style="font-weight:500;color:var(--text)">Mode allemand immersif</label>
+          <input type="checkbox" id="set-german-mode" onchange="aria.toggleGermanMode(this.checked)">
+        </div>
         <button class="settings-btn" onclick="aria.showToast('Test voix bientôt disponible','info')">Tester la voix</button>
       </div>
 
@@ -2500,12 +2867,9 @@ const aria = {
             <option value="qwen2.5-coder:14b">qwen2.5-coder:14b</option>
           </select>
         </div>
-        <div class="setting-row"><label>Code</label>
-          <select id="set-model-code" onchange="aria.saveSettings()">
-            <option value="qwen2.5-coder:14b">qwen2.5-coder:14b</option>
-            <option value="llama3.1:8b-instruct-q8_0">llama3.1:8b</option>
-            <option value="qwen3:14b">qwen3:14b</option>
-          </select>
+        <div class="setting-row">
+          <label>Code (Nexus)</label>
+          <span id="nexus-model-status" style="font-size:11px;color:var(--text3)">En attente de Nexus</span>
         </div>
         <div class="setting-row"><label>Routage auto</label><input type="checkbox" id="set-auto-route" checked onchange="aria.saveSettings()"></div>
       </div>

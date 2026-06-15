@@ -52,14 +52,21 @@ MODELS: dict[str, str] = {
     'fast':   'llama3.1:8b-instruct-q8_0',
     'medium': 'llama3.1:8b-instruct-q8_0',
     'heavy':  'qwen3:14b',
-    'code':   'qwen2.5-coder:14b',
-    'intent': 'llama3.2:1b',  # Détection d'intent ultra-rapide
+    'intent': 'llama3.2:1b',
 }
+
+KNOWN_INTENTS = [
+    'lancer_app', 'fermer_app', 'volume', 'meteo', 'heure_date', 'minuteur',
+    'search_web', 'search_news', 'aviation_metar', 'aviation_taf',
+    'math_calculate', 'question_libre', 'browser_open_site',
+    'browser_search_in_site', 'preset',
+]
 
 MODEL: str = _config.get("model", MODELS["heavy"])
 MODEL_FAST: str = _config.get("model_fast", MODELS["fast"])
 MODEL_HEAVY: str = _config.get("model_heavy", MODELS["heavy"])
-MODEL_CODE: str = _config.get("model_code", MODELS["code"])
+# Legacy UI/API — le rôle « code » est assuré par Nexus (fallback : MODEL_HEAVY).
+MODEL_CODE: str = _config.get("model_code", MODELS["heavy"])
 VISION_MODEL: str = _config.get("vision_model", "minicpm-v")
 INTENT_MODEL: str = _config.get("intent_model", MODELS["intent"])
 # Modèle de CONVERSATION : rapide par défaut (latence faible pour parler en direct).
@@ -180,7 +187,9 @@ PURE_ACTIONS = frozenset({
     "browser_open_site", "browser_open_url", "ouvrir_site",
     "browser_youtube_search", "browser_search_in_site", "browser_youtube_control",
     "browser_search_google", "cursor_open", "cursor_open_file", "git",
-    "nexus_prompt",
+    "nexus_prompt", "daily_brief", "export_pdf", "focus_mode_on", "focus_mode_off",
+    "calendar_today", "calendar_upcoming", "calendar_create", "revision_plan",
+    "german_mode_on", "german_mode_off", "run_macro", "smarthome", "social_discord",
 })
 
 # Actions that use an external API then summarize with LLM
@@ -343,6 +352,24 @@ def _build_dynamic_system_prompt() -> str:
     style_hint = memory_engine.get_engine().get_style_hint()
     if style_hint:
         dynamic_system += "\n\nSTYLE: " + style_hint
+    try:
+        import focus
+
+        if focus.is_focus_active():
+            dynamic_system += "\n\nMode focus actif : sois bref et direct, évite les digressions."
+    except Exception:
+        pass
+    try:
+        import german_mode
+
+        if german_mode.is_german_mode_active():
+            dynamic_system += (
+                "\n\nMode allemand immersif actif : réponds en allemand. "
+                "Si l'utilisateur écrit en allemand, corrige discrètement ses erreurs "
+                "en donnant la version correcte suivie d'une brève explication en français entre parenthèses."
+            )
+    except Exception:
+        pass
     return dynamic_system
 
 
@@ -424,17 +451,17 @@ def _ollama_request(
 
 
 def _detect_intent(text: str) -> dict:
-    """Détecte l'intent via llama3.2:1b — ultra rapide (~50-100ms)."""
-    prompt = f"""Classify this command in ONE word from this list:
-lancer_app|fermer_app|volume|meteo|heure_date|minuteur|search_web|search_news|aviation_metar|aviation_taf|math_calculate|question_libre|browser_open_site|browser_search_in_site|preset|nexus_prompt
-Command: "{text}"
-Answer with just the category, nothing else:"""
+    """Détection d'intent ultra-rapide via llama3.2:1b (~50-100ms)."""
+    prompt = f"""Classifie cette commande en UN mot parmi cette liste :
+{'|'.join(KNOWN_INTENTS)}
+Commande : "{text}"
+Réponds uniquement avec la catégorie, rien d'autre :"""
 
     try:
         response = requests.post(
             "http://localhost:11434/api/generate",
             json={
-                "model": MODELS["intent"],
+                "model": MODELS['intent'],
                 "prompt": prompt,
                 "stream": False,
                 "options": {"num_predict": 10, "temperature": 0.1},
@@ -442,19 +469,12 @@ Answer with just the category, nothing else:"""
             timeout=10,
         )
         raw = response.json().get("response", "").strip().lower()
-        known_intents = [
-            "lancer_app", "fermer_app", "volume", "meteo", "heure_date", "minuteur",
-            "search_web", "search_news", "aviation_metar", "aviation_taf",
-            "math_calculate", "question_libre", "browser_open_site",
-            "browser_search_in_site", "preset", "nexus_prompt",
-        ]
-        for intent in known_intents:
+        for intent in KNOWN_INTENTS:
             if intent in raw:
-                params = _fast_intent_params(intent, text)
-                return {"intent": intent, "params": params, "confidence": 0.85}
+                return {"intent": intent, "params": {}, "confidence": 0.85}
         return {"intent": "question_libre", "params": {}, "confidence": 0.5}
-    except Exception as exc:
-        logger.error("Intent detection error: %s", exc)
+    except Exception as e:
+        logger.error("Erreur détection intent: %s", e)
         return {"intent": "question_libre", "params": {}, "confidence": 0.3}
 
 
@@ -726,6 +746,19 @@ def _rule_based_intent(text: str) -> dict:
         (r"rappel|agenda|[ée]v[ée]nement", "rappel", {"text": text}),
         (r"quelle heure|quelle date|heure", "heure_date", {}),
         (r"blague", "blague", {}),
+        (r"fais-moi mon brief|brief du jour|résumé de la journée|quoi de neuf aujourd", "daily_brief", {}),
+        (r"exporte.*(conversation|pdf|session)", "export_pdf", {}),
+        (r"mode focus|mode concentration|ne me dérange pas", "focus_mode_on", {"text": text}),
+        (r"désactive.*focus|desactive.*focus|fin du mode focus", "focus_mode_off", {}),
+        (r"qu'est-ce que j'ai aujourd|mon agenda|mes rendez-vous", "calendar_today", {}),
+        (r"prochains rendez|semaine prochaine", "calendar_upcoming", {}),
+        (r"ajoute un rendez|programme un événement|crée un événement", "calendar_create", {"text": text}),
+        (r"plan de révision|planning bac|révision bac", "revision_plan", {}),
+        (r"mode allemand|passons à l'allemand|parle allemand", "german_mode_on", {}),
+        (r"désactive.*allemand|desactive.*allemand|retour au français", "german_mode_off", {}),
+        (r"lance la macro|exécute la macro|execute la macro", "run_macro", {"text": text}),
+        (r"allume|éteins|eteins|domotique|home assistant", "smarthome", {"text": text}),
+        (r"discord|messages discord", "social_discord", {}),
         (r"mémoire|memoire|souviens", "memoire", {"text": text}),
     ]
     for pattern, intent, params in rules:
@@ -830,6 +863,14 @@ def _present_action_result(result: str) -> None:
         return
     ui.append_assistant_text(result)
     ui.finalize_assistant_message()
+    try:
+        import focus
+
+        if focus.is_focus_active():
+            ui.set_status("idle")
+            return
+    except Exception:
+        pass
     ui.set_status("speaking")
     tts.speak(result)
     ui.set_status("idle")
@@ -843,6 +884,14 @@ def _finish_streamed_response(full_response: str, *, already_spoken: bool = Fals
     if already_spoken:
         ui.set_status("idle")
         return
+    try:
+        import focus
+
+        if focus.is_focus_active():
+            ui.set_status("idle")
+            return
+    except Exception:
+        pass
     ui.set_status("speaking")
     tts.speak(full_response)
     ui.set_status("idle")
@@ -1380,11 +1429,13 @@ def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
             return cursor_control.open_file_in_cursor(file_match.group(1))
         return cursor_control.handle(original_text)
     if intent == "cursor_generate_code":
+        from actions import nexus
+
         request = params.get("request", original_text)
-        # Nexus est l'éditeur de code de Mathi : on le privilégie dès qu'il répond.
-        if nexus_control.is_available():
-            return nexus_control.send_prompt(request)
-        return cursor_control.voice_to_cursor(request)
+        if nexus.is_enabled() and nexus.is_available():
+            return nexus.send_prompt(request)
+        response, _ = _conversation(request, stream_to_ui=False)
+        return response
     if intent == "cursor_prompt":
         payload = _extract_browser_text(original_text, "cursor_prompt")
         return browser.type_in_cursor_composer(payload or original_text)
@@ -1537,6 +1588,125 @@ def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
         return "C'est noté, je m'en souviendrai."
     if intent == "historique":
         return get_history_summary()
+    if intent == "daily_brief":
+        return generate_daily_brief()
+    if intent == "export_pdf":
+        from actions.export_pdf import export_conversation
+
+        messages = memory_engine.get_current_conversation_messages()
+        title = memory_engine.get_current_conversation_title()
+        path = export_conversation(messages, title=title)
+        return f"Conversation exportée : {path}"
+    if intent == "focus_mode_on":
+        import focus
+        import re
+
+        duration = None
+        m = re.search(r"(\d+)\s*(?:heure|h|minute|min)", original_text.lower())
+        if m:
+            val = int(m.group(1))
+            duration = val * 60 if "heure" in original_text.lower() or " h" in original_text.lower() else val
+        focus.set_focus_mode(True, duration)
+        try:
+            ui.update_focus_indicator(True)
+        except Exception:
+            pass
+        return "Mode focus activé." + (f" Pendant {duration} minutes." if duration else "")
+    if intent == "focus_mode_off":
+        import focus
+
+        focus.set_focus_mode(False)
+        try:
+            ui.update_focus_indicator(False)
+        except Exception:
+            pass
+        return "Mode focus désactivé."
+    if intent == "calendar_today":
+        from actions import gcalendar
+
+        if not gcalendar.is_configured():
+            return "Google Calendar non configuré. Lance setup_google.py."
+        events = gcalendar.get_today_events()
+        if events:
+            return "Aujourd'hui tu as : " + ", ".join(f"{e['time']} : {e['title']}" for e in events) + "."
+        return "Tu n'as rien de prévu aujourd'hui."
+    if intent == "calendar_upcoming":
+        from actions import gcalendar
+
+        if not gcalendar.is_configured():
+            return "Google Calendar non configuré."
+        events = gcalendar.get_upcoming_events(7)
+        if events:
+            lines = [f"{e['title']} ({e['start'][:10]})" for e in events[:5]]
+            return "Dans les 7 prochains jours : " + ", ".join(lines) + "."
+        return "Rien de prévu dans les 7 prochains jours."
+    if intent == "calendar_create":
+        from actions import gcalendar
+
+        import dateparser
+
+        if not gcalendar.is_configured():
+            return "Google Calendar non configuré."
+        dt = dateparser.parse(params.get("datetime_text", original_text), languages=["fr"])
+        if not dt:
+            return "Je n'ai pas compris la date/heure. Précise par exemple 'demain à 14h'."
+        title = params.get("title", original_text)
+        return gcalendar.create_event(title, dt, int(params.get("duration", 60)))
+    if intent == "revision_plan":
+        from actions.revision_planner import generate_plan
+
+        return generate_plan()
+    if intent == "german_mode_on":
+        import german_mode
+
+        german_mode.set_german_mode(True)
+        return "Mode allemand activé. Ich spreche jetzt Deutsch."
+    if intent == "german_mode_off":
+        import german_mode
+
+        german_mode.set_german_mode(False)
+        return "Mode allemand désactivé. Retour au français."
+    if intent == "run_macro":
+        from actions import macros
+
+        name = original_text.lower()
+        for key in macros.list_macros():
+            if key in name:
+                return macros.run_macro(key, lambda step: ask_return_text(step) or step)
+        return "Macro introuvable. Macros disponibles : " + ", ".join(macros.list_macros())
+    if intent == "smarthome":
+        from actions import smarthome
+
+        t = original_text.lower()
+        if "allume" in t or "active" in t:
+            entity = params.get("entity_id", "light.salon")
+            return smarthome.call_service("light", "turn_on", entity)
+        if "éteins" in t or "eteins" in t or "coupe" in t:
+            entity = params.get("entity_id", "light.salon")
+            return smarthome.call_service("light", "turn_off", entity)
+        return "Dis par exemple « allume la lumière » ou configure Home Assistant dans config.yaml."
+    if intent == "social_discord":
+        from actions import social
+
+        return social.read_discord_unread()
+    if intent == "drive_search":
+        from actions import gdrive
+
+        if gdrive.is_configured():
+            files = gdrive.search_files(params.get("query", original_text))
+            if files:
+                return "Fichiers trouvés : " + ", ".join(f["name"] for f in files[:5])
+            return "Aucun fichier trouvé."
+        return _handle_drive_intent(intent, params, original_text)
+    if intent == "drive_list":
+        from actions import gdrive
+
+        if gdrive.is_configured():
+            files = gdrive.list_recent()
+            if files:
+                return "Fichiers récents : " + ", ".join(f["name"] for f in files[:5])
+            return "Aucun fichier récent."
+        return _handle_drive_intent(intent, params, original_text)
     return ""
 
 
@@ -1635,12 +1805,83 @@ def _conversation(text: str, stream_to_ui: bool = True) -> tuple[str, bool]:
     return full_response, spoke_streaming
 
 
+def _describe_image_b64(image_b64: str, prompt: str) -> str:
+    """Description vision via Ollama (sans streaming UI)."""
+    try:
+        response = requests.post(
+            OLLAMA_CHAT_URL,
+            json={
+                "model": VISION_MODEL,
+                "messages": [{"role": "user", "content": prompt, "images": [image_b64]}],
+                "stream": False,
+            },
+            timeout=90,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data.get("message", {}).get("content", "").strip()
+    except requests.RequestException as exc:
+        logger.error("Vision error: %s", exc)
+        return f"Erreur analyse image: {exc}"
+
+
+def analyze_homework_image(image_b64: str, user_prompt: str = "") -> str:
+    """Analyse image devoir BAC : vision puis bascule heavy si résolution nécessaire."""
+    correction_mode = any(
+        kw in (user_prompt or "").lower()
+        for kw in ("corrige", "correction", "devoir", "exercice", "note", "évalue", "evalue")
+    )
+    vision_prompt = (
+        "Décris précisément le contenu de cette image : énoncé, correction, graphique… "
+        "Transcris le texte et formules visibles."
+    )
+    if correction_mode:
+        vision_prompt = (
+            "Analyse ce devoir scanné ou photographié. Transcris l'énoncé, identifie "
+            "les erreurs de l'élève si une correction est visible, sinon propose une correction détaillée."
+        )
+    description = _describe_image_b64(image_b64, vision_prompt)
+    if not description or description.startswith("Erreur"):
+        return description or "Impossible d'analyser l'image."
+    needs_solving = any(kw in description.lower() for kw in (
+        "énoncé", "exercice", "calculer", "démontrer", "résoudre", "déterminer"
+    ))
+    if correction_mode:
+        return ask_return_text(
+            f"Voici un devoir analysé:\n\n{description}\n\n"
+            f"{'Question: ' + user_prompt if user_prompt else 'Corrige et explique les erreurs étape par étape.'}"
+        )
+    if needs_solving and not user_prompt:
+        return ask_return_text(f"Voici un exercice transcrit:\n\n{description}\n\nRésous-le étape par étape.")
+    if user_prompt:
+        return ask_return_text(f"Contexte image: {description}\n\nQuestion: {user_prompt}")
+    return description
+
+
+def generate_daily_brief() -> str:
+    import brief
+
+    return brief.generate_daily_brief()
+
+
 def ask(text: str, *, show_user: bool = True) -> None:
     """Point d'entrée principal — route vers le bon handler selon l'intent."""
     if not text or not text.strip():
         return
 
     memory_engine.get_engine().update_active_hours()
+
+    import conversation_modes
+
+    mode_response = conversation_modes.try_handle(text)
+    if mode_response is not None:
+        if show_user:
+            ui.show_user_text(text)
+        ui.append_assistant_text(mode_response)
+        ui.finalize_assistant_message()
+        _speak_response(mode_response)
+        ui.set_status("idle")
+        return
 
     custom = memory.match_custom_command(text)
     if custom:

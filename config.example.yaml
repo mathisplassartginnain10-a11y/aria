@@ -119,3 +119,35 @@ nexus:
   enabled: false
   endpoint: ""  # URL de Nexus une fois lancé localement
   api_key: ""   # Clé API Nexus
+
+# Wake word (openwakeword — « Hey Jarvis »)
+wake_word_enabled: false
+wake_word_model: "hey_jarvis_v0.1"
+
+# STT temps réel (fenêtres glissantes, opt-in)
+realtime_transcription: false
+
+# Brief quotidien automatique au premier lancement du jour
+daily_brief_enabled: true
+
+# Mode focus / ne pas déranger
+focus_mode: false
+focus_mode_until: null
+
+# Mode allemand immersif (BAC spécialité)
+german_mode: false
+
+# Home Assistant (smart home — optionnel)
+home_assistant:
+  enabled: false
+  url: "http://homeassistant.local:8123"
+  token: ""
+
+# Réseaux sociaux (stubs — tokens optionnels)
+social:
+  discord_bot_token: ""
+  telegram_bot_token: ""
+  telegram_chat_id: ""
+
+# Modèle vision Ollama
+vision_model: minicpm-v

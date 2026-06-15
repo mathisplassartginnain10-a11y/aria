@@ -12,9 +12,14 @@ _CONFIG_PATH = app_paths.config_path()
 with _CONFIG_PATH.open("r", encoding="utf-8") as f:
     _config = yaml.safe_load(f)
 
-API_KEY = _config.get("newsapi_key", "")
 CACHE: dict[str, tuple[float, list]] = {}
 CACHE_TTL = 900
+
+
+def _api_key() -> str:
+    import api_keys
+
+    return api_keys.get_key("newsapi")
 
 
 def _fetch(url: str) -> dict | None:
@@ -32,12 +37,12 @@ def get_top_headlines(category: str = "general", country: str = "fr", n: int = 5
     if cache_key in CACHE and time.time() - CACHE[cache_key][0] < CACHE_TTL:
         return CACHE[cache_key][1]
 
-    if not API_KEY:
+    if not _api_key():
         return [{"title": "Clé API NewsAPI non configurée.", "description": ""}]
 
     url = (
         f"https://newsapi.org/v2/top-headlines"
-        f"?country={country}&category={category}&pageSize={n}&apiKey={API_KEY}"
+        f"?country={country}&category={category}&pageSize={n}&apiKey={_api_key()}"
     )
     data = _fetch(url)
     if data is None:
@@ -52,10 +57,10 @@ def get_top_headlines(category: str = "general", country: str = "fr", n: int = 5
 
 
 def get_by_topic(topic: str, n: int = 3) -> list[dict]:
-    if not API_KEY:
+    if not _api_key():
         return [{"title": "Clé API NewsAPI non configurée.", "description": ""}]
 
-    url = f"https://newsapi.org/v2/everything?q={topic}&pageSize={n}&language=fr&apiKey={API_KEY}"
+    url = f"https://newsapi.org/v2/everything?q={topic}&pageSize={n}&language=fr&apiKey={_api_key()}"
     data = _fetch(url)
     if data is None:
         return [{"title": "Recherche d'actualités échouée.", "description": ""}]

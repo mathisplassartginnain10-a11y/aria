@@ -1,0 +1,26 @@
+nom: "DR400 — Visite pré-vol"
+items:
+  - section: "Extérieur"
+    points:
+      - "Documents de bord présents (carnet de route, certificats)"
+      - "Niveau carburant vérifié visuellement aux deux réservoirs"
+      - "Pas de fuite de carburant ou d'huile sous le moteur"
+      - "Hélice : pas de fissure, pas d'impact"
+      - "Capot moteur bien fermé et verrouillé"
+      - "Pneus : pression et usure correctes"
+      - "Antennes en bon état"
+      - "Gouvernes libres, pas de jeu anormal"
+      - "Surfaces : pas de givre, neige, ou dommage"
+  - section: "Habitacle"
+    points:
+      - "Ceintures et harnais en bon état"
+      - "Documents avion à bord (certificat d'immatriculation, assurance, manuel de vol)"
+      - "Masse et centrage calculés et dans les limites"
+      - "Carburant suffisant pour le vol + réserve réglementaire"
+  - section: "Moteur — avant démarrage"
+    points:
+      - "Parking brake serré"
+      - "Mixture riche"
+      - "Volets configurés pour le décollage"
+      - "Trim réglé en position neutre"
+      - "Zone hélice dégagée — annoncer 'contact'"
