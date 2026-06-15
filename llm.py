@@ -852,8 +852,37 @@ def _execute_ddg_search(intent: str, params: dict, original_text: str) -> str:
     return summary
 
 
+def _should_speak_tts() -> bool:
+    """Parle si TTS global activé ou conversation en mode vocal."""
+    if _config.get("tts_enabled", False):
+        return True
+    try:
+        conv_id = memory_engine.get_current_conversation_id()
+        return memory_engine.get_conversation_mode(conv_id) == "vocal"
+    except Exception:
+        return False
+
+
 def _speak_response(summary: str) -> None:
     _present_action_result(summary)
+
+
+def _speak_already_displayed(text: str) -> None:
+    """TTS sans ré-afficher le texte (réponse déjà dans le chat)."""
+    if not text or not text.strip():
+        return
+    try:
+        import focus
+
+        if focus.is_focus_active():
+            return
+    except Exception:
+        pass
+    if not _should_speak_tts():
+        return
+    ui.set_status("speaking")
+    tts.speak(text, force=True)
+    ui.set_status("idle")
 
 
 def _present_action_result(result: str) -> None:
@@ -871,8 +900,11 @@ def _present_action_result(result: str) -> None:
             return
     except Exception:
         pass
+    if not _should_speak_tts():
+        ui.set_status("idle")
+        return
     ui.set_status("speaking")
-    tts.speak(result)
+    tts.speak(result, force=True)
     ui.set_status("idle")
 
 
@@ -883,6 +915,7 @@ def _finish_streamed_response(full_response: str, *, already_spoken: bool = Fals
         return
     if already_spoken:
         ui.set_status("idle")
+        tts.notify_speech_finished()
         return
     try:
         import focus
@@ -892,8 +925,11 @@ def _finish_streamed_response(full_response: str, *, already_spoken: bool = Fals
             return
     except Exception:
         pass
+    if not _should_speak_tts():
+        ui.set_status("idle")
+        return
     ui.set_status("speaking")
-    tts.speak(full_response)
+    tts.speak(full_response, force=True)
     ui.set_status("idle")
 
 
@@ -1776,9 +1812,13 @@ def _conversation(text: str, stream_to_ui: bool = True) -> tuple[str, bool]:
             if stream_to_ui:
                 if any(sentence_buffer.endswith(ending) for ending in sentence_endings):
                     sentence = sentence_buffer.strip()
-                    if sentence and len(sentence) > 5:
+                    if sentence and len(sentence) > 5 and _should_speak_tts():
                         ui.set_status("speaking")
-                        threading.Thread(target=tts.speak, args=(sentence,), daemon=True).start()
+                        threading.Thread(
+                            target=tts.speak,
+                            kwargs={"text": sentence, "force": True, "notify_finished": False},
+                            daemon=True,
+                        ).start()
                         spoke_streaming = True
                         sentence_buffer = ""
 
@@ -1787,9 +1827,13 @@ def _conversation(text: str, stream_to_ui: bool = True) -> tuple[str, bool]:
 
     if stream_to_ui and sentence_buffer.strip():
         remainder = sentence_buffer.strip()
-        if len(remainder) > 5:
+        if len(remainder) > 5 and _should_speak_tts():
             ui.set_status("speaking")
-            threading.Thread(target=tts.speak, args=(remainder,), daemon=True).start()
+            threading.Thread(
+                target=tts.speak,
+                kwargs={"text": remainder, "force": True, "notify_finished": True},
+                daemon=True,
+            ).start()
             spoke_streaming = True
 
     if stream_to_ui:
@@ -1879,7 +1923,7 @@ def ask(text: str, *, show_user: bool = True) -> None:
             ui.show_user_text(text)
         ui.append_assistant_text(mode_response)
         ui.finalize_assistant_message()
-        _speak_response(mode_response)
+        _speak_already_displayed(mode_response)
         ui.set_status("idle")
         return
 
@@ -2021,9 +2065,13 @@ def _stream_response(response, user_text: str = "", model: str = MODEL_HEAVY) ->
 
             if any(sentence_buffer.endswith(p) for p in sentence_endings):
                 sentence = sentence_buffer.strip()
-                if sentence and len(sentence) > 5:
+                if sentence and len(sentence) > 5 and _should_speak_tts():
                     ui.set_status("speaking")
-                    threading.Thread(target=tts.speak, args=(sentence,), daemon=True).start()
+                    threading.Thread(
+                        target=tts.speak,
+                        kwargs={"text": sentence, "force": True, "notify_finished": False},
+                        daemon=True,
+                    ).start()
                     spoke_streaming = True
                     sentence_buffer = ""
 
@@ -2032,9 +2080,13 @@ def _stream_response(response, user_text: str = "", model: str = MODEL_HEAVY) ->
 
     if sentence_buffer.strip():
         remainder = sentence_buffer.strip()
-        if len(remainder) > 5:
+        if len(remainder) > 5 and _should_speak_tts():
             ui.set_status("speaking")
-            threading.Thread(target=tts.speak, args=(remainder,), daemon=True).start()
+            threading.Thread(
+                target=tts.speak,
+                kwargs={"text": remainder, "force": True, "notify_finished": True},
+                daemon=True,
+            ).start()
             spoke_streaming = True
 
     ui.finalize_assistant_message()

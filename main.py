@@ -171,6 +171,7 @@ try:
             ui.set_status("idle")
             _mic_active = False
             _listen_thread = None
+            ui.notify_mic_state(False)
 
 
     def _resume_mic() -> None:
@@ -185,6 +186,7 @@ try:
             ui.set_status("listening")
             _listen_thread = threading.Thread(target=stt.start_listening, daemon=True)
             _listen_thread.start()
+            ui.notify_mic_state(True)
 
 
     def _start_mic() -> None:

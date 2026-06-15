@@ -270,6 +270,28 @@
     @keyframes logoPulseFast { 0%,100% { opacity:0.8; transform:scale(1); } 50% { opacity:1; transform:scale(1.15); } }
     .logo-speaking { filter: drop-shadow(0 0 14px rgba(74,222,128,0.45)) !important; }
 
+    .mic-emphasized {
+      animation: micEmphasize 2s ease-in-out infinite;
+      box-shadow: 0 0 0 0 rgba(108,142,255,0.4) !important;
+    }
+    @keyframes micEmphasize {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(108,142,255,0.3); transform: scale(1); }
+      50%      { box-shadow: 0 0 0 8px rgba(108,142,255,0); transform: scale(1.04); }
+    }
+
+    #mode-select-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 9000;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 24px;
+      background: rgba(0,0,0,0.4);
+      backdrop-filter: blur(8px);
+    }
+
     #orb-canvas {
       display: block;
       margin: 4px auto 0;
@@ -1298,6 +1320,38 @@
 
 <div id="toast-container"></div>
 
+<div id="mode-select-overlay" class="glass">
+  <div class="glass" style="padding:32px 40px;border-radius:24px;display:flex;flex-direction:column;align-items:center;gap:20px;max-width:360px">
+    <div id="aria-logo-mode-select" style="transform:scale(1.3)">
+      <svg viewBox="0 0 64 64" width="64" height="64" aria-hidden="true">
+        <defs>
+          <linearGradient id="logoGradMode" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#6C8EFF"/>
+            <stop offset="100%" stop-color="#A78BFA"/>
+          </linearGradient>
+        </defs>
+        <circle cx="32" cy="32" r="29" fill="none" stroke="url(#logoGradMode)" stroke-width="1.5" stroke-dasharray="100 82" stroke-linecap="round"/>
+        <circle cx="32" cy="32" r="17" fill="none" stroke="rgba(167,139,250,0.4)" stroke-width="1"/>
+        <circle cx="32" cy="32" r="9" fill="url(#logoGradMode)"/>
+        <path d="M32 26 L37 38 L34 38 L32.5 34 L31.5 34 L30 38 L27 38 Z" fill="rgba(12,12,15,0.9)"/>
+      </svg>
+    </div>
+    <div style="font-size:16px;color:var(--text);text-align:center">
+      Comment veux-tu échanger avec ARIA ?
+    </div>
+    <div style="display:flex;gap:12px;width:100%">
+      <button type="button" class="glass-btn mode-select-btn" data-mode="ecrit" style="flex:1;padding:16px;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer">
+        <span style="font-size:24px">💬</span>
+        <span style="font-size:13px">Écrit</span>
+      </button>
+      <button type="button" class="glass-btn mode-select-btn" data-mode="vocal" style="flex:1;padding:16px;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer">
+        <span style="font-size:24px">🎙️</span>
+        <span style="font-size:13px">Vocal</span>
+      </button>
+    </div>
+  </div>
+</div>
+
 <script>
 const aria = {
   _focusActive: false,
@@ -1317,6 +1371,16 @@ const aria = {
   showAvatars: true,
   ariaAlign: 'left',
   weatherText: '',
+  conversationMode: null,
+  currentConversationId: null,
+  ttsEnabledForSession: false,
+  micManuallyPaused: false,
+  _ttsFinishTimer: null,
+  _micRestartCooldown: false,
+
+  _isValidConversationMode(mode) {
+    return mode === 'ecrit' || mode === 'vocal';
+  },
   streamingCursor: null,
   currentWrap: null,
   currentContent: null,
@@ -1334,73 +1398,190 @@ const aria = {
   glassIntensity: 60,
   currentDevice: 'pc',
   _modelPickerData: null,
+  _initDone: false,
+  _pinUnlocking: false,
+  _pinUnlocked: false,
+  _pinCorrect: '0000',
+  _pinKeyHandler: null,
+
+  async loadAppPin() {
+    try {
+      let raw = this.api('get_app_pin');
+      if (raw?.then) raw = await raw;
+      this._pinCorrect = String(raw || '0000').replace(/\D/g, '').padStart(4, '0').slice(-4);
+    } catch (e) {
+      this._pinCorrect = '0000';
+    }
+  },
+
+  _updatePinDots() {
+    const len = (window._pinBuffer || '').length;
+    for (let i = 0; i < 4; i++) {
+      const dot = document.getElementById(`dot-${i}`);
+      if (dot) {
+        dot.style.background = i < len ? 'var(--accent)' : 'transparent';
+        dot.style.borderColor = i < len ? 'var(--accent)' : 'var(--border2)';
+      }
+    }
+    const input = document.getElementById('pin-input');
+    if (input && input.value !== window._pinBuffer) input.value = window._pinBuffer || '';
+  },
+
+  _teardownPinListeners() {
+    if (this._pinKeyHandler) {
+      document.removeEventListener('keydown', this._pinKeyHandler, true);
+      this._pinKeyHandler = null;
+    }
+  },
+
+  _validatePin(overlay) {
+    if (window._pinBuffer === this._pinCorrect) {
+      this._pinUnlocking = true;
+      this._pinUnlocked = true;
+      overlay.style.opacity = '0';
+      overlay.style.transition = 'opacity 0.3s';
+      this._teardownPinListeners();
+      setTimeout(() => {
+        overlay.remove();
+        const resolve = window._pinResolve;
+        window._pinResolve = null;
+        window._pinBuffer = '';
+        this._pinUnlocking = false;
+        if (resolve) resolve(true);
+      }, 300);
+      return;
+    }
+    const pinError = document.getElementById('pin-error');
+    const pinDots = document.getElementById('pin-dots');
+    if (pinError) pinError.textContent = 'Code incorrect';
+    if (pinDots) {
+      pinDots.style.animation = 'none';
+      void pinDots.offsetWidth;
+      pinDots.style.animation = 'shake 0.3s';
+    }
+    setTimeout(() => {
+      window._pinBuffer = '';
+      this._updatePinDots();
+      const input = document.getElementById('pin-input');
+      if (input) input.focus();
+      if (pinError) pinError.textContent = '';
+    }, 600);
+  },
+
+  pinPress(key) {
+    const overlay = document.getElementById('pin-overlay');
+    if (!overlay || this._pinUnlocking || this._pinUnlocked) return;
+
+    if (key === 'back') {
+      window._pinBuffer = (window._pinBuffer || '').slice(0, -1);
+    } else if (/^\d$/.test(String(key)) && (window._pinBuffer || '').length < 4) {
+      window._pinBuffer = (window._pinBuffer || '') + String(key);
+    } else {
+      return;
+    }
+
+    this._updatePinDots();
+    if (window._pinBuffer.length === 4) {
+      this._validatePin(overlay);
+    }
+  },
 
   async checkPin() {
+    if (this._pinUnlocked) return;
+    if (document.getElementById('pin-overlay')) {
+      return new Promise(resolve => { window._pinResolve = resolve; });
+    }
+
+    await this.loadAppPin();
+
     return new Promise(resolve => {
       const overlay = document.createElement('div');
       overlay.id = 'pin-overlay';
-      overlay.style.cssText = 'position:fixed;inset:0;background:var(--bg);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px';
+      overlay.style.cssText = 'position:fixed;inset:0;background:var(--bg);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px';
       overlay.innerHTML = `
         <div style="font-size:24px;font-weight:600;color:var(--text);letter-spacing:4px">A R I A</div>
-        <div style="font-size:13px;color:var(--text3)">Entrez votre code</div>
-        <div id="pin-dots" style="display:flex;gap:12px;margin:8px 0">
-          ${[0,1,2,3].map(i => `<div id="dot-${i}" style="width:14px;height:14px;border-radius:50%;border:2px solid var(--border2);background:transparent;transition:all 0.15s"></div>`).join('')}
+        <div style="font-size:13px;color:var(--text3)">Entrez votre code PIN</div>
+        <div id="pin-dots" style="display:flex;gap:12px;margin:4px 0">
+          ${[0, 1, 2, 3].map(i => `<div id="dot-${i}" style="width:14px;height:14px;border-radius:50%;border:2px solid var(--border2);background:transparent;transition:all 0.15s"></div>`).join('')}
         </div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:220px">
-          ${[1,2,3,4,5,6,7,8,9,'',0,'⌫'].map(n => `
-            <button onclick="aria.pinPress('${n}')" style="padding:18px;border-radius:10px;background:var(--surface);border:1px solid var(--border);color:var(--text);font-size:18px;cursor:pointer;font-family:inherit;${n==='' ? 'visibility:hidden' : ''}">${n}</button>
+        <input id="pin-input" type="tel" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="one-time-code"
+          placeholder="••••"
+          aria-label="Code PIN à 4 chiffres"
+          style="width:148px;padding:12px 16px;text-align:center;letter-spacing:12px;font-size:22px;border-radius:12px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;outline:none">
+        <div id="pin-keypad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:240px;margin-top:4px">
+          ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `
+            <button type="button" data-key="${n}" class="pin-key" style="padding:18px;border-radius:10px;background:var(--surface);border:1px solid var(--border);color:var(--text);font-size:18px;cursor:pointer;font-family:inherit">${n}</button>
           `).join('')}
+          <button type="button" data-key="back" class="pin-key" aria-label="Effacer" style="padding:18px;border-radius:10px;background:var(--surface);border:1px solid var(--border);color:var(--text3);font-size:16px;cursor:pointer;font-family:inherit">⌫</button>
+          <button type="button" data-key="0" class="pin-key" style="padding:18px;border-radius:10px;background:var(--surface);border:1px solid var(--border);color:var(--text);font-size:18px;cursor:pointer;font-family:inherit">0</button>
+          <button type="button" data-key="clear" class="pin-key" aria-label="Tout effacer" style="padding:18px;border-radius:10px;background:var(--surface);border:1px solid var(--border);color:var(--text3);font-size:13px;cursor:pointer;font-family:inherit">C</button>
         </div>
+        <div style="font-size:11px;color:var(--text3)">Clavier ou pavé numérique</div>
         <div id="pin-error" style="font-size:12px;color:var(--error);height:16px"></div>`;
       document.body.appendChild(overlay);
 
       window._pinResolve = resolve;
       window._pinBuffer = '';
+
+      const keypad = overlay.querySelector('#pin-keypad');
+      keypad.addEventListener('click', e => {
+        const btn = e.target.closest('[data-key]');
+        if (!btn) return;
+        e.preventDefault();
+        const k = btn.getAttribute('data-key');
+        if (k === 'clear') {
+          window._pinBuffer = '';
+          this._updatePinDots();
+          document.getElementById('pin-input')?.focus();
+        } else {
+          this.pinPress(k === 'back' ? 'back' : k);
+        }
+      });
+
+      const input = overlay.querySelector('#pin-input');
+      input.addEventListener('input', () => {
+        window._pinBuffer = input.value.replace(/\D/g, '').slice(0, 4);
+        input.value = window._pinBuffer;
+        this._updatePinDots();
+        if (window._pinBuffer.length === 4) this._validatePin(overlay);
+      });
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && window._pinBuffer.length === 4) {
+          e.preventDefault();
+          this._validatePin(overlay);
+        }
+      });
+
+      this._pinKeyHandler = e => {
+        if (!document.getElementById('pin-overlay') || this._pinUnlocking) return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        if (/^\d$/.test(e.key)) {
+          e.preventDefault();
+          this.pinPress(e.key);
+          return;
+        }
+        if (e.key === 'Backspace' || e.key === 'Delete') {
+          e.preventDefault();
+          this.pinPress('back');
+          return;
+        }
+        if (e.key === 'Enter' && window._pinBuffer.length === 4) {
+          e.preventDefault();
+          this._validatePin(overlay);
+        }
+      };
+      document.addEventListener('keydown', this._pinKeyHandler, true);
+
+      overlay.addEventListener('click', e => {
+        if (e.target === overlay) input.focus();
+      });
+      setTimeout(() => input.focus(), 150);
     });
   },
 
-  pinPress(key) {
-    if (key === '') return;
-    const CORRECT_PIN = '0000';
-
-    if (key === '⌫') {
-      window._pinBuffer = window._pinBuffer.slice(0, -1);
-    } else if (window._pinBuffer.length < 4) {
-      window._pinBuffer += key;
-    }
-
-    for (let i = 0; i < 4; i++) {
-      const dot = document.getElementById(`dot-${i}`);
-      if (dot) {
-        dot.style.background = i < window._pinBuffer.length ? 'var(--accent)' : 'transparent';
-        dot.style.borderColor = i < window._pinBuffer.length ? 'var(--accent)' : 'var(--border2)';
-      }
-    }
-
-    if (window._pinBuffer.length === 4) {
-      if (window._pinBuffer === CORRECT_PIN) {
-        document.getElementById('pin-overlay').style.opacity = '0';
-        document.getElementById('pin-overlay').style.transition = 'opacity 0.3s';
-        setTimeout(() => {
-          document.getElementById('pin-overlay').remove();
-          if (window._pinResolve) window._pinResolve(true);
-        }, 300);
-      } else {
-        document.getElementById('pin-error').textContent = 'Code incorrect';
-        document.getElementById('pin-dots').style.animation = 'shake 0.3s';
-        setTimeout(() => {
-          window._pinBuffer = '';
-          for (let i = 0; i < 4; i++) {
-            const dot = document.getElementById(`dot-${i}`);
-            if (dot) { dot.style.background = 'transparent'; dot.style.borderColor = 'var(--border2)'; }
-          }
-          document.getElementById('pin-error').textContent = '';
-        }, 600);
-      }
-    }
-  },
-
   async init() {
+    if (this._initDone) return;
+    this._initDone = true;
     await this.checkPin();
     this.setGlassIntensity(60);
     this.orbCtx = document.getElementById('orb-canvas').getContext('2d');
@@ -1468,6 +1649,15 @@ const aria = {
     this.loadConfigFlags();
     this.refreshFocusState();
     setInterval(() => this.refreshFocusState(), 15000);
+
+    document.querySelectorAll('.mode-select-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mode = btn.getAttribute('data-mode');
+        if (mode) this.selectConversationMode(mode);
+      });
+    });
+
+    await this.syncConversationModeOnStartup();
   },
 
   api(name, ...args) {
@@ -1907,7 +2097,112 @@ const aria = {
     this.setStatus('idle');
   },
 
-  toggleMic() { this.api('toggle_activation'); },
+  toggleMic() {
+    const wasListening = this.status === 'listening' || this.status === 'transcribing';
+    this.api('toggle_activation');
+    if (this.conversationMode === 'vocal') {
+      this.micManuallyPaused = wasListening;
+    }
+  },
+
+  startMic() {
+    this.api('start_mic');
+    this.micManuallyPaused = false;
+  },
+
+  showModeSelector() {
+    const overlay = document.getElementById('mode-select-overlay');
+    if (overlay) overlay.style.display = 'flex';
+  },
+
+  hideModeSelector() {
+    const overlay = document.getElementById('mode-select-overlay');
+    if (overlay) overlay.style.display = 'none';
+  },
+
+  addAriaBubble(text) {
+    this.appendToken(text);
+    this.finalizeMessage();
+  },
+
+  applyConversationModeUI(mode, { skipGreeting = false } = {}) {
+    if (!this._isValidConversationMode(mode)) return;
+    this.conversationMode = mode;
+    this.ttsEnabledForSession = mode === 'vocal';
+    const micBtn = document.getElementById('mic-btn');
+    const inputMic = document.getElementById('input-mic-btn');
+    if (mode === 'vocal') {
+      micBtn?.classList.add('mic-emphasized');
+      inputMic?.classList.add('mic-emphasized');
+      if (!skipGreeting) {
+        this.startMic();
+        const greeting = "Mode vocal activé. Je t'écoute.";
+        this.addAriaBubble(greeting);
+        this.api('speak_text', greeting);
+      }
+    } else {
+      this.micManuallyPaused = false;
+      micBtn?.classList.remove('mic-emphasized');
+      inputMic?.classList.remove('mic-emphasized');
+      document.getElementById('text-input')?.focus();
+    }
+  },
+
+  async selectConversationMode(mode) {
+    let id = this.currentConversationId;
+    if (!id) {
+      id = this.api('get_current_conversation_id');
+      if (id?.then) id = await id;
+    }
+    if (!id) return;
+
+    this.currentConversationId = id;
+    const p = this.api('set_conversation_mode', id, mode);
+    if (p?.then) await p;
+    this.hideModeSelector();
+    this.ttsEnabledForSession = mode === 'vocal';
+    this.applyConversationModeUI(mode);
+  },
+
+  async syncConversationModeForConversation(convId) {
+    this.currentConversationId = convId;
+    let mode = this.api('get_conversation_mode', convId);
+    if (mode?.then) mode = await mode;
+    if (!this._isValidConversationMode(mode)) {
+      this.conversationMode = null;
+      this.ttsEnabledForSession = false;
+      document.getElementById('mic-btn')?.classList.remove('mic-emphasized');
+      document.getElementById('input-mic-btn')?.classList.remove('mic-emphasized');
+      this.showModeSelector();
+      return;
+    }
+    this.applyConversationModeUI(mode, { skipGreeting: true });
+  },
+
+  async syncConversationModeOnStartup() {
+    let id = this.api('get_current_conversation_id');
+    if (id?.then) id = await id;
+    if (!id) return;
+    await this.syncConversationModeForConversation(id);
+  },
+
+  onMicExternalToggle(isActive) {
+    if (this.conversationMode === 'vocal') {
+      this.micManuallyPaused = !isActive;
+    }
+  },
+
+  onTTSFinished() {
+    clearTimeout(this._ttsFinishTimer);
+    this._ttsFinishTimer = setTimeout(() => {
+      if (this.conversationMode !== 'vocal' || this.micManuallyPaused) return;
+      if (['listening', 'transcribing', 'thinking', 'speaking'].includes(this.status)) return;
+      if (this._micRestartCooldown) return;
+      this._micRestartCooldown = true;
+      setTimeout(() => { this._micRestartCooldown = false; }, 2000);
+      this.startMic();
+    }, 450);
+  },
 
   sendText() {
     const input = document.getElementById('text-input');
@@ -2080,16 +2375,23 @@ const aria = {
       if (m.role === 'user') this.addUserBubble(m.text);
       else { this.appendToken(m.text); this.finalizeMessage(); }
     });
+    await this.syncConversationModeForConversation(id);
     this.showToast('Conversation chargée', 'success');
   },
 
   async startNewConversation() {
-    let p = this.api('new_conversation');
-    if (p?.then) await p;
+    let convId = this.api('new_conversation');
+    if (convId?.then) convId = await convId;
+    this.currentConversationId = convId;
+    this.conversationMode = null;
+    this.ttsEnabledForSession = false;
+    this.micManuallyPaused = false;
+    document.getElementById('mic-btn')?.classList.remove('mic-emphasized');
+    document.getElementById('input-mic-btn')?.classList.remove('mic-emphasized');
     document.querySelectorAll('.bubble-user,.bubble-aria-wrap').forEach(e => e.remove());
     this.updateEmpty();
     await this.loadConversations();
-    this.showToast('Nouvelle conversation', 'info');
+    this.showModeSelector();
   },
 
   toggleSettings(open) {
@@ -2986,7 +3288,9 @@ const aria = {
 
 window.aria = aria;
 window.addEventListener('pywebviewready', () => aria.init());
-if (!window.pywebview) window.addEventListener('load', () => aria.init());
+window.addEventListener('load', () => {
+  if (!aria._initDone) aria.init();
+});
 </script>
 
 <!-- MOBILE BOTTOM NAV -->

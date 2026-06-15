@@ -291,6 +291,16 @@ class AriaAPI:
     def update_focus_indicator(self, active: bool) -> None:
         self._js(f"if(window.aria) aria.updateFocusIndicator({json.dumps(active)})")
 
+    def get_app_pin(self) -> str:
+        import yaml
+
+        try:
+            with app_paths.config_path().open("r", encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+            return str(cfg.get("mobile_pin", "0000") or "0000")
+        except Exception:
+            return "0000"
+
     def get_config_flags(self) -> str:
         import yaml
 
@@ -317,7 +327,7 @@ class AriaAPI:
         import llm
         import memory_engine
 
-        messages = memory_engine.load_conversation(conv_id)
+        messages = memory_engine.switch_conversation(conv_id)
         llm.clear_history()
         llm.load_conversation_messages(messages)
         return json.dumps(messages)
@@ -326,9 +336,38 @@ class AriaAPI:
         import llm
         import memory_engine
 
-        memory_engine.new_conversation()
+        conv_id = memory_engine.new_conversation()
         llm.clear_history()
-        return "ok"
+        return conv_id
+
+    def get_current_conversation_id(self) -> str:
+        import memory_engine
+
+        return memory_engine.get_current_conversation_id()
+
+    def set_conversation_mode(self, conv_id: str, mode: str) -> None:
+        import memory_engine
+
+        memory_engine.set_conversation_mode(conv_id, mode)
+        logger.info("Mode conversation '%s' = %s", conv_id, mode)
+
+    def get_conversation_mode(self, conv_id: str) -> str | None:
+        import memory_engine
+
+        return memory_engine.get_conversation_mode(conv_id)
+
+    def speak_text(self, text: str) -> None:
+        import tts
+
+        tts.speak(text, force=True)
+
+    def start_mic(self) -> None:
+        try:
+            import main
+
+            main._resume_mic()
+        except Exception:
+            logger.exception("start_mic failed")
 
     def get_memory_stats(self) -> str:
         import json
@@ -1001,3 +1040,8 @@ def update_checklist_ui(section: str, item: int, total: int) -> None:
 def hide_checklist_ui() -> None:
     if _instance:
         _instance.hide_checklist_ui()
+
+
+def notify_mic_state(active: bool) -> None:
+    if _instance:
+        _instance._js(f"if(window.aria) aria.onMicExternalToggle({json.dumps(active)});")

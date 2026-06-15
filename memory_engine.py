@@ -197,6 +197,7 @@ class MemoryEngine:
             if not self._auto_save_running:
                 break
             try:
+                self.save_current_conversation()
                 self._save_all()
                 logger.debug("Auto-save mémoire effectuée")
             except Exception as exc:
@@ -237,7 +238,7 @@ class MemoryEngine:
         save_json(PROFILE_PATH, self.profile)
 
     def save_current_conversation(self) -> None:
-        if not self.current_conversation["messages"]:
+        if not self.current_conversation["messages"] and not self.current_conversation.get("mode"):
             return
         snapshot = copy.deepcopy(self.current_conversation)
         for i, conv in enumerate(self.conversations):
@@ -275,6 +276,43 @@ class MemoryEngine:
             if conv["id"] == conv_id:
                 return conv.get("messages", [])
         return []
+
+    def switch_conversation(self, conv_id: str) -> list:
+        self.save_current_conversation()
+        for conv in self.conversations:
+            if conv["id"] == conv_id:
+                self.current_conversation_id = conv_id
+                self.current_conversation = copy.deepcopy(conv)
+                if "messages" not in self.current_conversation:
+                    self.current_conversation["messages"] = []
+                return self.current_conversation["messages"]
+        return []
+
+    def set_conversation_mode(self, conv_id: str, mode: str) -> None:
+        if mode not in ("ecrit", "vocal"):
+            return
+        conv = self._find_conversation(conv_id)
+        if conv is None:
+            return
+        conv["mode"] = mode
+        if self.current_conversation_id == conv_id:
+            self.current_conversation["mode"] = mode
+        self.save_current_conversation()
+
+    def get_conversation_mode(self, conv_id: str) -> str | None:
+        conv = self._find_conversation(conv_id)
+        if conv is None:
+            return None
+        mode = conv.get("mode")
+        return mode if mode in ("ecrit", "vocal") else None
+
+    def _find_conversation(self, conv_id: str) -> dict | None:
+        if self.current_conversation_id == conv_id:
+            return self.current_conversation
+        for conv in self.conversations:
+            if conv["id"] == conv_id:
+                return conv
+        return None
 
     def record_message(self, role: str, text: str, intent: str | None = None, model: str | None = None) -> None:
         entry = {
@@ -647,6 +685,22 @@ def get_conversations_list() -> list:
 
 def load_conversation(conv_id: str) -> list:
     return get_engine().load_conversation(conv_id)
+
+
+def switch_conversation(conv_id: str) -> list:
+    return get_engine().switch_conversation(conv_id)
+
+
+def set_conversation_mode(conv_id: str, mode: str) -> None:
+    get_engine().set_conversation_mode(conv_id, mode)
+
+
+def get_conversation_mode(conv_id: str) -> str | None:
+    return get_engine().get_conversation_mode(conv_id)
+
+
+def get_current_conversation_id() -> str:
+    return get_engine().current_conversation_id
 
 
 def save_current_conversation() -> None:

@@ -196,8 +196,8 @@ def speak_sound(sound_name: str) -> None:
             logger.exception("Failed to play sound %s", sound_name)
 
 
-def speak(text: str) -> None:
-    if not TTS_ENABLED:
+def speak(text: str, *, force: bool = False, notify_finished: bool = True) -> None:
+    if not force and not TTS_ENABLED:
         logger.debug("TTS désactivé, skip: %s", text[:50])
         return
 
@@ -244,3 +244,17 @@ def speak(text: str) -> None:
                         tmp_path.unlink()
                     except OSError:
                         logger.warning("Could not delete temp audio: %s", tmp_path)
+
+    if notify_finished:
+        notify_speech_finished()
+
+
+def notify_speech_finished() -> None:
+    """Déclenche aria.onTTSFinished() côté JS (une fois par lecture complète)."""
+    try:
+        import ui as _ui
+
+        if _ui._instance:
+            _ui._instance._js("if(window.aria) aria.onTTSFinished();")
+    except Exception:
+        logger.debug("onTTSFinished callback skipped", exc_info=True)
