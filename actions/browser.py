@@ -222,6 +222,18 @@ def resolve_site_url(site_name: str) -> str:
         "meet": "meet.google.com", "photos": "photos.google.com",
         "calendar": "calendar.google.com", "agenda": "calendar.google.com",
         "classroom": "classroom.google.com",
+        # Services Google multi-mots (sinon « google » -> google.fr les capte avant)
+        "google docs": "docs.google.com", "google doc": "docs.google.com",
+        "google drive": "drive.google.com", "google sheets": "sheets.google.com",
+        "google sheet": "sheets.google.com", "google slides": "slides.google.com",
+        "google slide": "slides.google.com", "google maps": "maps.google.com",
+        "google map": "maps.google.com", "google agenda": "calendar.google.com",
+        "google calendar": "calendar.google.com", "google photos": "photos.google.com",
+        "google meet": "meet.google.com", "google traduction": "translate.google.com",
+        "google translate": "translate.google.com", "google keep": "keep.google.com",
+        "google classroom": "classroom.google.com", "google scholar": "scholar.google.com",
+        "google news": "news.google.com", "google forms": "docs.google.com/forms",
+        "google form": "docs.google.com/forms",
         "outlook": "outlook.live.com", "teams": "teams.microsoft.com",
         "onedrive": "onedrive.live.com", "office": "office.com",
         "azure": "portal.azure.com", "bing": "bing.com",
@@ -497,9 +509,19 @@ def resolve_site_url(site_name: str) -> str:
     if extra:
         return f"https://{extra}"
 
+    # Correspondance par mot entier — on garde l'alias le plus spécifique (le plus long).
+    # Évite que « google » capte « google docs », ou « x » capte n'importe quel mot.
+    best_alias: str | None = None
+    best_domain: str | None = None
     for alias, domain in aliases.items():
-        if alias in name or name in alias:
-            return f"https://{domain}"
+        if " " in alias:
+            matched = alias in name
+        else:
+            matched = re.search(rf"\b{re.escape(alias)}\b", name) is not None
+        if matched and (best_alias is None or len(alias) > len(best_alias)):
+            best_alias, best_domain = alias, domain
+    if best_domain:
+        return f"https://{best_domain}"
 
     clean = name.replace(" ", "").replace("'", "")
     if clean in aliases:

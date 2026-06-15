@@ -27,6 +27,9 @@ _training_process: subprocess.Popen | None = None
 _training_log: list[str] = []
 _training_status = "idle"
 
+_installed_apps_cache = None
+_installed_apps_cache_time = 0.0
+
 
 def _html_path() -> Path:
     path = app_paths.resource_path("ui", "index.html")
@@ -116,11 +119,18 @@ class AriaAPI:
             return "{}"
 
     def get_installed_apps(self) -> str:
+        """Scanne les apps réellement installées sur CE PC. Cache 1h."""
         import json
         import os
+        import time
         import winreg
 
-        apps = set()
+        global _installed_apps_cache, _installed_apps_cache_time
+
+        if _installed_apps_cache and (time.time() - _installed_apps_cache_time) < 3600:
+            return json.dumps(_installed_apps_cache)
+
+        apps: set[str] = set()
 
         keys = [
             (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
@@ -135,9 +145,14 @@ class AriaAPI:
                         sub = winreg.OpenKey(key, winreg.EnumKey(key, i))
                         try:
                             name, _ = winreg.QueryValueEx(sub, "DisplayName")
-                            if name and len(name) > 1:
+                            if (
+                                name
+                                and 1 < len(name) < 60
+                                and not name.startswith("{")
+                                and "KB" not in name[:3]
+                            ):
                                 apps.add(name.strip())
-                        except Exception:
+                        except FileNotFoundError:
                             pass
                     except Exception:
                         pass
@@ -154,7 +169,9 @@ class AriaAPI:
             for root, _, files in os.walk(d):
                 for f in files:
                     if f.endswith(".lnk"):
-                        apps.add(f.replace(".lnk", "").strip())
+                        name = f.replace(".lnk", "").strip()
+                        if 1 < len(name) < 60:
+                            apps.add(name)
 
         try:
             result = subprocess.run(
@@ -172,37 +189,43 @@ class AriaAPI:
             )
             for line in result.stdout.splitlines():
                 line = line.strip()
-                if line and "." in line:
-                    parts = line.split(".")
-                    clean = parts[-1] if len(parts) > 1 else line
-                    if len(clean) > 2:
+                if "." in line:
+                    clean = line.split(".")[-1]
+                    if 2 < len(clean) < 40:
                         apps.add(clean)
         except Exception:
             pass
 
         try:
-            from actions.apps import KNOWN_APPS
-
-            for k in KNOWN_APPS:
-                if isinstance(k, str) and len(k) > 1:
-                    apps.add(k.title())
+            steam_apps_path = r"C:\Program Files (x86)\Steam\steamapps\common"
+            if os.path.exists(steam_apps_path):
+                for game_dir in os.listdir(steam_apps_path):
+                    if 1 < len(game_dir) < 60:
+                        apps.add(game_dir)
         except Exception:
             pass
 
-        cleaned = sorted(
-            [
-                a
-                for a in apps
-                if a
-                and len(a) > 1
-                and len(a) < 60
-                and not a.startswith("{")
-                and not a.startswith("KB")
-            ],
-            key=str.lower,
-        )
-
+        cleaned = sorted([a for a in apps if a], key=str.lower)
+        _installed_apps_cache = cleaned
+        _installed_apps_cache_time = time.time()
+        logger.info("Scan apps installées: %d trouvées", len(cleaned))
         return json.dumps(cleaned)
+
+    def refresh_installed_apps(self) -> str:
+        """Force le rafraîchissement du cache d'apps."""
+        global _installed_apps_cache_time
+
+        _installed_apps_cache_time = 0
+        return self.get_installed_apps()
+
+    def check_nexus(self) -> str:
+        import json
+        from actions import nexus
+
+        return json.dumps({
+            "enabled": nexus.is_enabled(),
+            "available": nexus.is_available() if nexus.is_enabled() else False,
+        })
 
     def get_conversations(self) -> str:
         import json
@@ -481,23 +504,70 @@ class AriaAPI:
             "custom_model_exists": custom_exists,
         })
 
+    def get_available_models(self) -> str:
+        """Liste les modèles installés + le choix courant (sélecteur type Claude)."""
+        import json
+        import llm
+        import ollama_manager
+
+        try:
+            installed = ollama_manager.get_loaded_models() or []
+        except Exception:
+            installed = []
+
+        def norm(name: str) -> str:
+            return name.removesuffix(":latest") if name else ""
+
+        options: list[dict[str, str]] = [
+            {
+                "id": "auto",
+                "label": "Auto",
+                "subtitle": "Rapide par défaut, réflexion si la question est complexe",
+            },
+            {
+                "id": llm.MODEL_FAST,
+                "label": "Rapide",
+                "subtitle": llm.MODEL_FAST,
+            },
+            {
+                "id": llm.REASONING_MODEL,
+                "label": "Raisonnement",
+                "subtitle": llm.REASONING_MODEL,
+            },
+            {
+                "id": llm.MODEL_CODE,
+                "label": "Code",
+                "subtitle": llm.MODEL_CODE,
+            },
+        ]
+
+        seen = {norm(o["id"]) for o in options}
+        for name in installed:
+            n = norm(name)
+            if n and n not in seen:
+                seen.add(n)
+                options.append({"id": name, "label": n, "subtitle": "Installé localement"})
+
+        current = llm.FORCED_MODEL or "auto"
+        if current != "auto" and norm(current) not in {norm(o["id"]) for o in options}:
+            options.append({"id": current, "label": norm(current), "subtitle": "Modèle actif"})
+
+        return json.dumps({"current": current, "options": options})
+
     def switch_model(self, model_name: str) -> str:
-        """Change le modèle actif dans config.yaml et llm.py en temps réel."""
+        """Choisit le modèle utilisé (comme Claude). 'auto' = escalade intelligente."""
         import llm
         import yaml
 
         try:
+            llm.FORCED_MODEL = None if model_name == "auto" else model_name
             config_path = app_paths.config_path()
             with config_path.open("r", encoding="utf-8") as f:
                 cfg = yaml.safe_load(f)
-            cfg["model"] = model_name
+            cfg["active_model"] = model_name
             with config_path.open("w", encoding="utf-8") as f:
                 yaml.dump(cfg, f, allow_unicode=True)
-            llm.MODELS["heavy"] = model_name
-            llm.MODEL = model_name
-            llm.MODEL_HEAVY = model_name
-            llm.clear_history()
-            logger.info("Modèle changé: %s", model_name)
+            logger.info("Modèle actif: %s", model_name)
             return "ok"
         except Exception as e:
             logger.error("switch_model error: %s", e)

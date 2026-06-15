@@ -135,15 +135,9 @@ try:
             logger.info("Ollama : accessible")
         else:
             logger.info("Ollama : démarrage au lancement de ARIA")
-
-        model = config.get("model", "qwen3:14b")
-        if model not in ollama_manager.get_loaded_models():
-            logger.info("Modèle %s absent — pull automatique au besoin", model)
-            threading.Thread(
-                target=ollama_manager.pull_model, args=(model,), daemon=True
-            ).start()
-        else:
-            logger.info("Modèle %s : présent", model)
+        # NB : la vérification/pull des modèles se fait dans _start_ollama,
+        # APRÈS que le serveur réponde (sinon get_loaded_models() expire et
+        # croit à tort que le modèle est absent → pull inutile de plusieurs Go).
 
 
     def _cleanup() -> None:
@@ -219,17 +213,36 @@ try:
 
     def _start_ollama() -> None:
         ollama_manager.start()
-        if ollama_manager.wait_until_ready(timeout=30):
-            ui.show_toast("Ollama démarré")
-            fast_model = str(_config.get("model_fast", "llama3.1:8b-instruct-q8_0"))
-            threading.Thread(
-                target=ollama_manager.warmup_model,
-                args=(fast_model,),
-                daemon=True,
-            ).start()
-            # qwen3:14b — chargement lazy à la première utilisation
-        else:
+        if not ollama_manager.wait_until_ready(timeout=60):
             ui.show_toast("Ollama non disponible")
+            return
+        ui.show_toast("Ollama démarré")
+
+        # Modèles : on vérifie SEULEMENT maintenant (Ollama répond).
+        loaded = ollama_manager.get_loaded_models()
+        model = str(_config.get("model", "qwen3:14b"))
+        if loaded and model not in loaded:
+            if _logger:
+                _logger.info("Modèle %s absent — pull en arrière-plan", model)
+            threading.Thread(
+                target=ollama_manager.pull_model, args=(model,), daemon=True
+            ).start()
+        elif loaded and _logger:
+            _logger.info("Modèle %s : présent", model)
+
+        # Préchauffe : modèle intent (1b) + modèle conversation rapide (8b).
+        import llm
+
+        threading.Thread(
+            target=ollama_manager.warmup_model,
+            args=(llm.MODELS["intent"],),
+            daemon=True,
+        ).start()
+        threading.Thread(
+            target=ollama_manager.warmup_model,
+            args=(llm.MODELS["fast"],),
+            daemon=True,
+        ).start()
 
 
     def _on_hotkey(_event=None) -> None:

@@ -42,6 +42,12 @@
     body.theme-mono { --accent:#ECECEC; --accent-bg:rgba(255,255,255,0.08); }
     body.theme-contrast { --accent:#fff; --accent-bg:rgba(255,255,255,0.15); --text:#fff; --text2:#ccc; --border:rgba(255,255,255,0.2); }
 
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-6px); }
+      75% { transform: translateX(6px); }
+    }
+
     body {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
       background:
@@ -56,6 +62,26 @@
       -moz-osx-font-smoothing: grayscale;
       text-rendering: optimizeLegibility;
       letter-spacing: -0.01em;
+    }
+
+    /* Aurora vivante derrière le verre (Liquid Glass) */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: -25%;
+      z-index: -1;
+      pointer-events: none;
+      background:
+        radial-gradient(38% 44% at 22% 18%, rgba(110,123,242,0.24), transparent 60%),
+        radial-gradient(34% 40% at 82% 26%, rgba(142,151,248,0.18), transparent 62%),
+        radial-gradient(46% 52% at 62% 96%, rgba(74,200,245,0.13), transparent 60%);
+      filter: blur(30px) saturate(1.35);
+      animation: auroraDrift 26s ease-in-out infinite alternate;
+    }
+    @keyframes auroraDrift {
+      0%   { transform: translate3d(-3%, -2%, 0) scale(1.05) rotate(0deg); }
+      50%  { transform: translate3d(4%, 3%, 0) scale(1.13) rotate(4deg); }
+      100% { transform: translate3d(-2%, 4%, 0) scale(1.08) rotate(-3deg); }
     }
 
     /* Scrollbars premium (fines, discrètes) */
@@ -73,13 +99,99 @@
 
     body.reduced-motion * { animation: none !important; transition: none !important; }
 
+    /* ===== Liquid Glass (iOS 26 / macOS Tahoe) — activable/désactivable ===== */
+    body:not(.no-glass) #sidebar,
+    body:not(.no-glass) #header,
+    body:not(.no-glass) #input-bar,
+    body:not(.no-glass) #settings-panel,
+    body:not(.no-glass) .bubble-user,
+    body:not(.no-glass) .hbtn,
+    body:not(.no-glass) #quit-modal > div {
+      /* vibrance : on tire la couleur de l'aurora à travers le verre */
+      backdrop-filter: blur(50px) saturate(220%) brightness(1.12) contrast(1.05);
+      -webkit-backdrop-filter: blur(50px) saturate(220%) brightness(1.12) contrast(1.05);
+      /* fin reflet lumineux qui glisse du haut (lumière captée par le verre) */
+      background-image: linear-gradient(180deg,
+                          rgba(255,255,255,0.10) 0%,
+                          rgba(255,255,255,0.025) 16%,
+                          rgba(255,255,255,0) 42%);
+      box-shadow:
+        inset 0 1px 0.5px rgba(255,255,255,0.45),     /* liseré spéculaire haut */
+        inset 0 0 0 0.5px rgba(255,255,255,0.08),       /* hairline border */
+        inset 0 -14px 32px -16px rgba(0,0,0,0.34),      /* profondeur basse */
+        0 16px 50px -12px rgba(0,0,0,0.50),             /* ombre ambiante portée */
+        0 2px 10px -3px rgba(0,0,0,0.38);               /* ombre de contact */
+    }
+    /* Le liseré spéculaire suit le coin arrondi de chaque surface */
+    body:not(.no-glass) .bubble-user { border: 0.5px solid rgba(255,255,255,0.10); }
+    body:not(.no-glass) .hbtn:hover {
+      background-image: linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0.04) 50%, transparent);
+    }
+
+    /* OFF : verre désactivé partout (rendu plat, opaque) */
+    body.no-glass *, body.no-glass *::before, body.no-glass *::after {
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+    }
+    body.no-glass #sidebar, body.no-glass #header,
+    body.no-glass #input-bar, body.no-glass #settings-panel {
+      background-image: none !important;
+    }
+
+    /* ===== Hover « touches » — micro-interactions Liquid Glass (spring) ===== */
+    .hbtn { position: relative; overflow: hidden; }
+    .hbtn, #send-btn, .file-btn, .theme-swatch, #presets-list > * {
+      transition: transform .26s cubic-bezier(0.34, 1.45, 0.5, 1),
+                  filter .22s ease, box-shadow .22s ease,
+                  background .2s ease, border-color .2s ease, color .2s ease;
+    }
+    /* Boutons d'en-tête : soulèvement + halo accent + balayage de lumière */
+    .hbtn:hover {
+      transform: translateY(-2px) scale(1.06);
+      filter: drop-shadow(0 6px 14px rgba(0,0,0,0.45)) drop-shadow(0 0 11px var(--accent-glow));
+    }
+    .hbtn:active { transform: scale(0.93); transition-duration: .08s; }
+    .hbtn::after {
+      content: ""; position: absolute; top: 0; left: -80%;
+      width: 55%; height: 100%; pointer-events: none; opacity: 0;
+      background: linear-gradient(105deg, transparent, rgba(255,255,255,0.50), transparent);
+      transform: skewX(-18deg);
+    }
+    .hbtn:hover::after { animation: glassSheen .75s ease forwards; }
+    @keyframes glassSheen {
+      0%   { left: -80%; opacity: 0; }
+      18%  { opacity: .9; }
+      100% { left: 135%; opacity: 0; }
+    }
+    /* Bouton d'envoi : pop élastique + halo */
+    #send-btn:hover {
+      transform: translateY(-1px) scale(1.09);
+      filter: brightness(1.1) saturate(1.1) drop-shadow(0 0 14px var(--accent-glow));
+    }
+    #send-btn:active { transform: scale(0.9); transition-duration: .08s; }
+    .file-btn:hover { transform: translateY(-1px) scale(1.12); color: var(--accent); }
+    /* Items de navigation / modes : glissement + teinte */
+    .nav-item, #presets-list > *, .conv-item {
+      transition: background .15s, color .15s,
+                  transform .24s cubic-bezier(0.34, 1.4, 0.5, 1);
+    }
+    .nav-item:hover, #presets-list > *:hover, .conv-item:hover { transform: translateX(4px); }
+    .nav-item:active, #presets-list > *:active { transform: translateX(2px) scale(0.99); }
+    /* Échantillons de thème : pop lumineux */
+    .theme-swatch:hover {
+      transform: translateY(-2px) scale(1.07);
+      box-shadow: 0 8px 22px rgba(0,0,0,0.45), 0 0 0 2px rgba(255,255,255,0.18);
+    }
+    .theme-swatch:active { transform: scale(0.95); }
+
     /* ── Sidebar ── */
     #sidebar {
       width: 264px;
-      background: rgba(18,18,21,0.70);
-      backdrop-filter: blur(34px) saturate(1.7);
-      -webkit-backdrop-filter: blur(34px) saturate(1.7);
-      border-right: 1px solid var(--border);
+      background: rgba(22,22,28,0.55);
+      backdrop-filter: blur(40px) saturate(180%) brightness(1.08);
+      -webkit-backdrop-filter: blur(40px) saturate(180%) brightness(1.08);
+      border-right: 1px solid rgba(255,255,255,0.10);
+      box-shadow: inset -1px 0 0 rgba(255,255,255,0.05), inset 1px 0 0 rgba(255,255,255,0.04);
       display: flex;
       flex-direction: column;
       flex-shrink: 0;
@@ -226,9 +338,10 @@
       padding: 0 24px;
       flex-shrink: 0;
       border-bottom: 1px solid var(--border);
-      background: rgba(11,11,13,0.55);
-      backdrop-filter: blur(14px) saturate(1.2);
-      -webkit-backdrop-filter: blur(14px) saturate(1.2);
+      background: rgba(20,20,26,0.42);
+      backdrop-filter: blur(24px) saturate(1.7);
+      -webkit-backdrop-filter: blur(24px) saturate(1.7);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), var(--shadow-sm);
       z-index: 5;
     }
 
@@ -247,12 +360,110 @@
       justify-self: end;
     }
 
+    .header-left {
+      display: flex;
+      align-items: center;
+      justify-self: start;
+    }
+
+    .model-picker {
+      position: relative;
+    }
+
+    .model-picker-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 34px;
+      padding: 0 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.05);
+      color: var(--text2);
+      font-family: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+
+    .model-picker-btn:hover,
+    .model-picker.open .model-picker-btn {
+      background: var(--hover);
+      border-color: var(--border2);
+      color: var(--text);
+    }
+
+    .model-picker-chevron {
+      font-size: 10px;
+      opacity: 0.7;
+    }
+
+    .model-picker-menu {
+      display: none;
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      min-width: 280px;
+      max-width: min(360px, 90vw);
+      max-height: 320px;
+      overflow-y: auto;
+      background: var(--card);
+      border: 1px solid var(--border2);
+      border-radius: 12px;
+      box-shadow: var(--shadow-lg);
+      z-index: 1000;
+      padding: 6px;
+    }
+
+    .model-picker.open .model-picker-menu {
+      display: block;
+    }
+
+    .model-option {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+      width: 100%;
+      padding: 10px 12px;
+      border: none;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 13px;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .model-option:hover {
+      background: var(--hover);
+    }
+
+    .model-option.active {
+      background: var(--accent-bg);
+      color: var(--accent);
+    }
+
+    .model-option-sub {
+      font-size: 11px;
+      color: var(--text3);
+    }
+
+    .model-option.active .model-option-sub {
+      color: var(--accent-2);
+      opacity: 0.85;
+    }
+
     .hbtn {
       width: 36px;
       height: 36px;
-      border-radius: 10px;
-      background: transparent;
-      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: rgba(255,255,255,0.06);
+      backdrop-filter: blur(16px) saturate(180%) brightness(1.1);
+      -webkit-backdrop-filter: blur(16px) saturate(180%) brightness(1.1);
+      border: 1px solid rgba(255,255,255,0.14);
+      box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.40), inset 0 -1px 1px rgba(0,0,0,0.15), 0 4px 14px rgba(0,0,0,0.22);
       color: var(--text2);
       cursor: pointer;
       font-size: 16px;
@@ -342,8 +553,10 @@
     .bubble-user {
       align-self: flex-end;
       max-width: 85%;
-      background: linear-gradient(180deg, #24252B, var(--user-bg));
-      border: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.045));
+      backdrop-filter: blur(22px) saturate(180%) brightness(1.1);
+      -webkit-backdrop-filter: blur(22px) saturate(180%) brightness(1.1);
+      border: 1px solid rgba(255,255,255,0.16);
       border-radius: var(--user-radius) var(--user-radius) 5px var(--user-radius);
       padding: 13px 17px;
       font-size: var(--user-font);
@@ -352,7 +565,7 @@
       white-space: pre-wrap;
       word-break: break-word;
       color: var(--text);
-      box-shadow: var(--shadow-sm);
+      box-shadow: inset 0 1.5px 1px rgba(255,255,255,0.40), inset 0 -1px 1px rgba(255,255,255,0.05), 0 8px 26px rgba(0,0,0,0.32);
     }
 
     .bubble-user.center { align-self: center; }
@@ -471,10 +684,12 @@
 
     #text-input {
       width: 100%;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 18px;
-      padding: 15px 96px 15px 48px;
+      background: rgba(255,255,255,0.055);
+      backdrop-filter: blur(20px) saturate(190%) brightness(1.12);
+      -webkit-backdrop-filter: blur(20px) saturate(190%) brightness(1.12);
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 24px;
+      padding: 16px 96px 16px 50px;
       font-size: 15px;
       color: var(--text);
       font-family: inherit;
@@ -483,14 +698,20 @@
       min-height: 54px;
       max-height: 200px;
       line-height: 1.5;
-      box-shadow: var(--shadow-md);
+      box-shadow:
+        inset 0 1.5px 1px rgba(255,255,255,0.40),
+        inset 0 -1px 1px rgba(255,255,255,0.05),
+        0 10px 34px rgba(0,0,0,0.42);
       transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
     }
 
     #text-input:focus {
-      border-color: var(--accent);
-      background: var(--card);
-      box-shadow: var(--shadow-md), 0 0 0 4px var(--accent-bg);
+      border-color: rgba(142,151,248,0.55);
+      background: rgba(255,255,255,0.08);
+      box-shadow:
+        inset 0 1.5px 1px rgba(255,255,255,0.50),
+        0 10px 34px rgba(0,0,0,0.42),
+        0 0 0 4px var(--accent-bg);
     }
 
     #text-input::placeholder { color: var(--text3); }
@@ -601,6 +822,14 @@
     .preset-field label { display: block; font-size: 11px; color: var(--text3); margin-bottom: 3px; }
     .preset-field input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; color: var(--text); font-family: inherit; font-size: 12px; }
     .preset-save { width: 100%; margin-top: 6px; padding: 8px; border-radius: 8px; border: 1px solid rgba(255,107,53,0.3); background: var(--accent-bg); color: var(--accent); font-family: inherit; font-size: 12px; cursor: pointer; font-weight: 500; }
+    .app-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; min-height: 0; }
+    .app-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-bg); border: 1px solid rgba(108,142,255,0.25); color: var(--accent); border-radius: 6px; padding: 4px 8px; font-size: 12px; }
+    .chip-remove { cursor: pointer; opacity: 0.6; font-size: 10px; }
+    .chip-remove:hover { opacity: 1; }
+    .app-search { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; color: var(--text); font-family: inherit; font-size: 12px; }
+    .app-results { position: relative; max-height: 160px; overflow-y: auto; background: var(--card); border: 1px solid var(--border); border-radius: 6px; margin-top: 4px; display: none; }
+    .app-result-item { padding: 8px 10px; font-size: 12px; cursor: pointer; color: var(--text2); }
+    .app-result-item:hover { background: var(--hover); color: var(--text); }
     .radio-group { display: flex; gap: 8px; flex-wrap: wrap; }
     .radio-group label { font-size: 12px; display: flex; align-items: center; gap: 4px; cursor: pointer; }
 
@@ -619,22 +848,27 @@
     #quit-modal.open { display: flex !important; }
 
     .modal-box {
-      background: var(--surface);
-      border: 1px solid var(--border2);
-      border-radius: 14px;
+      background: rgba(255,255,255,0.07);
+      backdrop-filter: blur(40px) saturate(180%) brightness(1.1);
+      -webkit-backdrop-filter: blur(40px) saturate(180%) brightness(1.1);
+      border: 1px solid rgba(255,255,255,0.16);
+      border-radius: 22px;
       padding: 28px;
       text-align: center;
       max-width: 300px;
+      box-shadow: inset 0 1.5px 1px rgba(255,255,255,0.40), 0 24px 60px rgba(0,0,0,0.55);
     }
 
     .toast {
-      background: var(--surface);
-      border: 1px solid var(--border2);
-      border-radius: 10px;
-      padding: 10px 14px;
+      background: rgba(255,255,255,0.07);
+      backdrop-filter: blur(24px) saturate(180%) brightness(1.12);
+      -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.12);
+      border: 1px solid rgba(255,255,255,0.16);
+      border-radius: 14px;
+      padding: 11px 16px;
       font-size: 12px;
       color: var(--text);
-      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      box-shadow: inset 0 1px 0.5px rgba(255,255,255,0.40), 0 10px 30px rgba(0,0,0,0.45);
       animation: toastIn 0.25s ease-out;
       max-width: 320px;
     }
@@ -877,7 +1111,15 @@
 <!-- Main -->
 <main id="main">
   <header id="header">
-    <div></div>
+    <div class="header-left">
+      <div id="model-picker" class="model-picker">
+        <button type="button" id="model-picker-btn" class="model-picker-btn" onclick="aria.toggleModelMenu(event)" title="Choisir le modèle">
+          <span id="model-picker-label">Auto</span>
+          <span class="model-picker-chevron">▾</span>
+        </button>
+        <div id="model-picker-menu" class="model-picker-menu"></div>
+      </div>
+    </div>
     <h1 id="header-title">ARIA</h1>
     <div class="header-actions">
       <span id="weather-clock" class="sr-only" aria-hidden="true"></span>
@@ -901,9 +1143,16 @@
       <div class="input-wrapper">
         <button type="button" id="input-mic-btn" title="Micro" onclick="aria.toggleMic()">🎤</button>
         <textarea id="text-input" rows="1" placeholder="Envoyer un message à ARIA…"></textarea>
-        <label id="file-btn" title="Joindre un fichier">
+        <label id="file-btn" title="Joindre des fichiers" style="width:42px;height:42px;border-radius:10px;background:var(--card);border:1px solid var(--border);color:var(--text2);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;transition:all 0.15s">
           📎
-          <input type="file" id="file-input" multiple accept="image/*,video/*,.pdf,.txt,.py,.js,.html,.css,.json,.yaml,.md,.csv,.xlsx,.docx" style="display:none" onchange="aria.handleFiles(this.files)">
+          <input
+            type="file"
+            id="file-input"
+            multiple
+            accept="image/*,video/*,.pdf,.txt,.py,.js,.html,.css,.json,.yaml,.md,.csv,.xlsx,.docx"
+            style="display:none"
+            onchange="aria.handleFiles(this.files)"
+          >
         </label>
         <button type="button" id="send-btn" title="Envoyer" onclick="aria.sendText()">↑</button>
       </div>
@@ -956,14 +1205,82 @@ const aria = {
   },
   presetsCustom: {},
   currentDevice: 'pc',
+  _modelPickerData: null,
 
-  init() {
+  async checkPin() {
+    return new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.id = 'pin-overlay';
+      overlay.style.cssText = 'position:fixed;inset:0;background:var(--bg);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px';
+      overlay.innerHTML = `
+        <div style="font-size:24px;font-weight:600;color:var(--text);letter-spacing:4px">A R I A</div>
+        <div style="font-size:13px;color:var(--text3)">Entrez votre code</div>
+        <div id="pin-dots" style="display:flex;gap:12px;margin:8px 0">
+          ${[0,1,2,3].map(i => `<div id="dot-${i}" style="width:14px;height:14px;border-radius:50%;border:2px solid var(--border2);background:transparent;transition:all 0.15s"></div>`).join('')}
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:220px">
+          ${[1,2,3,4,5,6,7,8,9,'',0,'⌫'].map(n => `
+            <button onclick="aria.pinPress('${n}')" style="padding:18px;border-radius:10px;background:var(--surface);border:1px solid var(--border);color:var(--text);font-size:18px;cursor:pointer;font-family:inherit;${n==='' ? 'visibility:hidden' : ''}">${n}</button>
+          `).join('')}
+        </div>
+        <div id="pin-error" style="font-size:12px;color:var(--error);height:16px"></div>`;
+      document.body.appendChild(overlay);
+
+      window._pinResolve = resolve;
+      window._pinBuffer = '';
+    });
+  },
+
+  pinPress(key) {
+    if (key === '') return;
+    const CORRECT_PIN = '0000';
+
+    if (key === '⌫') {
+      window._pinBuffer = window._pinBuffer.slice(0, -1);
+    } else if (window._pinBuffer.length < 4) {
+      window._pinBuffer += key;
+    }
+
+    for (let i = 0; i < 4; i++) {
+      const dot = document.getElementById(`dot-${i}`);
+      if (dot) {
+        dot.style.background = i < window._pinBuffer.length ? 'var(--accent)' : 'transparent';
+        dot.style.borderColor = i < window._pinBuffer.length ? 'var(--accent)' : 'var(--border2)';
+      }
+    }
+
+    if (window._pinBuffer.length === 4) {
+      if (window._pinBuffer === CORRECT_PIN) {
+        document.getElementById('pin-overlay').style.opacity = '0';
+        document.getElementById('pin-overlay').style.transition = 'opacity 0.3s';
+        setTimeout(() => {
+          document.getElementById('pin-overlay').remove();
+          if (window._pinResolve) window._pinResolve(true);
+        }, 300);
+      } else {
+        document.getElementById('pin-error').textContent = 'Code incorrect';
+        document.getElementById('pin-dots').style.animation = 'shake 0.3s';
+        setTimeout(() => {
+          window._pinBuffer = '';
+          for (let i = 0; i < 4; i++) {
+            const dot = document.getElementById(`dot-${i}`);
+            if (dot) { dot.style.background = 'transparent'; dot.style.borderColor = 'var(--border2)'; }
+          }
+          document.getElementById('pin-error').textContent = '';
+        }, 600);
+      }
+    }
+  },
+
+  async init() {
+    await this.checkPin();
     this.orbCtx = document.getElementById('orb-canvas').getContext('2d');
     this.buildSettingsPanel();
     this.loadSettings();
     this.detectDevice();
     this.loadPresets();
     this.loadConversations();
+    this.loadModelPicker();
     this.setStatus('idle');
     this.startClock();
     document.getElementById('text-input').addEventListener('keydown', e => {
@@ -1007,6 +1324,10 @@ const aria = {
       });
     }
     document.addEventListener('click', e => {
+      const picker = document.getElementById('model-picker');
+      if (picker?.classList.contains('open') && !picker.contains(e.target)) {
+        picker.classList.remove('open');
+      }
       const presetsSheet = document.getElementById('mobile-presets-sheet');
       if (presetsSheet?.classList.contains('open') && !presetsSheet.contains(e.target) &&
           !e.target.closest('.mobile-nav-btn')) {
@@ -1188,6 +1509,85 @@ const aria = {
   setModel(name) {
     const el = document.getElementById('model-display');
     if (el) el.textContent = name ? name : '';
+    this.updateModelPickerLabel(name || 'auto');
+  },
+
+  normModelId(id) {
+    return String(id || '').replace(/:latest$/, '');
+  },
+
+  async loadModelPicker() {
+    try {
+      let raw = this.api('get_available_models');
+      if (raw?.then) raw = await raw;
+      const data = JSON.parse(raw || '{}');
+      this._modelPickerData = data;
+      this.renderModelMenu(data);
+      this.updateModelPickerLabel(data.current || 'auto');
+    } catch (e) {
+      console.warn('loadModelPicker', e);
+    }
+  },
+
+  updateModelPickerLabel(current) {
+    const label = document.getElementById('model-picker-label');
+    const btn = document.getElementById('model-picker-btn');
+    if (!label) return;
+    const cur = current || 'auto';
+    if (cur === 'auto') {
+      label.textContent = 'Auto';
+      if (btn) btn.title = 'Auto — rapide + réflexion si besoin';
+      return;
+    }
+    const options = this._modelPickerData?.options || [];
+    const match = options.find(o => this.normModelId(o.id) === this.normModelId(cur));
+    label.textContent = match?.label || this.normModelId(cur);
+    if (btn) btn.title = match?.subtitle || cur;
+  },
+
+  renderModelMenu(data) {
+    const menu = document.getElementById('model-picker-menu');
+    if (!menu) return;
+    const current = data.current || 'auto';
+    const options = data.options || [];
+    menu.innerHTML = options.map(opt => {
+      const active = this.normModelId(opt.id) === this.normModelId(current);
+      return `<button type="button" class="model-option${active ? ' active' : ''}" onclick="aria.pickModel(${JSON.stringify(opt.id)})">
+        <span>${this.esc(opt.label)}</span>
+        <span class="model-option-sub">${this.esc(opt.subtitle || opt.id)}</span>
+      </button>`;
+    }).join('');
+  },
+
+  toggleModelMenu(event) {
+    event?.stopPropagation();
+    document.getElementById('model-picker')?.classList.toggle('open');
+  },
+
+  closeModelMenu() {
+    document.getElementById('model-picker')?.classList.remove('open');
+  },
+
+  async pickModel(modelId) {
+    try {
+      let raw = this.api('switch_model', modelId);
+      if (raw?.then) raw = await raw;
+      if (raw !== 'ok') {
+        this.showToast('Erreur changement de modèle', 'error');
+        return;
+      }
+      if (this._modelPickerData) this._modelPickerData.current = modelId;
+      this.updateModelPickerLabel(modelId);
+      this.setModel(modelId === 'auto' ? '' : modelId);
+      const opt = (this._modelPickerData?.options || []).find(o => o.id === modelId);
+      const name = opt?.label || (modelId === 'auto' ? 'Auto' : modelId);
+      this.showToast(`Modèle : ${name}`, 'info', 2500);
+      this.renderModelMenu(this._modelPickerData || { current: modelId, options: [] });
+    } catch (e) {
+      this.showToast('Erreur changement de modèle', 'error');
+    } finally {
+      this.closeModelMenu();
+    }
   },
 
   setInputText(text) {
@@ -1266,18 +1666,21 @@ const aria = {
     const inputEl = document.getElementById('text-input');
     let userPrompt = inputEl.value.trim();
 
-    if (!userPrompt) {
+    const hasImages = fileArray.some(f => f.type.startsWith('image/'));
+
+    if (!userPrompt && !hasImages) {
       userPrompt = await this.askFilePrompt();
       if (!userPrompt) {
         document.getElementById('file-input').value = '';
         return;
       }
+    } else if (!userPrompt && hasImages) {
+      userPrompt = 'Analyse ces images et dis-moi ce que tu observes';
     }
 
     fileArray.forEach(file => {
       const type = file.type.startsWith('image/') ? 'image'
-                 : file.type.startsWith('video/') ? 'video'
-                 : 'file';
+                 : file.type.startsWith('video/') ? 'video' : 'file';
       this.showFileBubble(file, type);
     });
 
@@ -1288,14 +1691,14 @@ const aria = {
     const filesData = await Promise.all(fileArray.map(async file => ({
       b64: await this.fileToBase64(file),
       name: file.name,
-      type: file.type || 'application/octet-stream',
+      type: file.type,
     })));
 
     if (window.pywebview?.api) {
       window.pywebview.api.send_files_with_prompt(
         JSON.stringify(filesData),
         userPrompt
-      ).catch(() => this.showToast('Erreur envoi fichiers', 'error'));
+      ).catch(e => this.showToast('Erreur envoi fichiers', 'error'));
     }
 
     document.getElementById('file-input').value = '';
@@ -1608,6 +2011,7 @@ const aria = {
       theme: this.theme,
       opacity: (document.getElementById('set-opacity')?.value ?? 100) / 100,
       reduced_motion: document.getElementById('set-reduced-motion')?.checked ?? false,
+      liquid_glass: document.getElementById('set-liquid-glass')?.checked ?? true,
       user_bubble_bg: document.getElementById('set-user-bg')?.value,
       user_bubble_radius: document.getElementById('set-user-radius')?.value,
       user_bubble_font: document.getElementById('set-user-font')?.value,
@@ -1645,6 +2049,7 @@ const aria = {
     document.body.style.opacity = s.opacity;
     this.reducedMotion = s.reduced_motion;
     document.body.classList.toggle('reduced-motion', this.reducedMotion);
+    document.body.classList.toggle('no-glass', !s.liquid_glass);
     this.api('save_settings', JSON.stringify(s));
     this.api('set_voice', s.tts_voice);
     this.api('set_tts_rate', s.tts_rate);
@@ -1675,6 +2080,11 @@ const aria = {
           document.getElementById('set-reduced-motion').checked = d.reduced_motion;
           this.reducedMotion = d.reduced_motion;
           document.body.classList.toggle('reduced-motion', d.reduced_motion);
+        }
+        if (d.liquid_glass != null) {
+          const g = document.getElementById('set-liquid-glass');
+          if (g) g.checked = d.liquid_glass;
+          document.body.classList.toggle('no-glass', !d.liquid_glass);
         }
         const fields = [
           ['user_bubble_bg','set-user-bg'], ['user_bubble_radius','set-user-radius'],
@@ -1742,16 +2152,11 @@ const aria = {
   },
 
   readPresetForm(key) {
-    const getSelected = id => {
-      const sel = document.getElementById(id);
-      if (!sel) return [];
-      return Array.from(sel.selectedOptions).map(o => o.value);
-    };
     return {
       label: document.getElementById(`pre-${key}-label`)?.value?.trim(),
       icon: document.getElementById(`pre-${key}-icon`)?.value?.trim(),
-      apps_open: getSelected(`pre-${key}-open-select`),
-      apps_close: getSelected(`pre-${key}-close-select`),
+      apps_open: this._appLists[`open-${key}`]?.selected || [],
+      apps_close: this._appLists[`close-${key}`]?.selected || [],
       volume: parseInt(document.getElementById(`pre-${key}-vol`)?.value, 10),
       brightness: parseInt(document.getElementById(`pre-${key}-bri`)?.value, 10),
     };
@@ -1769,6 +2174,84 @@ const aria = {
   csvToList(s) { return String(s || '').split(',').map(x => x.trim()).filter(Boolean); },
   listToCsv(a) { return Array.isArray(a) ? a.join(', ') : ''; },
 
+  async checkNexusStatus() {
+    let raw = this.api('check_nexus');
+    if (raw?.then) raw = await raw;
+    const status = JSON.parse(raw || '{}');
+    const el = document.getElementById('nexus-status');
+    if (!el) return;
+    if (status.enabled && status.available) {
+      el.textContent = '✓ Connecté';
+      el.style.color = 'var(--success)';
+    } else if (status.enabled) {
+      el.textContent = '✗ Inaccessible';
+      el.style.color = 'var(--error)';
+    } else {
+      el.textContent = 'Non activé';
+      el.style.color = 'var(--text3)';
+    }
+  },
+
+  async refreshInstalledApps() {
+    try {
+      let raw = this.api('refresh_installed_apps');
+      if (raw?.then) raw = await raw;
+      JSON.parse(raw || '[]');
+      this.showToast('Liste des apps mise à jour', 'success');
+      const merged = this.mergePresets(this.presetsCustom);
+      await this.renderPresetEditors(merged);
+    } catch (e) {
+      this.showToast('Erreur scan apps', 'error');
+    }
+  },
+
+  filterAppList(listId, query) {
+    const resultsDiv = document.getElementById(`results-${listId}`);
+    if (!query.trim()) {
+      resultsDiv.innerHTML = '';
+      resultsDiv.style.display = 'none';
+      return;
+    }
+
+    const data = this._appLists[listId];
+    const q = query.toLowerCase();
+    const matches = data.all
+      .filter(app => app.toLowerCase().includes(q) && !data.selected.includes(app))
+      .slice(0, 8);
+
+    resultsDiv.style.display = matches.length ? 'block' : 'none';
+    resultsDiv.innerHTML = matches.map(app =>
+      `<div class="app-result-item" onclick="aria.addAppChip(${JSON.stringify(listId)}, ${JSON.stringify(app)})">${this.esc(app)}</div>`
+    ).join('');
+  },
+
+  addAppChip(listId, appName) {
+    const data = this._appLists[listId];
+    if (!data.selected.includes(appName)) data.selected.push(appName);
+    this.renderChips(listId);
+    const search = document.getElementById(`search-${listId}`);
+    search.value = '';
+    document.getElementById(`results-${listId}`).innerHTML = '';
+    document.getElementById(`results-${listId}`).style.display = 'none';
+  },
+
+  removeAppChip(listId, appName) {
+    const data = this._appLists[listId];
+    data.selected = data.selected.filter(a => a !== appName);
+    this.renderChips(listId);
+  },
+
+  renderChips(listId) {
+    const data = this._appLists[listId];
+    const container = document.getElementById(`chips-${listId}`);
+    container.innerHTML = data.selected.map(app => `
+      <span class="app-chip">
+        ${this.esc(app)}
+        <span class="chip-remove" onclick="aria.removeAppChip(${JSON.stringify(listId)}, ${JSON.stringify(app)})">✕</span>
+      </span>
+    `).join('');
+  },
+
   async renderPresetEditors(merged) {
     const box = document.getElementById('settings-presets');
     if (!box) return;
@@ -1783,14 +2266,8 @@ const aria = {
     box.innerHTML = '';
     this.presetKeys.forEach(key => {
       const p = merged[key];
-
-      const buildSelect = (id, selected) => {
-        const selectedSet = new Set(Array.isArray(selected) ? selected : []);
-        const opts = appList.map(app =>
-          `<option value="${this.esc(app)}" ${selectedSet.has(app) ? 'selected' : ''}>${this.esc(app)}</option>`
-        ).join('');
-        return `<select id="${id}" multiple size="5" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:12px;padding:4px">${opts}</select>`;
-      };
+      const openApps = p.apps_open || [];
+      const closeApps = p.apps_close || [];
 
       const ed = document.createElement('div');
       ed.className = 'preset-editor';
@@ -1798,18 +2275,34 @@ const aria = {
         <div class="preset-editor-title">${this.esc(p.icon)} ${this.esc(p.label)}</div>
         <div class="preset-field"><label>Nom</label><input id="pre-${key}-label" value="${this.esc(p.label)}"></div>
         <div class="preset-field"><label>Icône</label><input id="pre-${key}-icon" value="${this.esc(p.icon)}" maxlength="4"></div>
+
         <div class="preset-field">
-          <label>Apps à ouvrir (Ctrl+clic pour sélectionner)</label>
-          ${buildSelect(`pre-${key}-open-select`, p.apps_open || [])}
+          <label>Apps à ouvrir</label>
+          <div id="chips-open-${key}" class="app-chips"></div>
+          <input type="text" class="app-search" id="search-open-${key}" placeholder="Rechercher une app installée..."
+            oninput="aria.filterAppList('open-${key}', this.value)" autocomplete="off">
+          <div id="results-open-${key}" class="app-results"></div>
         </div>
+
         <div class="preset-field">
-          <label>Apps à fermer (Ctrl+clic pour sélectionner)</label>
-          ${buildSelect(`pre-${key}-close-select`, p.apps_close || [])}
+          <label>Apps à fermer</label>
+          <div id="chips-close-${key}" class="app-chips"></div>
+          <input type="text" class="app-search" id="search-close-${key}" placeholder="Rechercher une app installée..."
+            oninput="aria.filterAppList('close-${key}', this.value)" autocomplete="off">
+          <div id="results-close-${key}" class="app-results"></div>
         </div>
+
         <div class="setting-row"><label>Volume</label><input type="range" id="pre-${key}-vol" min="0" max="100" value="${p.volume ?? 50}"><span id="pre-${key}-vol-val">${p.volume ?? 50}%</span></div>
         <div class="setting-row"><label>Luminosité</label><input type="range" id="pre-${key}-bri" min="0" max="100" value="${p.brightness ?? 50}"></div>
         <button type="button" class="preset-save" onclick="aria.savePreset('${key}')">Enregistrer</button>`;
       box.appendChild(ed);
+
+      this._appLists = this._appLists || {};
+      this._appLists[`open-${key}`] = { all: appList, selected: [...openApps] };
+      this._appLists[`close-${key}`] = { all: appList, selected: [...closeApps] };
+
+      this.renderChips(`open-${key}`);
+      this.renderChips(`close-${key}`);
 
       document.getElementById(`pre-${key}-vol`)?.addEventListener('input', function() {
         document.getElementById(`pre-${key}-vol-val`).textContent = this.value + '%';
@@ -1837,6 +2330,7 @@ const aria = {
         </div>
         <div class="setting-row"><label>Opacité</label><input type="range" id="set-opacity" min="70" max="100" value="100" oninput="aria.saveSettings()"></div>
         <div class="setting-row"><label>Réduction animations</label><input type="checkbox" id="set-reduced-motion" onchange="aria.saveSettings()"></div>
+        <div class="setting-row"><label>Effet verre (Liquid Glass)</label><input type="checkbox" id="set-liquid-glass" checked onchange="aria.saveSettings()"></div>
       </div>
 
       <div class="settings-section">
@@ -1854,6 +2348,7 @@ const aria = {
 
       <div class="settings-section">
         <div class="settings-title">Modes / Presets</div>
+        <button type="button" class="settings-btn" style="margin-bottom:10px;width:100%" onclick="aria.refreshInstalledApps()">🔄 Rafraîchir la liste</button>
         <div id="settings-presets"></div>
       </div>
 
@@ -2024,6 +2519,11 @@ const aria = {
 
       <div class="settings-section">
         <div class="settings-title">Système</div>
+        <div class="setting-row">
+          <label>Nexus (local)</label>
+          <span id="nexus-status" style="font-size:11px;color:var(--text3)">Non configuré</span>
+        </div>
+        <button class="settings-btn" onclick="aria.checkNexusStatus()">Vérifier Nexus</button>
         <div class="setting-row"><label>Toujours visible</label><input type="checkbox" id="set-always-top" onchange="aria.saveSettings()"></div>
         <button class="settings-btn" onclick="aria.api('open_file','config.yaml')">Ouvrir config.yaml</button>
         <button class="settings-btn" onclick="aria.api('open_file','assistant-vocal.log')">Voir les logs</button>

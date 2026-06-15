@@ -25,6 +25,7 @@ sounds_enabled: true
 
 # LLM
 max_history: 20
+active_model: auto  # auto | modèle Ollama exact (sélecteur dans l'en-tête)
 system_prompt: |
   Tu es ARIA (Assistant Résidant Intelligent et Autonome), un assistant vocal local
   en français. Tu es concis, naturel, et adapté à une lecture à voix haute.
@@ -112,3 +113,9 @@ briefing_includes: [weather, news, calendar]
 mobile_auto_start: true
 mobile_port: 5000
 mobile_pin: "0000"
+
+# Nexus — assistant de code local (type Cursor), connexion préparée
+nexus:
+  enabled: false
+  endpoint: ""  # URL de Nexus une fois lancé localement
+  api_key: ""   # Clé API Nexus

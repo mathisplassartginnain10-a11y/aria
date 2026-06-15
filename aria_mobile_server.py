@@ -466,12 +466,23 @@ def _print_startup_banner() -> None:
 
 def _serve_forever(port: int) -> None:
     try:
-        from gevent.pywsgi import WSGIServer
+        try:
+            from gevent.pywsgi import WSGIServer
 
-        server = WSGIServer(("0.0.0.0", port), app)
-        server.serve_forever()
-    except ImportError:
-        app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+            server = WSGIServer(("0.0.0.0", port), app)
+            server.serve_forever()
+        except ImportError:
+            app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+    except OSError as exc:
+        if getattr(exc, "errno", None) == 10048 or "10048" in str(exc) or "Address already in use" in str(exc):
+            logger.warning(
+                "Serveur mobile désactivé : port %d déjà utilisé "
+                "(une autre instance d'ARIA tourne peut-être).", port
+            )
+        else:
+            logger.error("Serveur mobile : erreur socket : %s", exc)
+    except Exception:
+        logger.exception("Serveur mobile : arrêt inattendu")
 
 
 def start_mobile_server(

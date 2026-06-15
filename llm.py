@@ -25,8 +25,10 @@ from actions import (
     aviation_expert,
     browser,
     calendar_action,
+    google_calendar,
     clipboard,
     cursor_control,
+    nexus_control,
     files,
     git,
     math_expert,
@@ -51,6 +53,7 @@ MODELS: dict[str, str] = {
     'medium': 'llama3.1:8b-instruct-q8_0',
     'heavy':  'qwen3:14b',
     'code':   'qwen2.5-coder:14b',
+    'intent': 'llama3.2:1b',  # Détection d'intent ultra-rapide
 }
 
 MODEL: str = _config.get("model", MODELS["heavy"])
@@ -58,12 +61,34 @@ MODEL_FAST: str = _config.get("model_fast", MODELS["fast"])
 MODEL_HEAVY: str = _config.get("model_heavy", MODELS["heavy"])
 MODEL_CODE: str = _config.get("model_code", MODELS["code"])
 VISION_MODEL: str = _config.get("vision_model", "minicpm-v")
-INTENT_MODEL: str = MODEL_FAST
+INTENT_MODEL: str = _config.get("intent_model", MODELS["intent"])
 # Modèle de CONVERSATION : rapide par défaut (latence faible pour parler en direct).
 # Mets "qwen3:14b" dans config (chat_model) si tu préfères la qualité à la vitesse.
 CHAT_MODEL: str = _config.get("chat_model", MODEL_FAST)
 # Garde le modèle chargé en VRAM entre deux requêtes -> pas de cold start.
 OLLAMA_KEEP_ALIVE: str = str(_config.get("ollama_keep_alive", "30m"))
+# Modèle de RÉFLEXION : activé seulement pour les questions complexes (raisonnement profond).
+REASONING_MODEL: str = _config.get("reasoning_model", MODEL_HEAVY)
+# Modèle FORCÉ par l'utilisateur via le sélecteur (comme Claude). None = mode « Auto »
+# (micro-routeur + chat rapide + escalade réflexion automatique selon la question).
+_active_model_cfg = _config.get("active_model")
+FORCED_MODEL: str | None = None if (not _active_model_cfg or _active_model_cfg == "auto") else str(_active_model_cfg)
+
+# Déclencheurs « réflexion » -> bascule sur le modèle de raisonnement (plus lent, plus profond).
+_REASONING_RE = re.compile(
+    r"\b(explique|expliques?|pourquoi|analyse[rz]?|compare[rz]?|d[ée]montre[rz]?|raisonne|"
+    r"r[ée]fl[ée]chi[ts]?|[ée]tape par [ée]tape|r[ée]sou[ds]|r[ée]soudre|calcule[rz]?|prouve|"
+    r"strat[ée]gie|optimise[rz]?|con[çc]ois|architecture|nuances?|implications?|cons[ée]quences?|"
+    r"avantages? et inconv[ée]nients?|en d[ée]tail|approfondi[ts]?)\b",
+    re.I,
+)
+# Déclencheurs « info fraîche » -> passe par la recherche web (Ollama + DuckDuckGo).
+_CURRENT_INFO_RE = re.compile(
+    r"\b(aujourd'?hui|actuel(?:le|lement)?|en ce moment|r[ée]cent[e]?s?|derni[èe]re?s?|"
+    r"cette ann[ée]e|202[5-9]|prix de|cours de|score|qui est (?:le|la|l'|actuellement)|"
+    r"qui sont|combien co[ûu]te|quoi de neuf|nouveaut[ée]s?)\b",
+    re.I,
+)
 MAX_HISTORY: int = _config["max_history"]
 BASE_SYSTEM_PROMPT: str = """Tu es ARIA, l'assistant personnel de Mathi, lycéen en Première à Couëron.
 Tu le connais intimement : ses projets (ARIA l'assistant vocal, IMPERO, PPL DR400 à LFRS),
@@ -118,7 +143,7 @@ FAST_REGEX: dict[str, str] = {
     r"\b(ferme|quitte|stop|arrête|arrete)\b.+": "fermer_app",
     r"\b(volume|son)\b.+(up|down|monte|baisse|\d+)": "volume",
     r"\b(météo|meteo|température|temperature|temps)\b": "meteo",
-    r"\b(heure|date|aujourd'hui|aujourdhui)\b": "heure_date",
+    r"\b(quelle heure|quelle date|l'heure|heure qu'il|quel jour)\b": "heure_date",
     r"\b(minuteur|timer|dans \d+ min)\b": "minuteur",
 }
 
@@ -155,6 +180,7 @@ PURE_ACTIONS = frozenset({
     "browser_open_site", "browser_open_url", "ouvrir_site",
     "browser_youtube_search", "browser_search_in_site", "browser_youtube_control",
     "browser_search_google", "cursor_open", "cursor_open_file", "git",
+    "nexus_prompt",
 })
 
 # Actions that use an external API then summarize with LLM
@@ -248,12 +274,32 @@ def _fast_intent(text: str) -> tuple[str, dict] | None:
     if re.search(r"\bferme\b.*\b(onglet|tab)\b", text_lower):
         return "browser_close_tab", {}
 
+    # PRIORITY 2.7: Nexus (éditeur de code local) — avant lancer_app/navigateur
+    if re.search(
+        r"(?:demande|envoie)\s+(?:à|a)\s+nexus|envoie\s+ça\s+à\s+nexus|"
+        r"nexus\s+(?:fais|fait)\s+",
+        text_lower,
+    ):
+        return "nexus_prompt", {"query": text, "text": text}
+    if "nexus" in text_lower:
+        if re.search(r"\b(demande|envoie|dis|code|écris|ecris|génère|genere|corrige)\b", text_lower):
+            return "nexus_prompt", {"query": text, "text": text}
+        if re.search(r"\b(ouvre|lance|démarre|demarre|open|va sur)\b", text_lower):
+            file_m = _CODE_FILE_RE.search(text_lower)
+            return ("nexus_open", {"path": file_m.group(1)}) if file_m else ("nexus_open", {})
+
     # PRIORITY 3: « ouvre [cible] » sans navigateur explicite
     m = re.search(r"(?:ouvre|va sur|navigue vers)\s+(.+)", text_lower)
     if m:
         target = m.group(1).strip()
         if _is_browser_app_name(target):
             return "lancer_app", {"app": target}
+        # Cible Nexus (éditeur de code maison) → ouvrir dans Nexus, pas le navigateur
+        if "nexus" in target:
+            file_m = _CODE_FILE_RE.search(text_lower)
+            if file_m:
+                return "nexus_open", {"path": file_m.group(1)}
+            return "nexus_open", {}
         # Cible Cursor ou fichier de code → ouvrir dans Cursor, pas dans le navigateur
         if "cursor" in target or _CODE_FILE_RE.search(target):
             file_m = _CODE_FILE_RE.search(text_lower)
@@ -378,46 +424,38 @@ def _ollama_request(
 
 
 def _detect_intent(text: str) -> dict:
-    fast = _fast_intent(text)
-    if fast:
-        intent, params = fast
-        logger.info("Fast intent (regex): %s", intent)
-        return {"intent": intent, "params": params, "confidence": 0.95}
-
-    rule = _rule_based_intent(text)
-    if rule.get("intent") != "question_libre" and rule.get("confidence", 0) >= 0.85:
-        logger.info("Rule intent: %s", rule.get("intent"))
-        return rule
-
-    prompt = (
-        f'Classify this command in ONE word from this list:\n'
-        f'lancer_app|fermer_app|volume|meteo|actu|aviation|maths|code|recherche|question\n'
-        f'If multiple apps are mentioned (e.g. "lance Spotify et Discord"), classify as lancer_app.\n'
-        f'Command: "{text}"\n'
-        f'Answer with just the category:'
-    )
-    response = _ollama_request(
-        [{"role": "user", "content": prompt}],
-        stream=False,
-        model=INTENT_MODEL,
-        num_predict=10,
-    )
-    if response is None:
-        return {"intent": "question_libre", "params": {}, "confidence": 0.0}
+    """Détecte l'intent via llama3.2:1b — ultra rapide (~50-100ms)."""
+    prompt = f"""Classify this command in ONE word from this list:
+lancer_app|fermer_app|volume|meteo|heure_date|minuteur|search_web|search_news|aviation_metar|aviation_taf|math_calculate|question_libre|browser_open_site|browser_search_in_site|preset|nexus_prompt
+Command: "{text}"
+Answer with just the category, nothing else:"""
 
     try:
-        content = response.json()["message"]["content"].strip().lower()
-        content = re.sub(r"[^a-z_]", "", content.split()[0] if content.split() else content)
-        mapped = INTENT_CATEGORY_MAP.get(content)
-        if mapped:
-            rule_params = _rule_based_intent(text)
-            params = rule_params.get("params", {}) if rule_params.get("intent") == mapped else _fast_intent_params(mapped, text)
-            logger.info("LLM intent (%s): %s", INTENT_MODEL, mapped)
-            return {"intent": mapped, "params": params, "confidence": 0.88}
-    except (json.JSONDecodeError, KeyError, IndexError):
-        logger.exception("Intent parsing failed")
-
-    return _rule_based_intent(text)
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": MODELS["intent"],
+                "prompt": prompt,
+                "stream": False,
+                "options": {"num_predict": 10, "temperature": 0.1},
+            },
+            timeout=10,
+        )
+        raw = response.json().get("response", "").strip().lower()
+        known_intents = [
+            "lancer_app", "fermer_app", "volume", "meteo", "heure_date", "minuteur",
+            "search_web", "search_news", "aviation_metar", "aviation_taf",
+            "math_calculate", "question_libre", "browser_open_site",
+            "browser_search_in_site", "preset", "nexus_prompt",
+        ]
+        for intent in known_intents:
+            if intent in raw:
+                params = _fast_intent_params(intent, text)
+                return {"intent": intent, "params": params, "confidence": 0.85}
+        return {"intent": "question_libre", "params": {}, "confidence": 0.5}
+    except Exception as exc:
+        logger.error("Intent detection error: %s", exc)
+        return {"intent": "question_libre", "params": {}, "confidence": 0.3}
 
 
 def _extract_in_site_search(text: str) -> tuple[str, str] | None:
@@ -530,6 +568,37 @@ Execute the appropriate operation and return the result in French."""
 def _rule_based_intent(text: str) -> dict:
     t = text.lower()
     rules = [
+        # === Google Agenda (priorité haute ; move/delete/add AVANT list) ===
+        (
+            r"(?:d[ée]place|deplace|d[ée]cale|decale|reporte|repousse|change|modifie)\b.*?"
+            r"(?:rendez-?vous|rdv|cr[ée]neau|r[ée]union|s[ée]ance|cours|[ée]v[èé]nement|"
+            r"\d{1,2}\s*h|demain|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)",
+            "calendar_move",
+            {"text": text},
+        ),
+        (
+            r"(?:annule|supprime|enl[èe]ve|retire)\b.*?"
+            r"(?:rendez-?vous|rdv|cr[ée]neau|r[ée]union|s[ée]ance|cours|[ée]v[èé]nement)",
+            "calendar_delete",
+            {"text": text},
+        ),
+        (
+            r"(?:cale|caler|planifie|programme|r[ée]serve|reserve|bloque|ajoute|"
+            r"cr[ée]e|cree|note|pr[ée]vois)\b.*?"
+            r"(?:rendez-?vous|rdv|cr[ée]neau|r[ée]union|s[ée]ance|cours|[ée]v[èé]nement|"
+            r"\d{1,2}\s*h|demain|apr[èe]s-demain|lundi|mardi|mercredi|jeudi|vendredi|"
+            r"samedi|dimanche|midi|ce soir|semaine prochaine)",
+            "calendar_add",
+            {"text": text},
+        ),
+        (
+            r"(?:mon|ma|mes)\s+(?:agenda|planning|rendez-?vous|rdv|cr[ée]neaux?|"
+            r"[ée]v[èé]nements?)\b|qu'?est-ce que j'?ai\s+(?:de\s+)?(?:pr[ée]vu|"
+            r"aujourd'?hui|demain|cette semaine|au programme)|"
+            r"(?:rendez-?vous|rdv)\s+(?:de\s+)?(?:la\s+)?(?:journ[ée]e|semaine|aujourd'?hui|demain)",
+            "calendar_list",
+            {},
+        ),
         # Recherche in-page et in-site (avant recherche web générique)
         (
             r"(?:cherche|trouve|recherche).*(?:dans la page|sur la page|cette page|"
@@ -600,13 +669,16 @@ def _rule_based_intent(text: str) -> dict:
         (r"[ée]cris .+ dans le navigateur", "browser_type", {"text": text}),
         (r"^envoie .+ sur (?:la |cette )?page", "browser_type_send", {"text": text}),
         (r"^envoie(?!.*(?:cursor|claude|sur la page|sur cette page))", "browser_type_send", {"text": text}),
+        # Nexus (éditeur de code maison) — avant Cursor
+        (r"(?:ouvre|lance|d[ée]marre)\s+nexus", "nexus_open", {}),
+        (r"(?:demande|envoie|dis)\s+(?:à|a)\s+nexus|\b(?:dans|sur|via)\s+nexus\b|\bcode\b.*\bnexus\b", "nexus_prompt", {"text": text}),
         # Cursor v3
         (r"ouvre cursor$|ouvre cursor\s*$|lance cursor", "cursor_open", {}),
         (r"projet.*cursor|cursor.*projet", "cursor_open_project", {"name": text}),
         (r"ouvre.*\.(py|ts|tsx|js)|fichier.*cursor", "cursor_open_file", {"path": text}),
         (r"génère|genere|crée|cree|dans cursor|corrige.*cursor", "cursor_generate_code", {"request": text}),
         # Search v3 — news before generic web search
-        (r"cherche.*nouvelles|cherche.*actualit|recherche.*nouvelles|nouvelles sur|dernières nouvelles", "search_news", {"query": text}),
+        (r"cherche.*nouvelles|cherche.*actualit|recherche.*nouvelles|nouvelles sur|derni[èe]res? nouvelles|derni[èe]res? actu", "search_news", {"query": text}),
         (r"cherche.*intelligence artificielle|recherche.*intelligence artificielle", "search_news", {"query": "intelligence artificielle"}),
         (r"géopolitique|geopolitique", "search_geopolitics", {}),
         (r"actu.*aviation|aviation.*actu|nouvelles.*aviation", "search_aviation_news", {}),
@@ -639,7 +711,7 @@ def _rule_based_intent(text: str) -> dict:
         (r"veille|suspend", "veille", {}),
         (r"redémarre|reboot", "reboot", {}),
         (r"éteins|shutdown|extinction", "shutdown", {}),
-        (r"actu|actualité|news", "actu", {}),
+        (r"\bactus?\b|actualit[ée]s?|\bnews\b", "actu", {}),
         (r"météo|meteo|température", "meteo", {"city": text}),
         (r"\bmetar\b", "aviation_metar", {"icao": _extract_icao(text)}),
         (r"\btaf\b", "aviation_taf", {"icao": _extract_icao(text)}),
@@ -651,7 +723,7 @@ def _rule_based_intent(text: str) -> dict:
         (r"convertis|traduis", "traduction", {"text": text}),
         (r"mode ", "preset", {"name": text}),
         (r"presse.papier|clipboard", "clipboard_paste", {}),
-        (r"rappel|agenda|événement|aujourd'hui", "rappel", {"text": text}),
+        (r"rappel|agenda|[ée]v[ée]nement", "rappel", {"text": text}),
         (r"quelle heure|quelle date|heure", "heure_date", {}),
         (r"blague", "blague", {}),
         (r"mémoire|memoire|souviens", "memoire", {"text": text}),
@@ -795,6 +867,18 @@ def _extract_site_for_browser(params: dict, original_text: str) -> str:
     return site
 
 
+def _needs_reasoning(text: str) -> bool:
+    """Vrai si la question mérite le modèle de raisonnement (plus lent mais profond)."""
+    if _REASONING_RE.search(text):
+        return True
+    return len(text.split()) > 45
+
+
+def _is_current_info_query(text: str) -> bool:
+    """Vrai si la question porte sur une info récente/actuelle -> recherche web."""
+    return bool(_CURRENT_INFO_RE.search(text))
+
+
 def _resolve_intent_for_routing(text: str) -> tuple[str, dict, float]:
     """Résout l'intent : regex rapide puis détection complète."""
     fast = _fast_intent(text)
@@ -815,6 +899,11 @@ def _resolve_intent_for_routing(text: str) -> tuple[str, dict, float]:
         logger.warning("Intent detection failed: %s", exc)
         intent = "question_libre"
         confidence = 0.0
+
+    # Question ouverte portant sur une info récente -> recherche web (infos fraîches).
+    if intent == "question_libre" and _is_current_info_query(text):
+        logger.info("Question ouverte -> recherche web (info actuelle)")
+        return "search_web", {"query": text}, 0.9
 
     return intent, params, confidence
 
@@ -1084,6 +1173,27 @@ def _execute_action(intent: str, params: dict, text: str) -> str | None:
             clip = clipboard.get_text()
             return clip if clip.strip() else "Le presse-papier est vide."
 
+        if intent == "nexus_prompt":
+            from actions import nexus
+
+            if not nexus.is_enabled():
+                return (
+                    "Nexus n'est pas encore configuré. "
+                    "Tu peux l'activer dans config.yaml une fois Nexus lancé."
+                )
+            query = params.get("query") or params.get("text") or text
+            payload = re.sub(
+                r"^.*?(?:demande|envoie|dis)\s+(?:à|a)\s+nexus\s+(?:de\s+)?",
+                "",
+                query,
+                flags=re.I,
+            ).strip()
+            payload = re.sub(r"\b(?:dans|sur|via)\s+nexus\b", "", payload, flags=re.I).strip()
+            nexus_m = re.search(r"^nexus\s+(?:fais|fait)\s+(.+)", payload, re.I)
+            if nexus_m:
+                payload = nexus_m.group(1).strip()
+            return nexus.send_prompt(payload or query)
+
     except Exception as exc:
         logger.error("Action error for %s: %s", intent, exc)
         return f"Erreur: {exc}"
@@ -1234,6 +1344,29 @@ def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
         return "Recherche lancée dans Chrome"
     if intent == "search_aviation_news":
         return web_search.search_aviation_news()
+    if intent == "nexus_open":
+        path = params.get("path")
+        return nexus_control.open_nexus(path) if path else nexus_control.open_nexus()
+    if intent == "nexus_prompt":
+        from actions import nexus
+
+        if not nexus.is_enabled():
+            return (
+                "Nexus n'est pas encore configuré. "
+                "Tu peux l'activer dans config.yaml une fois Nexus lancé."
+            )
+        query = params.get("query") or params.get("text") or original_text
+        payload = re.sub(
+            r"^.*?(?:demande|envoie|dis)\s+(?:à|a)\s+nexus\s+(?:de\s+)?",
+            "",
+            query,
+            flags=re.I,
+        ).strip()
+        payload = re.sub(r"\b(?:dans|sur|via)\s+nexus\b", "", payload, flags=re.I).strip()
+        nexus_m = re.search(r"^nexus\s+(?:fais|fait)\s+(.+)", payload, re.I)
+        if nexus_m:
+            payload = nexus_m.group(1).strip()
+        return nexus.send_prompt(payload or query)
     if intent == "cursor_open":
         return cursor_control.open_cursor()
     if intent == "cursor_open_project":
@@ -1248,8 +1381,10 @@ def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
         return cursor_control.handle(original_text)
     if intent == "cursor_generate_code":
         request = params.get("request", original_text)
-        result = cursor_control.voice_to_cursor(request)
-        return result
+        # Nexus est l'éditeur de code de Mathi : on le privilégie dès qu'il répond.
+        if nexus_control.is_available():
+            return nexus_control.send_prompt(request)
+        return cursor_control.voice_to_cursor(request)
     if intent == "cursor_prompt":
         payload = _extract_browser_text(original_text, "cursor_prompt")
         return browser.type_in_cursor_composer(payload or original_text)
@@ -1352,6 +1487,41 @@ def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
     if intent == "ouvrir_fichier":
         path = params.get("path", original_text)
         return files.open_path(path)
+    if intent == "calendar_add":
+        start, end = google_calendar.parse_when(original_text)
+        title = google_calendar.extract_title(original_text)
+        if start is None:
+            return f"À quelle date et heure veux-tu caler « {title} » ?"
+        return google_calendar.create_event(title, start, end)
+    if intent == "calendar_move":
+        start, end = google_calendar.parse_when(original_text)
+        title = google_calendar.extract_title(original_text)
+        if start is None:
+            return f"Vers quelle date et heure veux-tu déplacer « {title} » ?"
+        return google_calendar.move_event(title, start, end)
+    if intent == "calendar_delete":
+        return google_calendar.delete_event(google_calendar.extract_title(original_text))
+    if intent == "calendar_list":
+        if not google_calendar.is_configured():
+            return calendar_action.get_today_events()
+        from datetime import timedelta
+
+        now = datetime.now()
+        t = original_text.lower()
+        if "demain" in t:
+            day = now + timedelta(days=1)
+            events = google_calendar.list_events(
+                time_min=day.replace(hour=0, minute=0, second=0, microsecond=0),
+                time_max=day.replace(hour=23, minute=59, second=59, microsecond=0),
+            )
+            return google_calendar.describe_events(events, empty="Rien de prévu demain.")
+        if "semaine" in t:
+            events = google_calendar.list_events(time_max=now + timedelta(days=7))
+            return google_calendar.describe_events(events, empty="Rien de prévu cette semaine.")
+        events = google_calendar.list_events(
+            time_max=now.replace(hour=23, minute=59, second=59, microsecond=0)
+        )
+        return google_calendar.describe_events(events, empty="Rien de prévu aujourd'hui.")
     if intent == "rappel":
         if "aujourd'hui" in original_text.lower() or "agenda" in original_text.lower():
             return calendar_action.get_today_events()
@@ -1383,7 +1553,31 @@ def _conversation(text: str, stream_to_ui: bool = True) -> tuple[str, bool]:
     _history.append({"role": "user", "content": text})
     _trim_history()
 
-    response = _ollama_request(_history, stream=True, model=CHAT_MODEL, num_predict=600)
+    # Escalade « réflexion » : question complexe -> modèle de raisonnement (non streamé,
+    # le <think> reste interne ; on n'affiche/dit que la réponse finale).
+    if FORCED_MODEL is None and _needs_reasoning(text):
+        logger.info("Réflexion activée -> %s", REASONING_MODEL)
+        if stream_to_ui:
+            ui.set_status("thinking")
+        resp = _ollama_request(_history, stream=False, model=REASONING_MODEL, num_predict=2000)
+        if resp is None:
+            _history.pop()
+            _present_action_result("Ollama n'est pas disponible.")
+            return "", False
+        answer = resp.json().get("message", {}).get("content", "")
+        answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.S).strip()
+        if not answer:
+            _history.pop()
+            ui.set_status("idle")
+            return "", False
+        if stream_to_ui:
+            ui.append_assistant_text(answer)
+            ui.finalize_assistant_message()
+        _history.append({"role": "assistant", "content": answer})
+        _trim_history()
+        return answer, False
+
+    response = _ollama_request(_history, stream=True, model=(FORCED_MODEL or CHAT_MODEL), num_predict=600)
     if response is None:
         _history.pop()
         msg = "Ollama n'est pas disponible."

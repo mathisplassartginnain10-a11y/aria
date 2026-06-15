@@ -30,8 +30,10 @@ def configure(ollama_path: str | Path) -> None:
 
 
 def _is_ollama_reachable() -> bool:
+    # 3s : quand Ollama charge un modèle il peut tarder à répondre à /api/tags ;
+    # un timeout trop court (1s) le déclarait « absent » à tort.
     try:
-        response = requests.get(OLLAMA_API_TAGS, timeout=1)
+        response = requests.get(OLLAMA_API_TAGS, timeout=3)
         return response.status_code == 200
     except requests.RequestException:
         return False
@@ -43,7 +45,7 @@ def is_running() -> bool:
 
 def get_loaded_models() -> list[str]:
     try:
-        response = requests.get(OLLAMA_API_TAGS, timeout=5)
+        response = requests.get(OLLAMA_API_TAGS, timeout=10)
         response.raise_for_status()
         models = response.json().get("models", [])
         return [m.get("name", "") for m in models if m.get("name")]
