@@ -11,6 +11,10 @@ _platform._wmi = None
 
 import ctypes
 import sys
+import io
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 try:
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("ARIA.VoiceAssistant.v2")
@@ -35,6 +39,9 @@ logging.basicConfig(
     ],
     force=True,
 )
+logging.getLogger("comtypes").setLevel(logging.WARNING)
+logging.getLogger("comtypes._post_coinit.unknwn").setLevel(logging.WARNING)
+logging.getLogger("asyncio").setLevel(logging.WARNING)
 logging.getLogger(__name__).debug("Bootstrap logging initialisé")
 
 try:
@@ -69,6 +76,88 @@ try:
     _logger: logging.Logger | None = None
     _last_hotkey_time: float = 0.0
     _HOTKEY_DEBOUNCE_S = 0.35
+    _shutdown_done = False
+
+
+    def _kill_ollama() -> None:
+        """Tue les processus Ollama à la fermeture d'ARIA."""
+        import psutil
+
+        log = _logger or logging.getLogger(__name__)
+        killed: list[str] = []
+        ollama_names = frozenset({"ollama.exe", "ollama", "ollama app.exe"})
+
+        for proc in psutil.process_iter(["name", "pid"]):
+            try:
+                name = str(proc.info.get("name") or "").lower()
+                if name not in ollama_names:
+                    continue
+                pid = proc.info.get("pid")
+                proc.terminate()
+                try:
+                    proc.wait(timeout=3)
+                except psutil.TimeoutExpired:
+                    proc.kill()
+                killed.append(name)
+                log.info("Processus tué: %s (PID %s)", name, pid)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+        if killed:
+            log.info("Ollama arrêté: %s", killed)
+        else:
+            log.info("Aucun processus Ollama trouvé à tuer")
+
+
+    def _on_aria_closing():
+        """Shutdown complet à la fermeture de la fenêtre ou à la sortie."""
+        global _shutdown_done, _mic_active, _listen_thread
+
+        if _shutdown_done:
+            return True
+        _shutdown_done = True
+
+        log = _logger or logging.getLogger(__name__)
+        log.info("=== Fermeture ARIA ===")
+
+        try:
+            stt.stop_listening()
+            stt._cleanup_pyaudio()
+        except Exception as exc:
+            log.error("Erreur arrêt STT: %s", exc)
+
+        try:
+            tts.stop()
+        except Exception as exc:
+            log.error("Erreur arrêt TTS: %s", exc)
+
+        try:
+            memory_engine.save_session()
+            memory_engine.save_current_conversation()
+            memory_engine.get_engine()._save_all()
+            memory.save()
+        except Exception as exc:
+            log.error("Erreur sauvegarde mémoire: %s", exc)
+
+        try:
+            ollama_manager.stop()
+        except Exception as exc:
+            log.error("Erreur arrêt Ollama (manager): %s", exc)
+
+        if _config.get("kill_ollama_on_exit", True):
+            try:
+                _kill_ollama()
+            except Exception as exc:
+                log.error("Erreur arrêt Ollama: %s", exc)
+        else:
+            log.info("Ollama conservé actif (kill_ollama_on_exit: false)")
+
+        with _mic_lock:
+            _mic_active = False
+            _listen_thread = None
+
+        log.info("=== ARIA fermé proprement ===")
+        return True
 
 
     def _is_admin() -> bool:
@@ -80,8 +169,15 @@ try:
             return False
 
 
-    def _setup_logging(debug: bool = False, debug_keys: bool = False) -> logging.Logger:
-        level = logging.DEBUG if (debug or debug_keys) else logging.INFO
+    def _setup_logging(
+        debug: bool = False,
+        debug_keys: bool = False,
+        log_level: str | None = None,
+    ) -> logging.Logger:
+        if log_level:
+            level = getattr(logging, str(log_level).upper(), logging.INFO)
+        else:
+            level = logging.DEBUG if (debug or debug_keys) else logging.INFO
         fmt = logging.Formatter("[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s")
         root = logging.getLogger()
         root.setLevel(level)
@@ -141,33 +237,24 @@ try:
 
 
     def _cleanup() -> None:
-        global _mic_active, _listen_thread
         if _logger:
             _logger.info("Cleanup en cours…")
-        memory_engine.save_session()
-        memory_engine.save_current_conversation()
-        memory_engine.get_engine()._save_all()
-        stt.stop_listening()
-        tts.stop()
-        ollama_manager.stop()
-        memory.save()
-        ui.hide()
-        with _mic_lock:
-            _mic_active = False
-            _listen_thread = None
+        _on_aria_closing()
+        try:
+            ui.hide()
+        except Exception:
+            pass
 
 
     def _pause_mic() -> None:
         global _mic_active, _listen_thread
         with _mic_lock:
-            if not _mic_active:
+            if not _mic_active and not stt.is_listening():
                 return
             if _logger:
                 _logger.info("Pause — arrêt du microphone")
             sounds.play("deactivate")
             stt.stop_listening()
-            if _listen_thread is not None and _listen_thread.is_alive():
-                _listen_thread.join(timeout=10)
             ui.set_status("idle")
             _mic_active = False
             _listen_thread = None
@@ -177,22 +264,25 @@ try:
     def _resume_mic() -> None:
         global _mic_active, _listen_thread
         with _mic_lock:
-            if _mic_active:
+            if _mic_active or stt.is_listening():
+                if _logger:
+                    _logger.debug("Micro déjà actif — reprise ignorée")
                 return
             if _logger:
                 _logger.info("Reprise — démarrage du microphone")
             _mic_active = True
             sounds.play("activate")
             ui.set_status("listening")
-            _listen_thread = threading.Thread(target=stt.start_listening, daemon=True)
-            _listen_thread.start()
+            stt.start_listening()
             ui.notify_mic_state(True)
 
 
     def _start_mic() -> None:
         global _mic_active, _listen_thread
         with _mic_lock:
-            if _mic_active:
+            if _mic_active or stt.is_listening():
+                if _logger:
+                    _logger.info("Micro déjà actif — démarrage auto ignoré")
                 return
             if _logger:
                 _logger.info("Démarrage automatique du microphone")
@@ -202,8 +292,7 @@ try:
             if briefing.should_run_briefing():
                 threading.Thread(target=briefing.run_morning_briefing, daemon=True).start()
 
-            _listen_thread = threading.Thread(target=stt.start_listening, daemon=True)
-            _listen_thread.start()
+            stt.start_listening()
 
 
     def _toggle_mic() -> None:
@@ -265,13 +354,22 @@ try:
 
 
     def _on_hotkey(_event=None) -> None:
-        global _last_hotkey_time
+        global _last_hotkey_time, _mic_active
         now = time.monotonic()
         if now - _last_hotkey_time < _HOTKEY_DEBOUNCE_S:
             return
         _last_hotkey_time = now
 
-        _toggle_mic()
+        stt.toggle()
+        with _mic_lock:
+            _mic_active = stt.is_listening()
+        if _mic_active:
+            sounds.play("activate")
+            ui.set_status("listening")
+        else:
+            sounds.play("deactivate")
+            ui.set_status("idle")
+        ui.notify_mic_state(_mic_active)
 
 
     def _debug_key_hook(event) -> None:
@@ -327,7 +425,11 @@ try:
         app_paths.ensure_runtime_layout()
         _config = _load_config()
         debug_keys = bool(_config.get("debug_keys", False))
-        _logger = _setup_logging(_config.get("debug", False), debug_keys=debug_keys)
+        _logger = _setup_logging(
+            _config.get("debug", False),
+            debug_keys=debug_keys,
+            log_level=_config.get("log_level"),
+        )
 
         generate_sounds.ensure_sounds()
         memory.init()
@@ -345,6 +447,7 @@ try:
         atexit.register(lambda: memory_engine.get_engine().save_session())
         atexit.register(lambda: memory_engine.get_engine().save_current_conversation())
         atexit.register(lambda: memory_engine.get_engine()._save_all())
+        atexit.register(stt._cleanup_pyaudio)
 
         signal.signal(signal.SIGINT, _signal_handler)
         signal.signal(signal.SIGTERM, _signal_handler)
@@ -383,9 +486,8 @@ try:
 
         threading.Thread(target=_keyboard_thread, args=(debug_keys,), daemon=True).start()
 
-        def _auto_start_mic() -> None:
+        def _delayed_startup() -> None:
             time.sleep(2)
-            _start_mic()
             _maybe_daily_brief()
 
         def _maybe_daily_brief() -> None:
@@ -413,10 +515,11 @@ try:
                 if _logger:
                     _logger.exception("Brief quotidien indisponible")
 
-        threading.Thread(target=_auto_start_mic, daemon=True).start()
+        threading.Thread(target=_delayed_startup, daemon=True).start()
 
         _logger.info("Touches actives : F24 (double hook) + Ctrl+Shift+A (test)")
-        _logger.info("ARIA prêt. F24 ou Ctrl+Shift+A pour mettre le micro en pause/reprise.")
+        _logger.info("ARIA prêt — micro en attente d'activation (🎤 ou F24)")
+        _logger.info("F24 ou Ctrl+Shift+A pour activer/désactiver le micro.")
         if debug_keys:
             _logger.info("debug_keys=true — consultez assistant-vocal.log pour voir les noms de touches")
         _logger.info(
@@ -430,6 +533,9 @@ try:
             _logger.error("Erreur fatale dans ui.run(): %s", exc, exc_info=True)
             traceback.print_exc()
             raise
+        finally:
+            if not _shutdown_done:
+                _cleanup()
 
 
     if __name__ == "__main__":

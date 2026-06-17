@@ -1,5 +1,5 @@
 import asyncio
-import concurrent.futures
+import atexit
 import logging
 import os
 import re
@@ -23,14 +23,56 @@ SOUNDS_DIR = app_paths.sounds_dir()
 
 _lock = threading.Lock()
 _stop_event = threading.Event()
+_shutdown = threading.Event()
 _duck_lock = threading.Lock()
 _saved_sessions: list[tuple] = []
+
+_tts_loop: asyncio.AbstractEventLoop | None = None
+_tts_thread: threading.Thread | None = None
+_tts_loop_lock = threading.Lock()
 
 # Global TTS enabled flag — disabled by default
 TTS_ENABLED = False
 
 _mixer_ready = False
 _mixer_lock = threading.Lock()
+
+
+def _on_shutdown() -> None:
+    _shutdown.set()
+
+
+atexit.register(_on_shutdown)
+
+
+def _get_tts_loop() -> asyncio.AbstractEventLoop:
+    global _tts_loop, _tts_thread
+    with _tts_loop_lock:
+        if _tts_loop is None or not _tts_loop.is_running():
+            _tts_loop = asyncio.new_event_loop()
+            _tts_thread = threading.Thread(
+                target=_tts_loop.run_forever,
+                daemon=True,
+                name="TTS-Loop",
+            )
+            _tts_thread.start()
+        return _tts_loop
+
+
+def _run_async(coro) -> None:
+    """Exécute une coroutine dans la boucle TTS persistante."""
+    if _shutdown.is_set():
+        logger.debug("TTS ignoré — arrêt en cours")
+        return
+    loop = _get_tts_loop()
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    try:
+        future.result(timeout=15)
+    except Exception as exc:
+        if _shutdown.is_set():
+            logger.debug("TTS ignoré — arrêt en cours: %s", exc)
+            return
+        raise exc
 
 
 def _ensure_mixer() -> None:
@@ -122,20 +164,6 @@ async def _generate_audio(text: str, output_path: Path, voice: str, rate: str) -
     await communicate.save(str(output_path))
 
 
-def _run_async(coro) -> None:
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    if loop and loop.is_running():
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(asyncio.run, coro)
-            future.result()
-    else:
-        asyncio.run(coro)
-
-
 def _play_music() -> None:
     _ensure_mixer()
     mute_other_apps()
@@ -196,7 +224,27 @@ def speak_sound(sound_name: str) -> None:
             logger.exception("Failed to play sound %s", sound_name)
 
 
+def _safe_js(script: str) -> None:
+    """Appelle du JS côté UI uniquement si la fenêtre est encore vivante."""
+    try:
+        import ui as _ui
+
+        if _ui._instance is None:
+            return
+        window = getattr(_ui, "_window", None)
+        if window is None:
+            window = getattr(_ui._instance, "_window", None)
+        if window is None:
+            return
+        _ui._instance._js(script)
+    except Exception as exc:
+        logger.debug("JS call ignoré (fenêtre fermée ou thread mort): %s", exc)
+
+
 def speak(text: str, *, force: bool = False, notify_finished: bool = True) -> None:
+    if _shutdown.is_set():
+        return
+
     if not force and not TTS_ENABLED:
         logger.debug("TTS désactivé, skip: %s", text[:50])
         return
@@ -220,41 +268,50 @@ def speak(text: str, *, force: bool = False, notify_finished: bool = True) -> No
     sentences = _split_sentences(cleaned)
     _stop_event.clear()
 
-    with _lock:
-        for sentence in sentences:
-            if _stop_event.is_set():
-                break
-            tmp_path: Path | None = None
-            try:
-                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_file:
-                    tmp_path = Path(tmp_file.name)
+    try:
+        with _lock:
+            for sentence in sentences:
+                if _stop_event.is_set():
+                    break
+                tmp_path: Path | None = None
+                try:
+                    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_file:
+                        tmp_path = Path(tmp_file.name)
 
-                _run_async(_generate_audio(sentence, tmp_path, voice, TTS_RATE))
+                    _run_async(_generate_audio(sentence, tmp_path, voice, TTS_RATE))
 
-                _ensure_mixer()
-                pg = _pygame()
-                pg.mixer.music.load(str(tmp_path))
-                _play_music()
-            except Exception:
-                logger.exception("TTS playback failed for: %s", sentence)
-                restore_other_apps()
-            finally:
-                if tmp_path is not None and tmp_path.exists():
-                    try:
-                        tmp_path.unlink()
-                    except OSError:
-                        logger.warning("Could not delete temp audio: %s", tmp_path)
+                    _ensure_mixer()
+                    pg = _pygame()
+                    pg.mixer.music.load(str(tmp_path))
+                    _play_music()
 
-    if notify_finished:
-        notify_speech_finished()
+                    while pg.mixer.music.get_busy():
+                        if _shutdown.is_set() or _stop_event.is_set():
+                            pg.mixer.music.stop()
+                            break
+                        time.sleep(0.05)
+
+                    pg.mixer.music.unload()
+                    time.sleep(0.05)
+                except Exception:
+                    logger.exception("TTS playback failed for: %s", sentence)
+                    restore_other_apps()
+                finally:
+                    if tmp_path is not None and tmp_path.exists():
+                        try:
+                            tmp_path.unlink(missing_ok=True)
+                        except Exception as exc:
+                            logger.debug(
+                                "Temp audio non supprimé (sera nettoyé au prochain démarrage): %s",
+                                exc,
+                            )
+    except Exception as exc:
+        logger.error("Erreur TTS: %s", exc)
+    finally:
+        if notify_finished:
+            _safe_js("if(window.aria) aria.onTTSFinished();")
 
 
 def notify_speech_finished() -> None:
     """Déclenche aria.onTTSFinished() côté JS (une fois par lecture complète)."""
-    try:
-        import ui as _ui
-
-        if _ui._instance:
-            _ui._instance._js("if(window.aria) aria.onTTSFinished();")
-    except Exception:
-        logger.debug("onTTSFinished callback skipped", exc_info=True)
+    _safe_js("if(window.aria) aria.onTTSFinished();")

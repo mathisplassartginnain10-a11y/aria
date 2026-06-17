@@ -1,1 +1,12 @@
-[]
+[
+  {
+    "input": "Merci beaucoup",
+    "output": "De rien ! C'était un plaisir de vous aider. Si vous avez besoin d'aide pour autre chose, n'hésitez pas à me demander !",
+    "score": 0.8,
+    "date": "2026-06-17T09:29:57.355216",
+    "context": {
+      "model": "qwen3:14b",
+      "topic": "general"
+    }
+  }
+]

@@ -81,7 +81,32 @@ REASONING_MODEL: str = _config.get("reasoning_model", MODEL_HEAVY)
 _active_model_cfg = _config.get("active_model")
 FORCED_MODEL: str | None = None if (not _active_model_cfg or _active_model_cfg == "auto") else str(_active_model_cfg)
 
-# Déclencheurs « réflexion » -> bascule sur le modèle de raisonnement (plus lent, plus profond).
+HEAVY_KEYWORDS = (
+    "explique en détail",
+    "analyse approfondie",
+    "architecture",
+    "démontre",
+    "étape par étape",
+    "raisonne",
+    "compare en détail",
+    "code complet",
+    "optimise",
+    "refactor",
+)
+HEAVY_REQUIRED = frozenset({
+    "math_derive",
+    "math_integrate",
+    "math_solve_equation",
+    "math_matrix",
+    "math_limit",
+    "math_proba",
+    "aviation_theory",
+    "aviation_gonogo",
+    "cursor_generate_code",
+    "agent_task",
+})
+SENTENCE_END_RE = re.compile(r"[.!?…]+\s*$")
+_stop_stream = threading.Event()
 _REASONING_RE = re.compile(
     r"\b(explique|expliques?|pourquoi|analyse[rz]?|compare[rz]?|d[ée]montre[rz]?|raisonne|"
     r"r[ée]fl[ée]chi[ts]?|[ée]tape par [ée]tape|r[ée]sou[ds]|r[ée]soudre|calcule[rz]?|prouve|"
@@ -104,6 +129,44 @@ Tu réponds toujours en tutoiement, directement, sans préambule.
 Tu maîtrises : Python, pywebview, Ollama, aviation PPL, maths Première, gaming PC.
 Jamais de "Bien sûr !", "Absolument !" ou politesse excessive."""
 SYSTEM_PROMPT = BASE_SYSTEM_PROMPT
+
+ACTIONS_SYSTEM_PROMPT = """Tu es ARIA, un assistant vocal Windows en français.
+
+Pour les commandes système, réponds UNIQUEMENT avec ce format strict (pas de texte avant ou après) :
+
+OPEN_APP:<nom>          → ouvrir une application (ex: OPEN_APP:chrome)
+CLOSE_APP:<nom>         → fermer une application
+SEARCH_WEB:<query>      → recherche Google
+OPEN_SITE:<url>         → ouvrir un site web
+VOLUME:<0-100>          → régler le volume
+SCREENSHOT:             → prendre une capture d'écran
+PRESET:<nom>            → activer un preset (vol/etude/gaming/detente/nuit)
+METEO:<ville>           → météo d'une ville
+TIMER:<secondes>        → démarrer un minuteur
+CHAT:<réponse>          → pour tout le reste, répondre normalement
+
+Exemples :
+"lance google chrome" → OPEN_APP:chrome
+"ouvre youtube" → OPEN_SITE:youtube.com
+"volume à 50" → VOLUME:50
+"quel temps fait-il à Nantes" → METEO:Nantes
+"bonjour comment tu vas" → CHAT:Je vais très bien merci !
+"explique moi les intégrales" → CHAT:<explication normale>
+"""
+
+ACTION_PREFIXES = (
+    "OPEN_APP:",
+    "CLOSE_APP:",
+    "SEARCH_WEB:",
+    "OPEN_SITE:",
+    "VOLUME:",
+    "SCREENSHOT:",
+    "PRESET:",
+    "METEO:",
+    "TIMER:",
+    "CHAT:",
+)
+
 OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
 HISTORY_PATH = app_paths.data_dir() / "history.json"
 
@@ -370,7 +433,46 @@ def _build_dynamic_system_prompt() -> str:
             )
     except Exception:
         pass
+    if _get_conversation_mode() == "vocal":
+        dynamic_system += (
+            "\n\nTu es en mode vocal. Réponds en 1-3 phrases maximum, de façon "
+            "naturelle et conversationnelle. Pas de listes, pas de markdown, pas de tirets."
+        )
     return dynamic_system
+
+
+def _get_conversation_mode() -> str:
+    try:
+        conv_id = memory_engine.get_current_conversation_id()
+        return memory_engine.get_conversation_mode(conv_id) or "ecrit"
+    except Exception:
+        return "ecrit"
+
+
+def _select_model(text: str, intent: str = "") -> str:
+    if FORCED_MODEL:
+        return FORCED_MODEL
+
+    conv_mode = _get_conversation_mode()
+    if conv_mode == "vocal":
+        if intent in HEAVY_REQUIRED:
+            return MODEL_HEAVY
+        return MODEL_FAST
+
+    if any(kw in text.lower() for kw in HEAVY_KEYWORDS):
+        return MODEL_HEAVY
+    return MODEL_FAST
+
+
+def _get_options(intent: str, conv_mode: str) -> dict:
+    options = {"temperature": 0.7, "top_p": 0.9}
+    if conv_mode == "vocal":
+        options["num_predict"] = 120
+    elif intent in HEAVY_REQUIRED:
+        options["num_predict"] = 800
+    else:
+        options["num_predict"] = 400
+    return options
 
 
 def _process_memory_learning(user_text: str, response: str) -> None:
@@ -421,18 +523,21 @@ def _ollama_request(
     stream: bool = False,
     retries: int = 3,
     model: str | None = None,
-    num_predict: int = 2000,
+    num_predict: int | None = None,
+    intent: str = "",
+    conv_mode: str | None = None,
 ) -> requests.Response | None:
+    if conv_mode is None:
+        conv_mode = _get_conversation_mode()
+    options = _get_options(intent, conv_mode)
+    if num_predict is not None:
+        options["num_predict"] = num_predict
     payload = {
         "model": model or MODEL,
         "messages": messages,
         "stream": stream,
         "keep_alive": OLLAMA_KEEP_ALIVE,
-        "options": {
-            "num_predict": num_predict,
-            "temperature": 0.6,
-            "top_p": 0.9,
-        },
+        "options": options,
     }
     for attempt in range(retries):
         try:
@@ -1299,6 +1404,8 @@ def _route_with_intelligence(
             result = _dispatch_action(intent, params, text)
         if result and stream_to_ui:
             _speak_response(result)
+        if result:
+            logger.warning("═══ LLM→UI: '%s' ═══", str(result)[:200])
         return result or ""
 
     if intent in API_THEN_LLM:
@@ -1307,6 +1414,7 @@ def _route_with_intelligence(
             formatted = _llm_format(_build_format_prompt(intent, api_data, text))
             if stream_to_ui:
                 _speak_response(formatted)
+            logger.warning("═══ LLM→UI: '%s' ═══", str(formatted)[:200])
             return formatted
         logger.warning("API failed for %s, falling back to LLM", intent)
 
@@ -1321,11 +1429,14 @@ def _route_with_intelligence(
                 _speak_response(result)
             elif stream_to_ui and intent == "blague":
                 _present_action_result(result)
+            logger.warning("═══ LLM→UI: '%s' ═══", str(result)[:200])
             return result
 
-    response, spoke = _conversation(text, stream_to_ui=stream_to_ui)
+    response, spoke = _conversation(text, stream_to_ui=stream_to_ui, intent=intent)
     if stream_to_ui and response:
         _finish_streamed_response(response, already_spoken=spoke)
+    if response:
+        logger.warning("═══ LLM→UI: '%s' ═══", str(response)[:200])
     return response
 
 
@@ -1752,20 +1863,107 @@ def _route_action(intent_data: dict, original_text: str) -> str:
     return _route_with_intelligence(intent, params, original_text, stream_to_ui=True)
 
 
-def _conversation(text: str, stream_to_ui: bool = True) -> tuple[str, bool]:
+def _stream_and_speak(response: requests.Response, stream_to_ui: bool = True) -> tuple[str, bool]:
+    """Stream le LLM et parle chaque phrase dès qu'elle est complète (file TTS ordonnée)."""
+    tts_queue: list[str | None] = []
+    spoke_streaming = False
+
+    def _speak_worker() -> None:
+        nonlocal spoke_streaming
+        while True:
+            if tts_queue:
+                sentence = tts_queue.pop(0)
+                if sentence is None:
+                    break
+                if len(sentence.strip()) > 2 and _should_speak_tts():
+                    ui.set_status("speaking")
+                    tts.speak(sentence, force=True, notify_finished=False)
+                    spoke_streaming = True
+            else:
+                time.sleep(0.02)
+
+    tts_thread: threading.Thread | None = None
+    if stream_to_ui and _should_speak_tts():
+        tts_thread = threading.Thread(target=_speak_worker, daemon=True, name="LLM-TTS")
+        tts_thread.start()
+
+    sentence_buffer = ""
+    full_response = ""
+
+    if stream_to_ui:
+        ui.set_status("thinking")
+
+    try:
+        for line in response.iter_lines():
+            if not line or _stop_stream.is_set():
+                break
+            try:
+                chunk = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            content = chunk.get("message", {}).get("content", "")
+            if content:
+                full_response += content
+                sentence_buffer += content
+                if stream_to_ui:
+                    ui.append_assistant_text(content)
+
+                if SENTENCE_END_RE.search(sentence_buffer.rstrip()):
+                    sentence = sentence_buffer.strip()
+                    if sentence and tts_thread is not None:
+                        tts_queue.append(sentence)
+                    sentence_buffer = ""
+
+            if chunk.get("done"):
+                break
+
+        remainder = sentence_buffer.strip()
+        if remainder:
+            if tts_thread is not None:
+                tts_queue.append(remainder)
+            elif stream_to_ui and len(remainder) > 2 and _should_speak_tts():
+                ui.set_status("speaking")
+                tts.speak(remainder, force=True, notify_finished=False)
+                spoke_streaming = True
+    finally:
+        if tts_thread is not None:
+            tts_queue.append(None)
+            tts_thread.join(timeout=30)
+
+    if stream_to_ui:
+        ui.finalize_assistant_message()
+
+    return full_response, spoke_streaming
+
+
+def _conversation(text: str, stream_to_ui: bool = True, intent: str = "question_libre") -> tuple[str, bool]:
     global _history
 
     _refresh_system_prompt()
     _history.append({"role": "user", "content": text})
     _trim_history()
 
-    # Escalade « réflexion » : question complexe -> modèle de raisonnement (non streamé,
-    # le <think> reste interne ; on n'affiche/dit que la réponse finale).
-    if FORCED_MODEL is None and _needs_reasoning(text):
+    conv_mode = _get_conversation_mode()
+    chat_model = FORCED_MODEL or _select_model(text, intent)
+
+    logger.debug("═══ PROMPT OLLAMA ═══")
+    logger.debug("%s", text[:500])
+    logger.debug("════════════════════")
+
+    # Escalade « réflexion » : trop lent en mode vocal — réservé au mode écrit.
+    if FORCED_MODEL is None and conv_mode != "vocal" and _needs_reasoning(text):
         logger.info("Réflexion activée -> %s", REASONING_MODEL)
         if stream_to_ui:
             ui.set_status("thinking")
-        resp = _ollama_request(_history, stream=False, model=REASONING_MODEL, num_predict=2000)
+        resp = _ollama_request(
+            _history,
+            stream=False,
+            model=REASONING_MODEL,
+            num_predict=2000,
+            intent=intent,
+            conv_mode=conv_mode,
+        )
         if resp is None:
             _history.pop()
             _present_action_result("Ollama n'est pas disponible.")
@@ -1781,68 +1979,34 @@ def _conversation(text: str, stream_to_ui: bool = True) -> tuple[str, bool]:
             ui.finalize_assistant_message()
         _history.append({"role": "assistant", "content": answer})
         _trim_history()
+        logger.info("═══ LLM RÉPONSE ═══")
+        logger.info("%s", answer[:300])
+        logger.info("═══════════════════")
         return answer, False
 
-    response = _ollama_request(_history, stream=True, model=(FORCED_MODEL or CHAT_MODEL), num_predict=600)
+    response = _ollama_request(
+        _history,
+        stream=True,
+        model=chat_model,
+        intent=intent,
+        conv_mode=conv_mode,
+    )
     if response is None:
         _history.pop()
         msg = "Ollama n'est pas disponible."
         _present_action_result(msg)
         return "", False
 
-    sentence_buffer = ""
-    full_response = ""
-    spoke_streaming = False
-    sentence_endings = (". ", "! ", "? ", ".\n", "!\n", "?\n")
-
-    if stream_to_ui:
-        ui.set_status("thinking")
-
-    for line in response.iter_lines():
-        if not line:
-            continue
-        chunk = json.loads(line)
-        content = chunk.get("message", {}).get("content", "")
-        if content:
-            full_response += content
-            sentence_buffer += content
-            if stream_to_ui:
-                ui.append_assistant_text(content)
-
-            if stream_to_ui:
-                if any(sentence_buffer.endswith(ending) for ending in sentence_endings):
-                    sentence = sentence_buffer.strip()
-                    if sentence and len(sentence) > 5 and _should_speak_tts():
-                        ui.set_status("speaking")
-                        threading.Thread(
-                            target=tts.speak,
-                            kwargs={"text": sentence, "force": True, "notify_finished": False},
-                            daemon=True,
-                        ).start()
-                        spoke_streaming = True
-                        sentence_buffer = ""
-
-        if chunk.get("done"):
-            break
-
-    if stream_to_ui and sentence_buffer.strip():
-        remainder = sentence_buffer.strip()
-        if len(remainder) > 5 and _should_speak_tts():
-            ui.set_status("speaking")
-            threading.Thread(
-                target=tts.speak,
-                kwargs={"text": remainder, "force": True, "notify_finished": True},
-                daemon=True,
-            ).start()
-            spoke_streaming = True
-
-    if stream_to_ui:
-        ui.finalize_assistant_message()
+    full_response, spoke_streaming = _stream_and_speak(response, stream_to_ui=stream_to_ui)
 
     if not full_response.strip():
         _history.pop()
         ui.set_status("idle")
         return "", False
+
+    logger.info("═══ LLM RÉPONSE ═══")
+    logger.info("%s", full_response[:300])
+    logger.info("═══════════════════")
 
     _history.append({"role": "assistant", "content": full_response})
     _trim_history()
@@ -1902,6 +2066,147 @@ def analyze_homework_image(image_b64: str, user_prompt: str = "") -> str:
     return description
 
 
+def _build_history_text(max_turns: int = 6) -> str:
+    """Construit un historique textuel compact pour le prompt actions."""
+    lines: list[str] = []
+    for msg in _history:
+        if msg.get("role") == "system":
+            continue
+        role = "Utilisateur" if msg.get("role") == "user" else "ARIA"
+        content = str(msg.get("content", "")).strip()
+        if content:
+            lines.append(f"{role}: {content}")
+    if max_turns > 0:
+        lines = lines[-max_turns * 2 :]
+    return "\n".join(lines)
+
+
+def _parse_action_response(response: str) -> tuple[str, str]:
+    """
+    Parse la réponse du LLM au format strict.
+    Retourne (action_type, action_value).
+    """
+    response = response.strip()
+    for prefix in ACTION_PREFIXES:
+        if response.startswith(prefix):
+            action_type = prefix.rstrip(":")
+            action_value = response[len(prefix) :].strip()
+            logger.info("Action parsée: %s → '%s'", action_type, action_value)
+            return action_type, action_value
+
+    logger.warning("Format non reconnu: '%s' → fallback CHAT", response[:100])
+    return "CHAT", response
+
+
+def _execute_parsed_action(action_type: str, action_value: str, original_text: str) -> str:
+    """Exécute l'action parsée depuis la réponse LLM."""
+    logger.info("Exécution: %s(%s)", action_type, action_value)
+
+    if action_type == "OPEN_APP":
+        result = apps.launch(action_value)
+    elif action_type == "CLOSE_APP":
+        result = apps.close(action_value)
+    elif action_type == "SEARCH_WEB":
+        result = browser.search_google(action_value)
+    elif action_type == "OPEN_SITE":
+        if action_value.startswith("http"):
+            result = browser.open_url(action_value)
+        else:
+            result = browser.open_site(action_value)
+    elif action_type == "VOLUME":
+        try:
+            result = system.set_volume(int(action_value))
+        except ValueError:
+            result = f"Niveau de volume invalide: {action_value}"
+    elif action_type == "SCREENSHOT":
+        result = system.screenshot()
+    elif action_type == "PRESET":
+        result = presets.activate(action_value)
+    elif action_type == "METEO":
+        import api_keys
+
+        status = api_keys.check_status("openweather")
+        data = (
+            weather.get_current(action_value)
+            if status.get("status") == "ok"
+            else weather.get_current_free(action_value)
+        )
+        if "error" not in data:
+            raw = (
+                f"Météo à {data.get('city', action_value)}: {data.get('temp')}°C, "
+                f"{data.get('description')}, vent {data.get('wind')} km/h"
+            )
+            result = _llm_format(f"Formate en une phrase naturelle: {raw}")
+        else:
+            result = f"Impossible d'obtenir la météo pour {action_value}"
+    elif action_type == "TIMER":
+        try:
+            result = timer.set_timer(int(action_value))
+        except (ValueError, TypeError):
+            result = f"Durée invalide: {action_value}"
+    elif action_type == "CHAT":
+        result = action_value
+    else:
+        result = action_value
+
+    logger.warning("═══ LLM→UI: '%s' ═══", str(result)[:200])
+    return result
+
+
+def ask_with_actions(text: str) -> str:
+    """
+    Route les commandes simples via format strict LLM.
+    Fast intent regex en premier, puis classification Ollama.
+    """
+    fast = _fast_intent(text)
+    if fast and fast[0] != "question_libre":
+        intent, params = fast
+        logger.info("Fast intent: %s", intent)
+        result = _execute_action(intent, params, text)
+        if result:
+            logger.warning("═══ LLM→UI: '%s' ═══", str(result)[:200])
+            return result
+
+    conv_mode = _get_conversation_mode()
+    model = MODELS["fast"] if conv_mode == "vocal" else _select_model(text)
+
+    history_text = _build_history_text()
+    full_prompt = f"{ACTIONS_SYSTEM_PROMPT}\n\n{history_text}\nUtilisateur: {text}\nARIA:"
+
+    logger.debug("═══ PROMPT ═══\n%s\n══════════════", full_prompt[:600])
+    logger.debug("═══ PROMPT OLLAMA ═══")
+    logger.debug("%s", full_prompt[:500])
+    logger.debug("════════════════════")
+
+    try:
+        resp = requests.post(
+            OLLAMA_GENERATE_URL,
+            json={
+                "model": model,
+                "prompt": full_prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.2,
+                    "num_predict": 150 if conv_mode == "vocal" else 400,
+                },
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        raw_response = resp.json().get("response", "").strip()
+    except Exception as exc:
+        logger.error("Erreur LLM: %s", exc)
+        return "Désolé, je n'ai pas pu traiter ta demande."
+
+    logger.info("═══ LLM RAW ═══\n%s\n═══════════════", raw_response[:300])
+    logger.info("═══ LLM RÉPONSE ═══")
+    logger.info("%s", raw_response[:300])
+    logger.info("═══════════════════")
+
+    action_type, action_value = _parse_action_response(raw_response)
+    return _execute_parsed_action(action_type, action_value, text)
+
+
 def generate_daily_brief() -> str:
     import brief
 
@@ -1912,6 +2217,8 @@ def ask(text: str, *, show_user: bool = True) -> None:
     """Point d'entrée principal — route vers le bon handler selon l'intent."""
     if not text or not text.strip():
         return
+
+    logger.warning("═══ STT→LLM: '%s' ═══", text)
 
     memory_engine.get_engine().update_active_hours()
 
@@ -1966,21 +2273,33 @@ def ask(text: str, *, show_user: bool = True) -> None:
     memory_engine.add_to_conversation("user", text)
 
     try:
-        # stream_to_ui doit toujours afficher la réponse de l'assistant dans le chat.
-        # show_user ne contrôle QUE l'affichage de la bulle utilisateur (déjà ajoutée
-        # côté JS pour la saisie texte), pas le streaming de la réponse.
-        response = _route_with_intelligence(intent, params, text, stream_to_ui=True)
-        if response:
-            _history.append({"role": "user", "content": text.strip()})
-            _history.append({"role": "assistant", "content": response})
-            _trim_history()
-            _save_history()
-            memory.extract_from_conversation(text)
-            memory_engine.record_message("assistant", response, model=MODEL)
-            memory_engine.extract_preferences(text, response)
-            memory_engine.add_to_conversation("assistant", response)
-            memory_engine.get_engine().save_current_conversation()
-            _process_memory_learning(text, response)
+        if _get_conversation_mode() == "vocal":
+            response = ask_with_actions(text)
+            if response:
+                _speak_response(response)
+                _history.append({"role": "user", "content": text.strip()})
+                _history.append({"role": "assistant", "content": response})
+                _trim_history()
+                _save_history()
+                memory.extract_from_conversation(text)
+                memory_engine.record_message("assistant", response, model=MODEL)
+                memory_engine.extract_preferences(text, response)
+                memory_engine.add_to_conversation("assistant", response)
+                memory_engine.get_engine().save_current_conversation()
+                _process_memory_learning(text, response)
+        else:
+            response = _route_with_intelligence(intent, params, text, stream_to_ui=True)
+            if response:
+                _history.append({"role": "user", "content": text.strip()})
+                _history.append({"role": "assistant", "content": response})
+                _trim_history()
+                _save_history()
+                memory.extract_from_conversation(text)
+                memory_engine.record_message("assistant", response, model=MODEL)
+                memory_engine.extract_preferences(text, response)
+                memory_engine.add_to_conversation("assistant", response)
+                memory_engine.get_engine().save_current_conversation()
+                _process_memory_learning(text, response)
     except Exception as exc:
         logger.error("Routing error: %s", exc)
         sounds.play("error")
@@ -2011,9 +2330,16 @@ def ask_return_text(text: str) -> str:
     memory_engine.record_intent(intent)
     memory_engine.add_to_conversation("user", text)
 
+    logger.debug("═══ PROMPT OLLAMA ═══")
+    logger.debug("%s", text[:500])
+    logger.debug("════════════════════")
+
     try:
         response = _route_with_intelligence(intent, params, text, stream_to_ui=False)
         if response:
+            logger.info("═══ LLM RÉPONSE ═══")
+            logger.info("%s", response[:300])
+            logger.info("═══════════════════")
             _history.append({"role": "user", "content": text.strip()})
             _history.append({"role": "assistant", "content": response})
             _trim_history()
@@ -2029,6 +2355,9 @@ def ask_return_text(text: str) -> str:
 
     response, _ = _conversation(text, stream_to_ui=False)
     if response:
+        logger.info("═══ LLM RÉPONSE ═══")
+        logger.info("%s", response[:300])
+        logger.info("═══════════════════")
         _save_history()
         memory.extract_from_conversation(text)
         memory_engine.record_message("assistant", response, model=MODEL)
@@ -2044,56 +2373,15 @@ def _stream_response(response, user_text: str = "", model: str = MODEL_HEAVY) ->
     """Stream une réponse Ollama vers l'UI et TTS."""
     global _history
 
-    sentence_buffer = ""
-    full_response = ""
-    spoke_streaming = False
-    sentence_endings = (". ", "! ", "? ", ".\n", "!\n", "?\n")
-    ui.set_status("thinking")
-
-    for line in response.iter_lines():
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        token = data.get("message", {}).get("content", "")
-        if token:
-            full_response += token
-            sentence_buffer += token
-            ui.append_assistant_text(token)
-
-            if any(sentence_buffer.endswith(p) for p in sentence_endings):
-                sentence = sentence_buffer.strip()
-                if sentence and len(sentence) > 5 and _should_speak_tts():
-                    ui.set_status("speaking")
-                    threading.Thread(
-                        target=tts.speak,
-                        kwargs={"text": sentence, "force": True, "notify_finished": False},
-                        daemon=True,
-                    ).start()
-                    spoke_streaming = True
-                    sentence_buffer = ""
-
-        if data.get("done"):
-            break
-
-    if sentence_buffer.strip():
-        remainder = sentence_buffer.strip()
-        if len(remainder) > 5 and _should_speak_tts():
-            ui.set_status("speaking")
-            threading.Thread(
-                target=tts.speak,
-                kwargs={"text": remainder, "force": True, "notify_finished": True},
-                daemon=True,
-            ).start()
-            spoke_streaming = True
-
-    ui.finalize_assistant_message()
+    full_response, spoke_streaming = _stream_and_speak(response, stream_to_ui=True)
 
     if not full_response.strip():
         ui.set_status("idle")
         return ""
+
+    logger.info("═══ LLM RÉPONSE ═══")
+    logger.info("%s", full_response[:300])
+    logger.info("═══════════════════")
 
     _history.append({"role": "assistant", "content": full_response})
     _trim_history()

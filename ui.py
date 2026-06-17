@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import base64
+import http.server
 import json
 import logging
+import socketserver
 import subprocess
 import sys
 import threading
@@ -29,6 +32,41 @@ _training_status = "idle"
 
 _installed_apps_cache = None
 _installed_apps_cache_time = 0.0
+
+_STATIC_PORT = 8765
+_static_server_started = False
+
+
+def _wallpaper_http_url(filename: str) -> str:
+    return f"http://127.0.0.1:{_STATIC_PORT}/wallpapers/{filename}"
+
+
+def _start_static_server() -> None:
+    """Démarre un serveur HTTP local pour servir data/ via http://127.0.0.1."""
+    global _static_server_started
+    if _static_server_started:
+        return
+
+    data_dir = app_paths.data_dir()
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(data_dir), **kwargs)
+
+        def log_message(self, format, *args):
+            pass
+
+    def _run() -> None:
+        try:
+            socketserver.TCPServer.allow_reuse_address = True
+            with socketserver.TCPServer(("127.0.0.1", _STATIC_PORT), Handler) as httpd:
+                httpd.serve_forever()
+        except Exception as exc:
+            logger.error("Erreur serveur statique: %s", exc)
+
+    threading.Thread(target=_run, daemon=True, name="ARIA-StaticHTTP").start()
+    _static_server_started = True
+    logger.info("Serveur statique démarré sur http://127.0.0.1:%d", _STATIC_PORT)
 
 
 def _html_path() -> Path:
@@ -96,15 +134,61 @@ class AriaAPI:
             logger.exception("Erreur sauvegarde settings")
 
     def save_wallpaper(self, base64_data: str, filename: str) -> str:
-        import base64
-        from pathlib import Path
+        """Sauvegarde une image uploadée dans data/wallpapers/ et retourne son URL."""
+        try:
+            wp_dir = app_paths.data_dir() / "wallpapers"
+            wp_dir.mkdir(parents=True, exist_ok=True)
 
-        wp_dir = app_paths.data_dir() / "wallpapers"
-        wp_dir.mkdir(parents=True, exist_ok=True)
-        ext = Path(filename).suffix or ".jpg"
-        out_path = wp_dir / f"custom{ext}"
-        out_path.write_bytes(base64.b64decode(base64_data))
-        return f"file:///{out_path.as_posix()}"
+            if "," in base64_data:
+                base64_data = base64_data.split(",", 1)[1]
+
+            ext = Path(filename).suffix.lower() or ".jpg"
+            if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+                ext = ".jpg"
+
+            safe_name = f"wallpaper_{int(time.time())}{ext}"
+            out_path = wp_dir / safe_name
+
+            out_path.write_bytes(base64.b64decode(base64_data))
+
+            url = _wallpaper_http_url(safe_name)
+            logger.info("Wallpaper sauvegardé: %s → %s", out_path, url)
+            return json.dumps({"success": True, "url": url, "filename": safe_name})
+        except Exception as exc:
+            logger.error("Erreur save_wallpaper: %s", exc)
+            return json.dumps({"success": False, "error": str(exc)})
+
+    def get_wallpapers(self) -> str:
+        """Retourne la liste des wallpapers personnalisés sauvegardés."""
+        try:
+            wp_dir = app_paths.data_dir() / "wallpapers"
+            if not wp_dir.exists():
+                return json.dumps([])
+            files = []
+            for f in sorted(wp_dir.iterdir()):
+                if f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+                    files.append({
+                        "filename": f.name,
+                        "url": _wallpaper_http_url(f.name),
+                    })
+            return json.dumps(files)
+        except Exception as exc:
+            logger.error("Erreur get_wallpapers: %s", exc)
+            return json.dumps([])
+
+    def delete_wallpaper(self, filename: str) -> str:
+        """Supprime un wallpaper personnalisé."""
+        try:
+            wp_dir = app_paths.data_dir() / "wallpapers"
+            target = wp_dir / Path(filename).name
+            if target.exists():
+                target.unlink()
+                logger.info("Wallpaper supprimé: %s", filename)
+                return json.dumps({"success": True})
+            return json.dumps({"success": False, "error": "Fichier non trouvé"})
+        except Exception as exc:
+            logger.error("Erreur delete_wallpaper: %s", exc)
+            return json.dumps({"success": False, "error": str(exc)})
 
     def get_presets(self) -> str:
         try:
@@ -362,12 +446,17 @@ class AriaAPI:
         tts.speak(text, force=True)
 
     def start_mic(self) -> None:
-        try:
-            import main
+        import stt
 
-            main._resume_mic()
-        except Exception:
-            logger.exception("start_mic failed")
+        if not stt.is_listening():
+            stt.start_listening()
+            logger.info("Micro démarré depuis UI")
+
+    def stop_mic(self) -> None:
+        import stt
+
+        stt.stop_listening()
+        logger.info("Micro arrêté depuis UI")
 
     def get_memory_stats(self) -> str:
         import json
@@ -820,6 +909,7 @@ class UI:
 
     def run(self) -> None:
         global _window
+        _start_static_server()
         html = _html_path()
         if not html.exists():
             raise FileNotFoundError(f"Interface introuvable : {html}")
@@ -845,6 +935,15 @@ class UI:
             transparent=False,
         )
         logger.info("Fenêtre créée: %s", _window)
+
+        try:
+            import main as _main
+
+            if hasattr(_main, "_on_aria_closing"):
+                _window.events.closing += _main._on_aria_closing
+                logger.info("Callback fermeture ARIA branché sur events.closing")
+        except Exception:
+            logger.exception("Impossible de brancher l'event closing")
 
         gui_backend = getattr(webview, "platforms", None)
         if gui_backend is None:
@@ -897,7 +996,11 @@ class UI:
         self._js(f"if(window.aria) aria.setStatus({escaped})")
 
     def update_waveform(self, rms: float) -> None:
-        self._js(f"if(window.aria) aria.updateWaveform({rms:.1f})")
+        try:
+            normalized = rms / 32768.0 if rms > 1.0 else rms
+            self._js(f"if(window.aria) aria.updateWaveform({normalized:.6f})")
+        except Exception:
+            pass
 
     def show_toast(self, message: str, duration: int = 3000, toast_type: str = "info") -> None:
         self._js(

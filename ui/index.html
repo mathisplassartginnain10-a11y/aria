@@ -559,6 +559,87 @@
       color: var(--success);
     }
 
+    /* Orbe micro réactif (zone input) */
+    #mic-orb-container {
+      position: relative;
+      width: 44px;
+      height: 44px;
+      flex-shrink: 0;
+    }
+
+    .mic-ring {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      border: 1.5px solid rgba(108,142,255,0.4);
+      opacity: 0;
+      transform: scale(1);
+      transition: none;
+      pointer-events: none;
+    }
+
+    #input-mic-btn {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.08);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: var(--text3);
+      cursor: pointer;
+      font-size: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 2;
+      transition: background 0.3s, border-color 0.3s, box-shadow 0.3s, color 0.3s;
+      padding: 0;
+    }
+
+    #input-mic-btn:hover { color: var(--text); background: rgba(255,255,255,0.14); }
+    #input-mic-btn.active { color: var(--accent); background: var(--accent-bg); }
+
+    #input-mic-btn.mic-idle,
+    #mic-btn.mic-idle {
+      background: rgba(255,255,255,0.06);
+      border-color: rgba(255,255,255,0.1);
+    }
+
+    #input-mic-btn.mic-listening,
+    #mic-btn.mic-listening {
+      background: rgba(108,142,255,0.15);
+      border-color: rgba(108,142,255,0.4);
+      box-shadow: 0 0 0 0 rgba(108,142,255,0.3);
+      color: var(--accent);
+      animation: micIdlePulse 2.5s ease-in-out infinite;
+    }
+
+    #input-mic-btn.mic-speaking-detected,
+    #mic-btn.mic-speaking-detected {
+      background: rgba(74,222,128,0.15);
+      border-color: rgba(74,222,128,0.5);
+      box-shadow: 0 0 12px rgba(74,222,128,0.3);
+      color: var(--success);
+      animation: none;
+    }
+
+    @keyframes micIdlePulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(108,142,255,0.2); }
+      50%       { box-shadow: 0 0 0 6px rgba(108,142,255,0); }
+    }
+
+    @keyframes ringExpand {
+      0%   { transform: scale(1);   opacity: 0.6; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
+
+    .mic-ring.ring-active {
+      animation: ringExpand 0.6s ease-out forwards;
+    }
+
     .hbtn:hover { background: var(--hover); border-color: var(--border2); color: var(--text); }
     .hbtn.active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
 
@@ -809,28 +890,6 @@
     }
 
     #text-input::placeholder { color: var(--text3); }
-
-    #input-mic-btn {
-      position: static;
-      width: 38px;
-      height: 38px;
-      border-radius: 50%;
-      background: rgba(255,255,255,0.08);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border: 0.5px solid rgba(255,255,255,0.12);
-      color: var(--text3);
-      cursor: pointer;
-      font-size: 16px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-    }
-
-    #input-mic-btn:hover { color: var(--text); background: rgba(255,255,255,0.14); }
-    #input-mic-btn.active { color: var(--accent); background: var(--accent-bg); }
 
     #send-btn {
       position: static;
@@ -1286,7 +1345,12 @@
 
     <div id="input-bar">
       <div id="input-zone">
-        <button type="button" id="input-mic-btn" title="Micro" onclick="aria.toggleMic()">🎤</button>
+        <div id="mic-orb-container">
+          <div class="mic-ring" id="mic-ring-1"></div>
+          <div class="mic-ring" id="mic-ring-2"></div>
+          <div class="mic-ring" id="mic-ring-3"></div>
+          <button type="button" id="input-mic-btn" title="Micro" onclick="aria.toggleMic()">🎤</button>
+        </div>
         <textarea id="text-input" rows="1" placeholder="Envoyer un message à ARIA…"></textarea>
         <label id="file-btn" title="Joindre des fichiers">
           📎
@@ -1377,6 +1441,14 @@ const aria = {
   micManuallyPaused: false,
   _ttsFinishTimer: null,
   _micRestartCooldown: false,
+  _vocalCountdownTimer: null,
+  _originalTranscription: '',
+  _countdownActive: false,
+  _injectingSTT: false,
+  _vocalCountdownListeners: null,
+  _micRmsHistory: [],
+  _lastRingTime: 0,
+  _speechDetected: false,
 
   _isValidConversationMode(mode) {
     return mode === 'ecrit' || mode === 'vocal';
@@ -1395,6 +1467,8 @@ const aria = {
   presetsCustom: {},
   wallpaperType: 'mesh-animated',
   wallpaperPath: '',
+  wallpaperFilename: '',
+  WALLPAPER_STATIC_PORT: 8765,
   glassIntensity: 60,
   currentDevice: 'pc',
   _modelPickerData: null,
@@ -1587,11 +1661,15 @@ const aria = {
     this.orbCtx = document.getElementById('orb-canvas').getContext('2d');
     this.buildSettingsPanel();
     this.loadSettings();
+    this.restoreWallpaper();
     this.detectDevice();
     this.loadPresets();
     this.loadConversations();
     this.loadModelPicker();
     this.setStatus('idle');
+    this._micActive = false;
+    document.getElementById('mic-btn')?.classList.add('mic-idle');
+    document.getElementById('mic-btn').textContent = '🎤';
     this.startClock();
     document.getElementById('text-input').addEventListener('keydown', e => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.sendText(); }
@@ -1669,7 +1747,7 @@ const aria = {
     if (!this.reducedMotion) {
       this.arcA += 0.013;
       this.arcB -= 0.008;
-      const lvl = Math.min(1, this.rms / 1000);
+      const lvl = Math.min(1, this.rms > 1 ? this.rms / 1000 : this.rms * 10);
       this.displayRms += (lvl - this.displayRms) * 0.1;
       const active = ['listening','thinking','speaking','transcribing'].includes(this.status);
       this.targetOrbR = active ? 22 : 14 + this.displayRms * 6;
@@ -1735,16 +1813,17 @@ const aria = {
     this.status = state;
     const labels = { idle:'En veille', inactive:'En veille', listening:'Écoute…', transcribing:'Transcription…', thinking:'Réflexion…', speaking:'ARIA parle…' };
     document.getElementById('status-text').textContent = labels[state] || 'En veille';
-    const active = ['listening','thinking','speaking','transcribing'].includes(state);
-    const micBtn = document.getElementById('mic-btn');
-    const inputMic = document.getElementById('input-mic-btn');
-    [micBtn, inputMic].forEach(btn => {
-      if (!btn) return;
-      btn.classList.remove('active', 'listening', 'speaking');
-      if (state === 'listening' || state === 'transcribing') btn.classList.add('listening');
-      else if (state === 'speaking') btn.classList.add('speaking');
-      else if (active) btn.classList.add('active');
-    });
+
+    const micStateMap = {
+      idle: 'idle',
+      inactive: 'idle',
+      listening: 'listening',
+      transcribing: 'transcribing',
+      thinking: 'idle',
+      speaking: 'idle',
+    };
+    this.setMicState(micStateMap[state] || 'idle');
+
     const logo = document.getElementById('aria-logo');
     if (logo) {
       logo.classList.remove('logo-idle', 'logo-listening', 'logo-thinking', 'logo-speaking');
@@ -1754,6 +1833,92 @@ const aria = {
     const stopBtn = document.getElementById('stop-btn');
     if (stopBtn) {
       stopBtn.style.display = ['speaking', 'thinking'].includes(state) ? 'inline-flex' : 'none';
+    }
+  },
+
+  setMicState(state) {
+    const inputBtn = document.getElementById('input-mic-btn');
+    const headerBtn = document.getElementById('mic-btn');
+    const buttons = [inputBtn, headerBtn].filter(Boolean);
+
+    buttons.forEach(btn => {
+      btn.classList.remove('mic-idle', 'mic-listening', 'mic-speaking-detected', 'active', 'listening', 'speaking');
+      btn.style.transform = 'scale(1)';
+    });
+
+    this._micRmsHistory = [];
+    this._speechDetected = false;
+
+    const icons = { idle: '🎤', listening: '🎤', transcribing: '⏳', paused: '⏸️' };
+    const icon = icons[state] || '🎤';
+    buttons.forEach(btn => { btn.textContent = icon; });
+
+    if (state === 'listening') {
+      buttons.forEach(btn => btn.classList.add('mic-listening'));
+    } else {
+      buttons.forEach(btn => btn.classList.add('mic-idle'));
+    }
+  },
+
+  _triggerRing() {
+    const rings = document.querySelectorAll('.mic-ring');
+    rings.forEach((ring, i) => {
+      ring.classList.remove('ring-active');
+      setTimeout(() => {
+        ring.style.animationDelay = `${i * 80}ms`;
+        ring.classList.add('ring-active');
+        setTimeout(() => ring.classList.remove('ring-active'), 700);
+      }, 10);
+    });
+  },
+
+  updateWaveform(rms) {
+    this._micRmsHistory.push(rms);
+    if (this._micRmsHistory.length > 8) this._micRmsHistory.shift();
+    const smoothRms = this._micRmsHistory.reduce((a, b) => a + b, 0) / this._micRmsHistory.length;
+    this.rms = smoothRms;
+
+    const btn = document.getElementById('input-mic-btn');
+    if (!btn) return;
+
+    const SPEECH_THRESHOLD = 0.02;
+    const isSpeaking = smoothRms > SPEECH_THRESHOLD;
+
+    if (isSpeaking && !this._speechDetected) {
+      this._speechDetected = true;
+      btn.classList.remove('mic-idle', 'mic-listening');
+      btn.classList.add('mic-speaking-detected');
+      btn.textContent = '🎙️';
+      const headerBtn = document.getElementById('mic-btn');
+      if (headerBtn) {
+        headerBtn.classList.remove('mic-idle', 'mic-listening');
+        headerBtn.classList.add('mic-speaking-detected');
+        headerBtn.textContent = '🎙️';
+      }
+    } else if (!isSpeaking && this._speechDetected) {
+      this._speechDetected = false;
+      btn.classList.remove('mic-speaking-detected');
+      if (this.status === 'listening' || this.status === 'transcribing') {
+        btn.classList.add('mic-listening');
+      } else {
+        btn.classList.add('mic-idle');
+      }
+      btn.textContent = this.status === 'transcribing' ? '⏳' : '🎤';
+      const headerBtn = document.getElementById('mic-btn');
+      if (headerBtn) {
+        headerBtn.classList.remove('mic-speaking-detected');
+        headerBtn.classList.add(this.status === 'listening' || this.status === 'transcribing' ? 'mic-listening' : 'mic-idle');
+        headerBtn.textContent = this.status === 'transcribing' ? '⏳' : '🎤';
+      }
+    }
+
+    const scale = isSpeaking ? 1 + Math.min(smoothRms * 3, 0.25) : 1;
+    btn.style.transform = `scale(${scale.toFixed(3)})`;
+
+    const now = Date.now();
+    if (isSpeaking && smoothRms > 0.04 && now - this._lastRingTime > 400) {
+      this._lastRingTime = now;
+      this._triggerRing();
     }
   },
 
@@ -1775,41 +1940,191 @@ const aria = {
     this.glassIntensity = v;
   },
 
-  setWallpaper(type, path, skipSave) {
+  _wallpaperHttpUrl(filename) {
+    return `http://127.0.0.1:${this.WALLPAPER_STATIC_PORT}/wallpapers/${encodeURIComponent(filename)}`;
+  },
+
+  _resolveCustomWallpaperUrl(s) {
+    if (!s || s.wallpaper_type !== 'custom') return null;
+    const filename = s.wallpaper_filename
+      || (s.wallpaper_url || s.wallpaper_path || '').split('/').pop()?.split('?')[0];
+    if (filename) return this._wallpaperHttpUrl(decodeURIComponent(filename));
+    const raw = s.wallpaper_url || s.wallpaper_path;
+    if (raw && raw.startsWith('http://')) return raw;
+    return null;
+  },
+
+  setWallpaper(type, url = null, skipSave) {
     const layer = document.getElementById('wallpaper-image');
     if (!layer) return;
-    layer.className = '';
-    layer.style.background = '';
-    if (type === 'custom' && path) {
-      layer.style.background = `url("${path}") center/cover no-repeat`;
-    } else if (type) {
-      layer.className = 'wp-' + type;
+
+    layer.className = layer.className
+      .split(' ')
+      .filter(c => c && !c.startsWith('wp-'))
+      .join(' ');
+
+    if (type === 'custom' && url) {
+      layer.style.background = '';
+      layer.style.backgroundImage = `url("${url}")`;
+      layer.style.backgroundSize = 'cover';
+      layer.style.backgroundPosition = 'center';
+      layer.style.backgroundRepeat = 'no-repeat';
+    } else {
+      layer.style.backgroundImage = '';
+      layer.style.background = '';
+      if (type) layer.classList.add(`wp-${type}`);
     }
+
     this.wallpaperType = type || 'mesh-animated';
-    this.wallpaperPath = path || '';
+    this.wallpaperPath = url || '';
+    this.wallpaperFilename = (type === 'custom' && url)
+      ? (url.split('/').pop()?.split('?')[0] || '')
+      : '';
+
     document.querySelectorAll('.wp-thumb').forEach(t => {
-      t.classList.toggle('active', t.dataset.wp === this.wallpaperType);
+      t.classList.toggle('active', type !== 'custom' && t.dataset.wp === this.wallpaperType);
     });
+
     if (!skipSave) this.saveSettings();
+  },
+
+  restoreWallpaper() {
+    const p = this.api('load_settings');
+    if (!p?.then) return;
+    p.then(raw => {
+      try {
+        const s = JSON.parse(raw || '{}');
+        if (!s.wallpaper_type) return;
+
+        if (s.wallpaper_type === 'custom') {
+          const url = this._resolveCustomWallpaperUrl(s);
+          if (url) {
+            this.setWallpaper('custom', url, true);
+            this.wallpaperFilename = s.wallpaper_filename
+              || url.split('/').pop()?.split('?')[0]
+              || '';
+          }
+        } else {
+          this.setWallpaper(s.wallpaper_type, null, true);
+        }
+      } catch (e) {
+        console.warn('restoreWallpaper', e);
+      }
+    });
+  },
+
+  async loadWallpapers() {
+    try {
+      let raw = this.api('get_wallpapers');
+      if (raw?.then) raw = await raw;
+      const wallpapers = JSON.parse(raw || '[]');
+      this.renderWallpaperGrid(wallpapers);
+    } catch (e) {
+      console.warn('loadWallpapers', e);
+    }
+  },
+
+  renderWallpaperGrid(customWallpapers) {
+    const grid = document.getElementById('wallpaper-custom-grid');
+    if (!grid) return;
+
+    grid.innerHTML = '';
+
+    if (!customWallpapers.length) {
+      grid.innerHTML = '<div style="font-size:12px;color:var(--text3);padding:8px">Aucune image importée</div>';
+      return;
+    }
+
+    customWallpapers.forEach(wp => {
+      const item = document.createElement('div');
+      item.className = 'wp-custom-item';
+      item.style.cssText = 'position:relative;width:80px;height:56px;border-radius:10px;overflow:hidden;cursor:pointer;border:2px solid transparent;transition:border-color 0.15s;flex-shrink:0';
+
+      const img = document.createElement('img');
+      img.src = wp.url;
+      img.alt = wp.filename || 'wallpaper';
+      img.style.cssText = 'width:100%;height:100%;object-fit:cover';
+      img.onclick = () => this.setWallpaper('custom', wp.url);
+
+      if (wp.filename) {
+        img.onerror = () => {
+          img.src = this._wallpaperHttpUrl(wp.filename);
+        };
+      }
+
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.textContent = '✕';
+      del.style.cssText = 'position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1';
+      del.onclick = (e) => {
+        e.stopPropagation();
+        this.deleteWallpaper(wp.filename);
+      };
+
+      item.appendChild(img);
+      item.appendChild(del);
+      grid.appendChild(item);
+    });
   },
 
   async uploadWallpaper(file) {
     if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      this.showToast('Fichier non supporté — utilise une image (jpg, png, webp)', 'error');
+      return;
+    }
+
+    this.showToast('Import en cours...', 'info');
+
     try {
-      const b64 = await this.fileToBase64(file);
-      let path = this.api('save_wallpaper', b64, file.name);
-      if (path?.then) path = await path;
-      if (path) {
-        const p = String(path).replace(/^"|"$/g, '');
-        this.setWallpaper('custom', p);
-        this.showToast('Fond d\'écran mis à jour', 'success');
+      const b64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = e => resolve(e.target.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      let raw = this.api('save_wallpaper', b64, file.name);
+      if (raw?.then) raw = await raw;
+      const result = JSON.parse(raw || '{}');
+
+      if (result.success) {
+        this.showToast('Image importée ✓', 'success');
+        this.setWallpaper('custom', result.url);
+        this.wallpaperFilename = result.filename || '';
+        if (!this.wallpaperFilename && result.url) {
+          this.wallpaperFilename = result.url.split('/').pop()?.split('?')[0] || '';
+        }
+        this.saveSettings();
+        await this.loadWallpapers();
+      } else {
+        this.showToast('Erreur import: ' + (result.error || 'inconnue'), 'error');
       }
     } catch (e) {
-      this.showToast('Erreur upload fond d\'écran', 'error');
+      this.showToast('Erreur import image', 'error');
+      console.error('uploadWallpaper error:', e);
     }
   },
 
-  updateWaveform(rms) { this.rms = rms; },
+  async deleteWallpaper(filename) {
+    try {
+      let raw = this.api('delete_wallpaper', filename);
+      if (raw?.then) raw = await raw;
+      const result = JSON.parse(raw || '{}');
+      if (result.success) {
+        this.showToast('Image supprimée', 'success');
+        if (this.wallpaperType === 'custom') {
+          this.setWallpaper('midnight');
+        }
+        await this.loadWallpapers();
+      } else {
+        this.showToast(result.error || 'Suppression impossible', 'error');
+      }
+    } catch (e) {
+      this.showToast('Erreur suppression image', 'error');
+    }
+  },
 
   updateEmpty() {
     const has = document.querySelectorAll('.bubble-user, .bubble-aria-wrap').length > 0;
@@ -1898,13 +2213,113 @@ const aria = {
   },
 
   showFinalTranscription(text) {
+    this.onSTTResult(text);
+  },
+
+  onSTTResult(text) {
     const input = document.getElementById('text-input');
-    if (!input) return;
+    if (!input || !text) return;
+
+    this._injectingSTT = true;
     input.value = text;
     input.style.color = 'var(--text)';
     this._partialTranscription = false;
-    input.focus();
     input.dispatchEvent(new Event('input'));
+    this._injectingSTT = false;
+
+    input.focus();
+
+    if (this.conversationMode === 'vocal') {
+      this._startVocalCountdown(text);
+    }
+  },
+
+  _removeVocalCountdownListeners() {
+    if (!this._vocalCountdownListeners) return;
+    const { input, onKeydown, onInput } = this._vocalCountdownListeners;
+    input.removeEventListener('keydown', onKeydown);
+    input.removeEventListener('input', onInput);
+    this._vocalCountdownListeners = null;
+  },
+
+  _cancelCountdown() {
+    if (this._vocalCountdownTimer) {
+      clearTimeout(this._vocalCountdownTimer);
+      this._vocalCountdownTimer = null;
+    }
+    this._countdownActive = false;
+    const input = document.getElementById('text-input');
+    if (input) {
+      input.style.outline = '';
+      input.style.borderColor = '';
+    }
+    this._removeVocalCountdownListeners();
+  },
+
+  _startVocalCountdown(text) {
+    if (this._vocalCountdownTimer) {
+      clearTimeout(this._vocalCountdownTimer);
+      this._vocalCountdownTimer = null;
+    }
+    this._removeVocalCountdownListeners();
+
+    this._countdownActive = true;
+    this._originalTranscription = text;
+
+    const input = document.getElementById('text-input');
+    if (!input) return;
+
+    input.style.outline = '2px solid rgba(108,142,255,0.7)';
+
+    const cleanup = () => {
+      this._countdownActive = false;
+      input.style.outline = '';
+      input.removeEventListener('keydown', onKeyDown);
+      input.removeEventListener('input', onInput);
+      this._vocalCountdownListeners = null;
+    };
+
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        clearTimeout(this._vocalCountdownTimer);
+        this._vocalCountdownTimer = null;
+        cleanup();
+        this._injectingSTT = true;
+        input.value = '';
+        input.dispatchEvent(new Event('input'));
+        this._injectingSTT = false;
+      } else if (e.key === 'Enter' && !e.shiftKey) {
+        clearTimeout(this._vocalCountdownTimer);
+        this._vocalCountdownTimer = null;
+        cleanup();
+      } else {
+        clearTimeout(this._vocalCountdownTimer);
+        this._vocalCountdownTimer = null;
+        cleanup();
+      }
+    };
+
+    const onInput = () => {
+      if (this._injectingSTT) return;
+      if (this._countdownActive && input.value !== this._originalTranscription) {
+        clearTimeout(this._vocalCountdownTimer);
+        this._vocalCountdownTimer = null;
+        cleanup();
+      }
+    };
+
+    input.addEventListener('keydown', onKeyDown);
+    input.addEventListener('input', onInput);
+    this._vocalCountdownListeners = { input, onKeydown: onKeyDown, onInput };
+
+    this._vocalCountdownTimer = setTimeout(() => {
+      cleanup();
+      const currentText = input.value.trim();
+      if (currentText && currentText === this._originalTranscription.trim()) {
+        this.sendText();
+      }
+      this._vocalCountdownTimer = null;
+    }, 1500);
   },
 
   showChecklistProgress(section, item, total) {
@@ -2098,10 +2513,27 @@ const aria = {
   },
 
   toggleMic() {
-    const wasListening = this.status === 'listening' || this.status === 'transcribing';
-    this.api('toggle_activation');
+    if (this._micActive) {
+      this._micActive = false;
+      this.api('stop_mic');
+      document.getElementById('mic-btn')?.classList.remove('mic-listening', 'mic-speaking-detected', 'mic-emphasized');
+      document.getElementById('mic-btn')?.classList.add('mic-idle');
+      document.getElementById('mic-btn').textContent = '🎤';
+      document.getElementById('input-mic-btn')?.classList.remove('mic-listening', 'mic-speaking-detected', 'mic-emphasized');
+      document.getElementById('input-mic-btn')?.classList.add('mic-idle');
+      this.setStatus('idle');
+    } else {
+      this._micActive = true;
+      this.api('start_mic');
+      document.getElementById('mic-btn')?.classList.remove('mic-idle');
+      document.getElementById('mic-btn')?.classList.add('mic-listening');
+      document.getElementById('mic-btn').textContent = '🎤';
+      document.getElementById('input-mic-btn')?.classList.remove('mic-idle');
+      document.getElementById('input-mic-btn')?.classList.add('mic-listening');
+      this.setStatus('listening');
+    }
     if (this.conversationMode === 'vocal') {
-      this.micManuallyPaused = wasListening;
+      this.micManuallyPaused = !this._micActive;
     }
   },
 
@@ -2135,7 +2567,6 @@ const aria = {
       micBtn?.classList.add('mic-emphasized');
       inputMic?.classList.add('mic-emphasized');
       if (!skipGreeting) {
-        this.startMic();
         const greeting = "Mode vocal activé. Je t'écoute.";
         this.addAriaBubble(greeting);
         this.api('speak_text', greeting);
@@ -2160,8 +2591,24 @@ const aria = {
     const p = this.api('set_conversation_mode', id, mode);
     if (p?.then) await p;
     this.hideModeSelector();
-    this.ttsEnabledForSession = mode === 'vocal';
-    this.applyConversationModeUI(mode);
+    this.conversationMode = mode;
+
+    if (mode === 'vocal') {
+      this.ttsEnabledForSession = true;
+      document.getElementById('mic-btn')?.classList.add('mic-emphasized');
+      document.getElementById('input-mic-btn')?.classList.add('mic-emphasized');
+      const greeting = "Mode vocal activé. Appuie sur 🎤 pour parler.";
+      this.addAriaBubble(greeting);
+    } else {
+      this.ttsEnabledForSession = false;
+      this._micActive = false;
+      await this.api('stop_mic');
+      document.getElementById('mic-btn')?.classList.remove('mic-listening', 'mic-emphasized');
+      document.getElementById('mic-btn')?.classList.add('mic-idle');
+      document.getElementById('input-mic-btn')?.classList.remove('mic-listening', 'mic-emphasized');
+      document.getElementById('input-mic-btn')?.classList.add('mic-idle');
+      document.getElementById('text-input')?.focus();
+    }
   },
 
   async syncConversationModeForConversation(convId) {
@@ -2187,24 +2634,33 @@ const aria = {
   },
 
   onMicExternalToggle(isActive) {
+    this._micActive = isActive;
+    const micBtn = document.getElementById('mic-btn');
+    const inputMic = document.getElementById('input-mic-btn');
+    if (isActive) {
+      micBtn?.classList.remove('mic-idle');
+      micBtn?.classList.add('mic-listening');
+      inputMic?.classList.remove('mic-idle');
+      inputMic?.classList.add('mic-listening');
+      this.setStatus('listening');
+    } else {
+      micBtn?.classList.remove('mic-listening', 'mic-speaking-detected', 'mic-emphasized');
+      micBtn?.classList.add('mic-idle');
+      inputMic?.classList.remove('mic-listening', 'mic-speaking-detected', 'mic-emphasized');
+      inputMic?.classList.add('mic-idle');
+      this.setStatus('idle');
+    }
     if (this.conversationMode === 'vocal') {
       this.micManuallyPaused = !isActive;
     }
   },
 
   onTTSFinished() {
-    clearTimeout(this._ttsFinishTimer);
-    this._ttsFinishTimer = setTimeout(() => {
-      if (this.conversationMode !== 'vocal' || this.micManuallyPaused) return;
-      if (['listening', 'transcribing', 'thinking', 'speaking'].includes(this.status)) return;
-      if (this._micRestartCooldown) return;
-      this._micRestartCooldown = true;
-      setTimeout(() => { this._micRestartCooldown = false; }, 2000);
-      this.startMic();
-    }, 450);
+    // Le micro reste inactif après la réponse TTS — l'utilisateur appuie sur 🎤 pour reprendre.
   },
 
   sendText() {
+    this._cancelCountdown();
     const input = document.getElementById('text-input');
     const text = input.value.trim();
     if (!text) return;
@@ -2404,6 +2860,7 @@ const aria = {
       this.loadTrainingStats();
       this.loadMobileConnectInfo();
       this.checkNexusStatus();
+      this.loadWallpapers();
     }
   },
 
@@ -2620,6 +3077,8 @@ const aria = {
       glass_intensity: document.getElementById('set-glass-intensity')?.value ?? 60,
       wallpaper_type: this.wallpaperType || 'mesh-animated',
       wallpaper_path: this.wallpaperPath || '',
+      wallpaper_url: this.wallpaperPath || '',
+      wallpaper_filename: this.wallpaperFilename || '',
       user_bubble_bg: document.getElementById('set-user-bg')?.value,
       user_bubble_radius: document.getElementById('set-user-radius')?.value,
       user_bubble_font: document.getElementById('set-user-font')?.value,
@@ -2702,10 +3161,21 @@ const aria = {
           this.setGlassIntensity(60);
         }
         if (d.wallpaper_type) {
-          this.setWallpaper(d.wallpaper_type, d.wallpaper_path || '', true);
+          if (d.wallpaper_type === 'custom') {
+            const url = this._resolveCustomWallpaperUrl(d);
+            if (url) {
+              this.setWallpaper('custom', url, true);
+              this.wallpaperFilename = d.wallpaper_filename
+                || url.split('/').pop()?.split('?')[0]
+                || '';
+            }
+          } else {
+            this.setWallpaper(d.wallpaper_type, null, true);
+          }
         } else {
           this.setWallpaper('mesh-animated', '', true);
         }
+        this.loadWallpapers();
         const fields = [
           ['user_bubble_bg','set-user-bg'], ['user_bubble_radius','set-user-radius'],
           ['user_bubble_font','set-user-font'], ['aria_bubble_font','set-aria-font'],
@@ -2970,17 +3440,27 @@ const aria = {
 
       <div class="settings-section">
         <div class="settings-title">Fond d'écran</div>
-        <div class="wallpaper-grid">
-          <div class="wp-thumb wp-aurora" data-wp="aurora" onclick="aria.setWallpaper('aurora')"></div>
-          <div class="wp-thumb wp-sunset" data-wp="sunset" onclick="aria.setWallpaper('sunset')"></div>
-          <div class="wp-thumb wp-forest" data-wp="forest" onclick="aria.setWallpaper('forest')"></div>
-          <div class="wp-thumb wp-midnight" data-wp="midnight" onclick="aria.setWallpaper('midnight')"></div>
-          <div class="wp-thumb wp-mesh-animated active" data-wp="mesh-animated" onclick="aria.setWallpaper('mesh-animated')"></div>
-          <div class="wp-thumb wp-mono" data-wp="mono" onclick="aria.setWallpaper('mono')"></div>
+
+        <div class="wallpaper-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
+          <div class="wp-thumb wp-aurora" data-wp="aurora" onclick="aria.setWallpaper('aurora')" title="Aurora"></div>
+          <div class="wp-thumb wp-sunset" data-wp="sunset" onclick="aria.setWallpaper('sunset')" title="Sunset"></div>
+          <div class="wp-thumb wp-forest" data-wp="forest" onclick="aria.setWallpaper('forest')" title="Forest"></div>
+          <div class="wp-thumb wp-midnight" data-wp="midnight" onclick="aria.setWallpaper('midnight')" title="Midnight"></div>
+          <div class="wp-thumb wp-mesh-animated active" data-wp="mesh-animated" onclick="aria.setWallpaper('mesh-animated')" title="Mesh"></div>
+          <div class="wp-thumb wp-mono" data-wp="mono" onclick="aria.setWallpaper('mono')" title="Mono"></div>
         </div>
-        <label class="settings-btn" style="text-align:center;cursor:pointer;display:block">
-          📷 Choisir une image personnelle
-          <input type="file" accept="image/*" style="display:none" onchange="aria.uploadWallpaper(this.files[0]); this.value=''">
+
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px">Images personnalisées</div>
+        <div id="wallpaper-custom-grid" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;min-height:24px"></div>
+
+        <label class="settings-btn" style="display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer">
+          📷 Importer une image
+          <input
+            type="file"
+            accept="image/*"
+            style="display:none"
+            onchange="aria.uploadWallpaper(this.files[0]); this.value='';"
+          >
         </label>
       </div>
 
