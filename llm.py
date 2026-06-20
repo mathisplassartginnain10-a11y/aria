@@ -487,6 +487,15 @@ RECHERCHE_PATTERNS: list[tuple[str, str]] = [
         "recherche_web",
     ),
     (
+        r"(?:peux-tu|tu peux|est-ce que tu peux|j'aimerais|je voudrais)\s+"
+        r"(?:savoir|connaître|connaitre|avoir des infos).+",
+        "recherche_web",
+    ),
+    (
+        r"(?:as-tu|tu as)\s+(?:des?\s+)?(?:infos?|informations?)\s+(?:sur|concernant)\s+.+",
+        "recherche_web",
+    ),
+    (
         r"(?:cherche|recherche|trouve)\s+.+\s+(?:et\s+)?(?:note|mets|écris|ecris).*(?:dans|sur)\s+"
         r"(?:le\s*)?(?:google\s*)?doc",
         "gdoc_write_search",
@@ -494,6 +503,10 @@ RECHERCHE_PATTERNS: list[tuple[str, str]] = [
     (
         r"(?:cherche|recherche)\s+les?\s+(?:dernières?|dernieres?|récentes?|recentes?)\s+"
         r"(?:actualités|actualites|news|infos)",
+        "recherche_actualites",
+    ),
+    (
+        r"(?:quoi de neuf|dernières?\s+nouvelles?|flash\s+info)\s+(?:sur|concernant|à propos de)\s+.+",
         "recherche_actualites",
     ),
     (
@@ -512,6 +525,10 @@ RECHERCHE_PATTERNS: list[tuple[str, str]] = [
     (
         r"(?:qu(?:'|e)\s*est.ce que|c'est quoi|qui est|quelle est)\s+.+",
         "recherche_wikipedia",
+    ),
+    (
+        r"(?:compare[rz]?|quelle est la différence entre|difference entre)\s+.+",
+        "recherche_multi",
     ),
     (r"(?:crée|créer|cree|ouvre|génère|genere)\s+(?:un|le)\s+(?:google\s*)?doc", "gdoc_create"),
     (
@@ -1808,19 +1825,57 @@ def _extract_search_query(text: str) -> str:
 
 
 def _extract_research_query(text: str) -> str:
-    """Extrait la requête de recherche depuis le texte utilisateur (spec v20)."""
-    patterns_to_remove = [
-        r"^(?:cherche|recherche|trouve|donne-moi|dis-moi)\s+(?:moi\s+)?(?:des?\s+infos?\s+sur\s+)?",
-        r"^(?:qu(?:'|e)\s*est.ce que|c'est quoi|qui est|quelle est)\s+",
-        r"\s+sur\s+(?:le web|internet|google|wikipedia|plusieurs sources|partout)$",
-        r"\s+(?:dans|sur)\s+(?:le\s*)?(?:google\s*)?doc$",
-        r"\s+(?:et\s+)?(?:note|mets|écris|ecris).*(?:dans|sur)\s+(?:le\s*)?(?:google\s*)?doc$",
-        r"\s+sur\s+youtube$",
-    ]
-    query = text.strip()
-    for pattern in patterns_to_remove:
-        query = re.sub(pattern, "", query, flags=re.IGNORECASE).strip()
-    return query or text.strip()
+    """Extrait la requête de recherche depuis le texte utilisateur."""
+    from actions.web_research import parse_research_request
+
+    return parse_research_request(text).query
+
+
+def _understand_research_request(
+    text: str,
+    *,
+    intent_hint: str | None = None,
+    output: str | None = None,
+) -> "ResearchRequest":
+    """Analyse une demande de recherche (règles + LLM léger si nécessaire)."""
+    from actions.web_research import (
+        ResearchRequest,
+        apply_refined_query,
+        needs_llm_query_refinement,
+        parse_research_request,
+    )
+
+    req = parse_research_request(text, intent_hint=intent_hint, output=output)
+
+    if needs_llm_query_refinement(req):
+        try:
+            prompt = (
+                "Extrais la meilleure requête de recherche web (3 à 12 mots, en français, "
+                "optimisée pour Google/DuckDuckGo) depuis cette phrase.\n"
+                "Réponds UNIQUEMENT par la requête, sans guillemets ni explication.\n\n"
+                f"Phrase : {req.original_text}\n"
+                "Requête :"
+            )
+            raw = generate(
+                prompt,
+                model=MODELS["intent"],
+                stream=False,
+                max_tokens=40,
+                temperature=0.1,
+            )
+            if raw and not raw.startswith("Erreur"):
+                req = apply_refined_query(req, raw.strip())
+        except Exception as exc:
+            logger.debug("LLM query refinement skipped: %s", exc)
+
+    logger.info(
+        "Research understood: query=%r type=%s sources=%s alts=%s",
+        req.query,
+        req.query_type,
+        req.sources,
+        req.alternate_queries,
+    )
+    return req
 
 
 def _wants_doc_output(text: str) -> bool:
@@ -1842,35 +1897,50 @@ def _do_web_research(
     output: str = "chat",
     *,
     stream_to_ui: bool = True,
+    intent_hint: str | None = None,
 ) -> str:
     """Recherche web multi-sources — synthèse chat ou écriture Google Doc."""
     from actions.web_research import (
+        build_synthesis_prompt,
         format_results_for_doc,
         format_results_for_llm,
-        multi_search,
+        format_results_for_ui,
+        multi_search_for_request,
     )
 
-    query = _extract_research_query(text)
-    if not query:
+    req = _understand_research_request(text, intent_hint=intent_hint, output=output)
+    if sources:
+        req.sources = sources
+    if not req.query:
         return "Je n'ai pas compris ta requête de recherche."
 
-    if output == "chat" and _wants_doc_output(text):
-        output = "doc"
-
-    logger.info("Recherche: '%s' sur %s → %s", query, sources, output)
+    query = req.query
+    logger.info(
+        "Recherche: %r (type=%s) sur %s → %s",
+        query,
+        req.query_type,
+        req.sources,
+        req.output,
+    )
 
     ui.set_status("thinking")
-    ui.show_toast(f"Recherche en cours : {query}...", toast_type="info")
-    ui.update_thinking_action("Recherche sur le web...")
+    ui.show_toast(f"Recherche : {query}...", toast_type="info")
+    ui.update_thinking_action(f"Recherche ({req.query_type})...")
     ui.set_response_model(_short_model_label(MODELS["heavy"]))
 
-    results = multi_search(query, sources=sources or ["web", "wikipedia"])
+    results = multi_search_for_request(req)
 
     if not results:
         ui.set_status("idle")
         return f"Aucun résultat trouvé pour '{query}'."
 
-    if output == "doc":
+    if req.output == "chat":
+        try:
+            ui.show_search_results(format_results_for_ui(results, query))
+        except Exception as exc:
+            logger.debug("show_search_results: %s", exc)
+
+    if req.output == "doc":
         from actions import gdocs
 
         active_doc = gdocs.get_active_doc()
@@ -1902,13 +1972,7 @@ def _do_web_research(
             return f"Erreur écriture dans le doc : {exc}"
 
     llm_input = format_results_for_llm(results, query)
-    synthesis_prompt = (
-        f"Tu es ARIA, un assistant français. Voici des résultats de recherche "
-        f"sur '{query}'. Synthétise-les en un compte-rendu clair et utile en français, "
-        f"en 3-5 paragraphes. Si des URLs YouTube sont présentes, mentionne-les. "
-        f"Sois factuel et précis.\n\n"
-        f"{llm_input}"
-    )
+    synthesis_prompt = build_synthesis_prompt(req, llm_input)
 
     if stream_to_ui:
         def on_token(token: str) -> None:
@@ -2053,40 +2117,32 @@ def _handle_v20_intent(
 
     if intent == "recherche_web":
         output = "doc" if _wants_doc_output(text) else "chat"
-        sources = ["web", "wikipedia"] if output == "chat" else ["web", "wikipedia", "news"]
-        return _do_web_research(text, sources=sources, output=output, stream_to_ui=stream_to_ui)
+        return _do_web_research(
+            text, output=output, stream_to_ui=stream_to_ui, intent_hint=intent
+        )
 
     if intent == "recherche_actualites":
         output = "doc" if _wants_doc_output(text) else "chat"
         return _do_web_research(
-            text, sources=["news"], output=output, stream_to_ui=stream_to_ui
+            text, output=output, stream_to_ui=stream_to_ui, intent_hint=intent
         )
 
     if intent == "recherche_wikipedia":
-        query = re.sub(
-            r"(?:qu(?:'|e)\s*est.ce que|c'est quoi|qui est|quelle est)\s+",
-            "",
-            text,
-            flags=re.IGNORECASE,
-        ).strip()
         output = "doc" if _wants_doc_output(text) else "chat"
         return _do_web_research(
-            query, sources=["wikipedia"], output=output, stream_to_ui=stream_to_ui
+            text, output=output, stream_to_ui=stream_to_ui, intent_hint=intent
         )
 
     if intent == "recherche_youtube":
         output = "doc" if _wants_doc_output(text) else "chat"
         return _do_web_research(
-            text, sources=["youtube", "web"], output=output, stream_to_ui=stream_to_ui
+            text, output=output, stream_to_ui=stream_to_ui, intent_hint=intent
         )
 
     if intent == "recherche_multi":
         output = "doc" if _wants_doc_output(text) else "chat"
         return _do_web_research(
-            text,
-            sources=["web", "news", "wikipedia"],
-            output=output,
-            stream_to_ui=stream_to_ui,
+            text, output=output, stream_to_ui=stream_to_ui, intent_hint=intent
         )
 
     if intent == "gdoc_create":
@@ -2263,10 +2319,20 @@ def _resolve_intent_for_routing(text: str) -> tuple[str, dict, float]:
         intent = "question_libre"
         confidence = 0.0
 
-    # Question ouverte portant sur une info récente -> recherche web (infos fraîches).
+    # Question ouverte portant sur une info récente -> recherche web enrichie (v20).
     if intent == "question_libre" and _is_current_info_query(text):
-        logger.info("Question ouverte -> recherche web (info actuelle)")
-        return "search_web", {"query": text}, 0.9
+        logger.info("Question ouverte -> recherche web enrichie (info actuelle)")
+        return "recherche_web", {"query": text}, 0.9
+
+    # Intents search_* legacy -> pipeline v20 avec compréhension améliorée
+    if intent in ("search_web", "search_news", "search_geopolitics"):
+        mapped = (
+            "recherche_actualites"
+            if intent in ("search_news", "search_geopolitics") or _is_news_query(text)
+            else "recherche_web"
+        )
+        logger.info("Intent %s -> %s (pipeline v20)", intent, mapped)
+        return mapped, {"query": text}, confidence
 
     return intent, params, confidence
 

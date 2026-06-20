@@ -487,6 +487,10 @@ def show_gdoc_link(title: str, url: str) -> None:
     emit("gdoc_link", {"title": title, "url": url})
 
 
+def show_search_results(html: str) -> None:
+    emit("search_results", html)
+
+
 def show_error(text: str) -> None:
     emit("error", text)
     show_toast(text, "error")
@@ -853,20 +857,383 @@ def get_memory_stats() -> dict:
 @expose
 def get_presets() -> list:
     """Retourne les presets configurés pour les raccourcis."""
-    import yaml
-    import app_paths
+    from actions import presets as _presets
 
     try:
-        with app_paths.config_path().open("r", encoding="utf-8") as f:
-            cfg = yaml.safe_load(f) or {}
-        presets = cfg.get("presets", {})
+        merged = _presets.get_merged_presets()
         return [
             {"id": k, "name": v.get("name", k), "icon": v.get("icon", "⚙️")}
-            for k, v in presets.items()
+            for k, v in merged.items()
         ]
     except Exception as e:
         logger.debug("get_presets: %s", e)
         return []
+
+
+@expose
+def create_agent(data_json: str) -> dict:
+    from actions import agents as _agents
+    import json as _json
+    try:
+        data = _json.loads(data_json)
+        agent = _agents.create_agent(
+            name=data.get("name", "Agent"),
+            icon=data.get("icon", "🤖"),
+            color=data.get("color", "#6C8EFF"),
+            model=data.get("model"),
+            system_prompt=data.get("system_prompt", ""),
+            rules=data.get("rules"),
+            git_repos=data.get("git_repos"),
+        )
+        return {"success": True, "agent": agent}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@expose
+def update_agent(agent_id: str, data_json: str) -> dict:
+    from actions import agents as _agents
+    import json as _json
+    try:
+        data = _json.loads(data_json)
+        agent = _agents.update_agent(agent_id, **data)
+        try:
+            import llm
+            llm._refresh_system_prompt()
+        except Exception:
+            pass
+        return {"success": True, "agent": agent}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@expose
+def delete_agent(agent_id: str) -> dict:
+    from actions import agents as _agents
+    try:
+        ok = _agents.delete_agent(agent_id)
+        return {"success": ok}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@expose
+def get_active_agent() -> dict:
+    from actions import agents as _agents
+    return _agents.get_active_agent()
+
+
+@expose
+def validate_git_repo(path: str) -> dict:
+    from pathlib import Path
+    p = Path(path)
+    valid = p.exists() and (p / ".git").exists()
+    return {"valid": valid, "path": str(p.resolve()) if valid else None}
+
+
+@expose
+def run_preset(preset_id: str) -> dict:
+    from actions import presets as _presets
+    try:
+        msg = _presets.activate(preset_id)
+        return {"success": True, "message": msg}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@expose
+def save_preset(preset_id: str, data_json: str) -> dict:
+    from actions import presets as _presets
+    import json as _json
+    try:
+        data = _json.loads(data_json)
+        msg = _presets.create_preset(preset_id, data)
+        return {"success": True, "message": msg}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@expose
+def get_presets_full() -> list:
+    from actions import presets as _presets
+    merged = _presets.get_merged_presets()
+    return [{"id": k, **v} for k, v in merged.items()]
+
+
+@expose
+def get_day_summary() -> dict:
+    """Résumé du jour pour le widget (tâches + rappels)."""
+    from datetime import date, datetime
+
+    import memory
+    from actions import checklist as _checklist
+
+    memory.init()
+    reminders = memory.recall("reminders", []) or []
+    today = date.today()
+    pending_today = 0
+    upcoming = 0
+
+    for reminder in reminders:
+        if reminder.get("triggered"):
+            continue
+        try:
+            dt = datetime.fromisoformat(reminder["datetime"])
+            if dt.date() == today:
+                pending_today += 1
+            elif dt.date() > today:
+                upcoming += 1
+        except (ValueError, KeyError, TypeError):
+            continue
+
+    if _checklist.is_active():
+        progress = _checklist.get_progress()
+        tasks_label = progress["section"] if progress else "Checklist en cours"
+        tasks_count = progress["item"] if progress else 1
+        tasks_detail = f"{progress['item']}/{progress['total']}" if progress else "1"
+    else:
+        tasks_label = "Aucune tâche planifiée"
+        tasks_count = 0
+        tasks_detail = ""
+
+    if pending_today:
+        rappels_label = f"{pending_today} aujourd'hui"
+    elif upcoming:
+        rappels_label = f"{upcoming} à venir"
+    else:
+        rappels_label = "Aucun rappel"
+
+    return {
+        "tasks_count": tasks_count,
+        "tasks_label": tasks_label,
+        "tasks_detail": tasks_detail,
+        "rappels_count": pending_today + upcoming,
+        "rappels_label": rappels_label,
+    }
+
+
+def _update_config_field(key: str, value) -> None:
+    import yaml
+    import app_paths
+
+    cfg_path = app_paths.config_path()
+    with cfg_path.open("r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f) or {}
+    cfg[key] = value
+    with cfg_path.open("w", encoding="utf-8") as f:
+        yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
+
+
+def _update_stt_field(key: str, value) -> None:
+    import yaml
+    import app_paths
+
+    cfg_path = app_paths.config_path()
+    with cfg_path.open("r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f) or {}
+    stt_cfg = cfg.setdefault("stt", {})
+    stt_cfg[key] = value
+    with cfg_path.open("w", encoding="utf-8") as f:
+        yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
+
+
+@expose
+def set_daily_brief(enabled: bool) -> dict:
+    _update_config_field("daily_brief_enabled", bool(enabled))
+    return {"success": True}
+
+
+@expose
+def set_wake_word(enabled: bool) -> dict:
+    _update_config_field("wake_word_enabled", bool(enabled))
+    return {"success": True}
+
+
+@expose
+def set_realtime_stt(enabled: bool) -> dict:
+    _update_config_field("realtime_transcription", bool(enabled))
+    return {"success": True}
+
+
+@expose
+def set_focus_mode(enabled: bool) -> dict:
+    import focus
+
+    focus.set_focus_mode(bool(enabled))
+    update_focus_indicator(focus.is_focus_active())
+    return {"success": True}
+
+
+@expose
+def set_stt_device_index(value) -> dict:
+    idx = None
+    if value is not None and str(value).strip() != "":
+        try:
+            idx = int(value)
+        except ValueError:
+            idx = None
+    _update_stt_field("device_index", idx)
+    return {"success": True}
+
+
+@expose
+def set_whisper_model(model: str) -> dict:
+    _update_config_field("whisper_model", model)
+    _update_stt_field("model", model)
+    return {"success": True}
+
+
+@expose
+def send_files_with_prompt(files_json: str, prompt: str) -> dict:
+    import base64
+    import json
+    import os
+    import subprocess
+    import sys
+    import tempfile
+    import threading
+    from pathlib import Path
+
+    def _process() -> None:
+        try:
+            files = json.loads(files_json)
+            if not files:
+                return
+
+            set_status("thinking")
+
+            images_b64: list[str] = []
+            text_contents: list[str] = []
+            flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+            for f in files:
+                mime = f.get("type", "")
+                name = f.get("name", "fichier")
+                data = base64.b64decode(f["b64"])
+                ext = Path(name).suffix or ".bin"
+
+                tmp = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+                tmp.write(data)
+                tmp.close()
+                tmp_path = tmp.name
+
+                try:
+                    if mime.startswith("image/"):
+                        images_b64.append(f["b64"])
+                    elif mime == "application/pdf" or name.lower().endswith(".pdf"):
+                        from pypdf import PdfReader
+
+                        reader = PdfReader(tmp_path)
+                        text = "\n".join(p.extract_text() or "" for p in reader.pages[:10])
+                        text_contents.append(f"[PDF: {name}]\n{text[:5000]}")
+                    elif mime.startswith("video/"):
+                        frame = tempfile.mktemp(suffix=".jpg")
+                        subprocess.run(
+                            [
+                                "ffmpeg", "-i", tmp_path, "-ss", "00:00:01",
+                                "-frames:v", "1", frame, "-y",
+                            ],
+                            capture_output=True,
+                            timeout=15,
+                            creationflags=flags,
+                        )
+                        if os.path.exists(frame):
+                            with open(frame, "rb") as img:
+                                images_b64.append(base64.b64encode(img.read()).decode())
+                            os.unlink(frame)
+                    else:
+                        with open(tmp_path, "r", encoding="utf-8", errors="ignore") as tf:
+                            text_contents.append(f"[{name}]\n{tf.read(5000)}")
+                finally:
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+
+            csv_files = [
+                f for f in files
+                if f.get("name", "").lower().endswith((".csv", ".xlsx", ".xls"))
+            ]
+            if csv_files and not images_b64:
+                from actions.data_analysis import analyze_file
+
+                tmp_csv = tempfile.NamedTemporaryFile(
+                    suffix=Path(csv_files[0]["name"]).suffix, delete=False
+                )
+                tmp_csv.write(base64.b64decode(csv_files[0]["b64"]))
+                tmp_csv.close()
+                try:
+                    result = analyze_file(tmp_csv.name, prompt)
+                    append_assistant_text(result)
+                    finalize_assistant_message()
+                    set_status("idle")
+                    return
+                finally:
+                    if os.path.exists(tmp_csv.name):
+                        os.unlink(tmp_csv.name)
+
+            import llm
+
+            if images_b64:
+                homework = any(
+                    kw in prompt.lower()
+                    for kw in ("devoir", "corrige", "correction", "exercice", "bac", "note")
+                )
+                if homework and len(images_b64) == 1:
+                    result = llm.analyze_homework_image(images_b64[0], prompt)
+                    append_assistant_text(result)
+                    finalize_assistant_message()
+                    set_status("idle")
+                else:
+                    llm.ask_with_images_and_text(prompt, images_b64, text_contents)
+            elif text_contents:
+                combined = "\n\n".join(text_contents)
+                llm.ask(f"{prompt}\n\nContenu des fichiers:\n{combined}", show_user=False)
+            else:
+                show_error("Aucun contenu exploitable dans les fichiers envoyés.")
+                set_status("idle")
+        except Exception as e:
+            logger.error("send_files_with_prompt error: %s", e)
+            show_error(f"Erreur: {e}")
+            set_status("idle")
+
+    threading.Thread(target=_process, daemon=True).start()
+    return {"success": True}
+
+
+@expose
+def get_memory_engine_stats() -> dict:
+    """Statistiques détaillées du profil mémoire (satisfaction, apps, sujets)."""
+    import memory_engine as _me
+    try:
+        return _me.get_memory_stats()
+    except Exception as e:
+        logger.debug("get_memory_engine_stats: %s", e)
+        return {}
+
+
+@expose
+def optimize_memory() -> dict:
+    """Nettoie les conversations vides et compresse la mémoire."""
+    import memory_engine as _me
+
+    try:
+        engine = _me.get_engine()
+        removed = 0
+        empty_ids = [
+            c.get("id") for c in list(engine.conversations)
+            if c.get("id") and not c.get("messages")
+        ]
+        for cid in empty_ids:
+            if engine.delete_conversation(cid):
+                removed += 1
+        engine.save_current_conversation()
+        return {
+            "success": True,
+            "message": f"Mémoire optimisée — {removed} conversation(s) vide(s) supprimée(s).",
+            "removed": removed,
+        }
+    except Exception as e:
+        logger.error("optimize_memory: %s", e)
+        return {"success": False, "error": str(e)}
 
 
 STATIC_FILE_PORT: int | None = None

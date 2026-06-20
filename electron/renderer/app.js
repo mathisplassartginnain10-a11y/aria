@@ -19,6 +19,105 @@ const state = {
   _staticPort: 9998,
   _streamingMessage: null,
   _clockInterval: null,
+  _pendingTheme: null,
+  _pendingWallpaper: null,
+  _currentStatus: 'idle',
+  _editingAgentId: null,
+  _agentRules: [],
+  _agentRepos: [],
+  _selectedColor: '#6C8EFF',
+  _activeAgentId: 'default',
+  _activeAgentIcon: '🤖',
+  _activeAgentName: 'ARIA',
+};
+
+const AGENT_COLORS = [
+  '#6C8EFF', '#4ADE80', '#F59E0B', '#F87171',
+  '#A78BFA', '#34D399', '#FB923C', '#60A5FA',
+  '#E879F9', '#2DD4BF', '#FBBF24', '#94A3B8',
+];
+
+const AGENT_EMOJIS = [
+  '🤖', '🛠️', '📚', '🎯', '🚀', '💡', '🔬', '🎨',
+  '🏆', '⚡', '🔥', '❄️', '🌊', '🎸', '🎧', '📷',
+  '✈️', '🚁', '🏎️', '⚽', '🎮', '🎲', '♟️', '🃏',
+  '👨‍💻', '👩‍💻', '🧑‍🔬', '🧑‍🎨', '👨‍✈️', '🦁', '🐉', '🦊',
+];
+
+const SoundFX = {
+  volume: 0.18,
+  _ctx: null,
+  _buffers: {},
+  _fileMap: {
+    start: 'activate.mp3',
+    listening: 'listening.mp3',
+    done: 'response.mp3',
+  },
+
+  _getCtx() {
+    return this._ctx || (this._ctx = new (window.AudioContext || window.webkitAudioContext)());
+  },
+
+  async _loadBuffer(name) {
+    if (this._buffers[name]) return this._buffers[name];
+    try {
+      const res = await fetch(`sounds/${name}`);
+      if (!res.ok) return null;
+      const buf = await this._getCtx().decodeAudioData(await res.arrayBuffer());
+      this._buffers[name] = buf;
+      return buf;
+    } catch (_) {
+      return null;
+    }
+  },
+
+  async play(kind) {
+    if (state.settings?.sounds_enabled === false) return;
+    const file = this._fileMap[kind];
+    if (file) {
+      const buffer = await this._loadBuffer(file);
+      if (buffer) {
+        try {
+          const ctx = this._getCtx();
+          const src = ctx.createBufferSource();
+          const gain = ctx.createGain();
+          src.buffer = buffer;
+          gain.gain.value = this.volume;
+          src.connect(gain);
+          gain.connect(ctx.destination);
+          src.start();
+          return;
+        } catch (_) {}
+      }
+    }
+    this._playSynth(kind);
+  },
+
+  _playSynth(kind) {
+    try {
+      const ctx = this._getCtx();
+      const now = ctx.currentTime;
+      const notes = {
+        start: [{ f: 523, t: 0, d: 0.08 }, { f: 659, t: 0.07, d: 0.12 }],
+        listening: [{ f: 440, t: 0, d: 0.06 }, { f: 554, t: 0.05, d: 0.08 }],
+        done: [{ f: 784, t: 0, d: 0.07 }, { f: 988, t: 0.06, d: 0.14 }],
+      }[kind] || [{ f: 520, t: 0, d: 0.12 }];
+
+      notes.forEach(({ f, t, d }) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = f;
+        gain.gain.setValueAtTime(0, now + t);
+        gain.gain.linearRampToValueAtTime(this.volume, now + t + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + t + d);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + t);
+        osc.stop(now + t + d + 0.02);
+      });
+    } catch (_) {}
+  },
 };
 
 // ── API Python ────────────────────────────────────────────────────────────────
@@ -56,6 +155,7 @@ async function init() {
   await loadSettings();
   applyTheme(state.settings.theme || 'slate');
   setGlassIntensity(state.settings.glass_intensity ?? 60);
+  if (state.settings.privacy_mode) setPrivacyMode(state.settings.privacy_mode);
   await restoreWallpaper();
   applySettingsForm();
 
@@ -70,7 +170,9 @@ async function init() {
   }
 
   setupEventListeners();
-  initLogoParticles();
+  await loadActiveAgent();
+  await loadAgentDropdown();
+  setStatus('idle');
   navigate('home');
   updateClock();
   console.log('[ARIA] Prêt');
@@ -160,11 +262,25 @@ function setupEventListeners() {
   api.on('assistant_token', (token) => appendStreamToken(token));
 
   // Fin du message ARIA
-  api.on('assistant_done', () => finalizeAssistantMessage());
+  api.on('assistant_done', () => {
+    finalizeAssistantMessage();
+    SoundFX.play('done');
+  });
 
   api.on('tts_finished', () => {
     if (state.micActive) setStatus('listening');
     else setStatus('idle');
+  });
+
+  api.on('gdoc_link', ({ title, url }) => showGdocLinkCard(title, url));
+
+  api.on('search_results', (html) => showSearchResultsCard(html));
+
+  api.on('focus_indicator', (active) => updateFocusIndicator(active));
+
+  api.on('error', (text) => {
+    showToast(text || 'Erreur', 'error');
+    setStatus('idle');
   });
 }
 
@@ -360,6 +476,185 @@ function finalizeAssistantMessage() {
   }
 }
 
+function showSearchResultsCard(sourcesHtml) {
+  showHomeConversation();
+  const messages = document.getElementById('messages');
+  if (!messages || !sourcesHtml) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'search-results-card';
+  wrap.innerHTML = sourcesHtml;
+  messages.appendChild(wrap);
+  scrollToBottom();
+}
+
+function showGdocLinkCard(title, url) {
+  showHomeConversation();
+  const messages = document.getElementById('messages');
+  if (!messages) return;
+  const card = document.createElement('a');
+  card.className = 'gdoc-link-card';
+  card.href = url || '#';
+  card.target = '_blank';
+  card.rel = 'noopener noreferrer';
+  card.onclick = (e) => {
+    if (url && window.ARIA?.openExternal) {
+      e.preventDefault();
+      window.ARIA.openExternal(url);
+    }
+  };
+  card.innerHTML = `
+    <span class="gdoc-link-icon">📄</span>
+    <div>
+      <div class="gdoc-link-text">${esc(title || 'Google Doc')}</div>
+      <div class="gdoc-link-sub">${esc(url || '')}</div>
+    </div>`;
+  messages.appendChild(card);
+  scrollToBottom();
+}
+
+function updateFocusIndicator(active) {
+  const el = document.getElementById('focus-indicator');
+  if (!el) return;
+  if (active) {
+    el.style.display = 'block';
+    el.style.transform = 'translateX(0)';
+  } else {
+    el.style.transform = 'translateX(120%)';
+    setTimeout(() => {
+      el.style.display = 'none';
+      el.style.transform = '';
+    }, 500);
+  }
+}
+
+function fileIcon(name) {
+  const ext = name.split('.').pop().toLowerCase();
+  const icons = {
+    pdf: '📄', py: '🐍', js: '⚡', html: '🌐', css: '🎨',
+    json: '📋', md: '📝', csv: '📊', txt: '📃', yaml: '⚙️',
+  };
+  return icons[ext] || '📁';
+}
+
+function showFileBubble(file, type) {
+  showHomeConversation();
+  const messages = document.getElementById('messages');
+  if (!messages) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'bubble-wrap user-wrap';
+  if (type === 'image') {
+    const url = URL.createObjectURL(file);
+    wrap.innerHTML = `
+      <div class="bubble bubble-user">
+        <img src="${url}" style="max-width:100%;max-height:300px;border-radius:8px;display:block;margin-bottom:8px" alt="">
+        <div class="bubble-text" style="font-size:12px;color:var(--text3)">${esc(file.name)}</div>
+      </div>`;
+  } else if (type === 'video') {
+    const url = URL.createObjectURL(file);
+    wrap.innerHTML = `
+      <div class="bubble bubble-user">
+        <video src="${url}" controls style="max-width:100%;max-height:200px;border-radius:8px;display:block;margin-bottom:8px"></video>
+        <div class="bubble-text" style="font-size:12px;color:var(--text3)">${esc(file.name)}</div>
+      </div>`;
+  } else {
+    wrap.innerHTML = `
+      <div class="bubble bubble-user">
+        <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
+          <span style="font-size:24px">${fileIcon(file.name)}</span>
+          <div>
+            <div style="font-size:13px;font-weight:500">${esc(file.name)}</div>
+            <div style="font-size:11px;color:var(--text3)">${(file.size / 1024).toFixed(1)} KB</div>
+          </div>
+        </div>
+      </div>`;
+  }
+  messages.appendChild(wrap);
+  scrollToBottom();
+}
+
+function askFilePrompt() {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:5000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
+    overlay.innerHTML = `
+      <div style="background:var(--surface);border:1px solid var(--border2);border-radius:12px;padding:24px;width:480px;max-width:90vw">
+        <div style="font-size:14px;font-weight:500;margin-bottom:6px;color:var(--text)">Que voulez-vous savoir ?</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:16px">Entrez votre question pour ces fichiers</div>
+        <textarea id="file-prompt-input" placeholder="Ex: Corrige ce devoir, Explique ce graphique..."
+          style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px;color:var(--text);font-family:inherit;font-size:14px;resize:none;height:80px;outline:none"></textarea>
+        <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
+          <button id="file-prompt-cancel" type="button" style="background:transparent;border:1px solid var(--border);color:var(--text2);padding:8px 16px;border-radius:8px;cursor:pointer;font-family:inherit">Annuler</button>
+          <button id="file-prompt-send" type="button" style="background:var(--accent);border:none;color:white;padding:8px 20px;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:500">Envoyer ➤</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    const input = overlay.querySelector('#file-prompt-input');
+    const confirm = () => {
+      const val = input.value.trim();
+      if (!val) { input.style.borderColor = 'var(--error, #F87171)'; return; }
+      overlay.remove();
+      resolve(val);
+    };
+    const cancel = () => { overlay.remove(); resolve(null); };
+
+    overlay.querySelector('#file-prompt-send').onclick = confirm;
+    overlay.querySelector('#file-prompt-cancel').onclick = cancel;
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); confirm(); }
+      if (e.key === 'Escape') cancel();
+    });
+    setTimeout(() => input.focus(), 100);
+  });
+}
+
+async function handleFiles(files) {
+  const fileArray = Array.from(files || []);
+  if (!fileArray.length) return;
+
+  const inputEl = document.getElementById('text-input');
+  let userPrompt = inputEl?.value.trim() || '';
+  const hasImages = fileArray.some(f => f.type.startsWith('image/'));
+
+  if (!userPrompt && !hasImages) {
+    userPrompt = await askFilePrompt();
+    if (!userPrompt) {
+      const fi = document.getElementById('file-input');
+      if (fi) fi.value = '';
+      return;
+    }
+  } else if (!userPrompt && hasImages) {
+    userPrompt = 'Analyse ces images et dis-moi ce que tu observes';
+  }
+
+  fileArray.forEach(file => {
+    const type = file.type.startsWith('image/') ? 'image'
+      : file.type.startsWith('video/') ? 'video' : 'file';
+    showFileBubble(file, type);
+  });
+
+  addUserBubble(userPrompt);
+  if (inputEl) {
+    inputEl.value = '';
+    adjustTextarea(inputEl);
+  }
+
+  const filesData = await Promise.all(fileArray.map(async file => {
+    const dataUrl = await fileToBase64(file);
+    const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+    return { b64, name: file.name, type: file.type };
+  }));
+
+  try {
+    await api.call('send_files_with_prompt', JSON.stringify(filesData), userPrompt);
+  } catch (e) {
+    showToast('Erreur envoi fichiers', 'error');
+  }
+
+  const fi = document.getElementById('file-input');
+  if (fi) fi.value = '';
+}
+
 // ── Envoi de messages ─────────────────────────────────────────────────────────
 
 async function sendMessage() {
@@ -510,6 +805,7 @@ async function toggleMic() {
   } else {
     state.micActive = true;
     state.micPaused = false;
+    SoundFX.play('start');
     await api.call('start_mic');
     setMicState('listening');
   }
@@ -548,7 +844,14 @@ function updateWaveform(rms) {
   const scale = isSpeaking ? 1 + Math.min(smooth * 3, 0.25) : 1;
   btn.style.transform = `scale(${scale.toFixed(3)})`;
 
-  // Anneaux
+  if (state._currentStatus === 'speaking') {
+    const core = document.querySelector('#home-orbe .orbe-core');
+    if (core) {
+      const orbeScale = 1 + Math.min(smooth * 4, 0.35);
+      core.style.transform = `scale(${orbeScale.toFixed(3)})`;
+    }
+  }
+
   const now = Date.now();
   if (isSpeaking && smooth > 0.04 && (!state._lastRingTime || now - state._lastRingTime > 400)) {
     state._lastRingTime = now;
@@ -594,9 +897,15 @@ function initLogoParticles() {
 }
 
 function setStatus(s) {
+  const prev = state._currentStatus;
+  state._currentStatus = s;
+  if (s === 'listening' && prev !== 'listening' && prev !== 'transcribing') {
+    SoundFX.play('listening');
+  }
   const subtitle = document.getElementById('sidebar-subtitle');
-  const homeLogo = document.getElementById('home-logo');
-  const sidebarWrap = document.getElementById('sidebar-logo-wrap');
+  const homeOrbe = document.getElementById('home-orbe');
+  const sidebarWrap = document.getElementById('sidebar-orbe-wrap')
+    || document.getElementById('sidebar-logo-wrap');
 
   const labels = {
     idle: 'En veille',
@@ -612,19 +921,24 @@ function setStatus(s) {
   }
 
   const map = {
-    idle: 'logo-idle',
-    listening: 'logo-listening',
-    transcribing: 'logo-listening',
-    thinking: 'logo-thinking',
-    speaking: 'logo-speaking',
+    idle: 'orbe-idle',
+    listening: 'orbe-listening',
+    transcribing: 'orbe-listening',
+    thinking: 'orbe-thinking',
+    speaking: 'orbe-speaking',
   };
-  const cls = map[s] || 'logo-idle';
+  const cls = map[s] || 'orbe-idle';
+  const orbeClasses = ['orbe-idle', 'orbe-listening', 'orbe-thinking', 'orbe-speaking'];
 
-  [homeLogo, sidebarWrap].forEach(el => {
+  [homeOrbe, sidebarWrap].forEach(el => {
     if (!el) return;
-    el.classList.remove('logo-idle', 'logo-listening', 'logo-thinking', 'logo-speaking');
+    el.classList.remove(...orbeClasses);
     el.classList.add(cls);
   });
+
+  if (s !== 'speaking') {
+    document.querySelector('#home-orbe .orbe-core')?.style.removeProperty('transform');
+  }
 }
 
 // ── Paramètres ────────────────────────────────────────────────────────────────
@@ -702,11 +1016,11 @@ async function loadModelSettings() {
 }
 
 async function setModel(role, modelName) {
+  AnimationController.play(SettingsAnimations.animModelChange, { role, modelName });
   try {
     const result = await api.call('set_model', role, modelName);
-    if (result.success) showToast(`${role} → ${modelName}`, 'success');
-    else showToast('Erreur: ' + result.error, 'error');
-  } catch(e) {
+    if (!result.success) showToast('Erreur: ' + result.error, 'error');
+  } catch (e) {
     showToast('Erreur set_model', 'error');
   }
 }
@@ -714,26 +1028,22 @@ async function setModel(role, modelName) {
 // ── Thèmes et wallpapers ──────────────────────────────────────────────────────
 
 function setTheme(theme) {
+  state._pendingTheme = theme;
   document.documentElement.setAttribute('data-theme', theme);
   document.querySelectorAll('.theme-pill').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.theme === theme);
   });
-  saveSetting('theme', theme);
 }
 
 function applyTheme(theme) {
+  state._pendingTheme = theme;
   document.documentElement.setAttribute('data-theme', theme);
-  document.querySelector(`.theme-pill[data-theme="${theme}"]`)?.classList.add('active');
+  document.querySelectorAll('.theme-pill').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.theme === theme);
+  });
 }
 
-function setGlassIntensity(value) {
-  const blur = 4 + (value / 100) * 36;
-  const alpha = 0.18 - (value / 100) * 0.16;
-  document.documentElement.style.setProperty('--glass-blur', `${blur}px`);
-  document.documentElement.style.setProperty('--glass-alpha', alpha);
-}
-
-function setWallpaper(type, url = null) {
+function applyWallpaperImmediate(type, url = null) {
   const layer = document.getElementById('wallpaper-image');
   if (!layer) return;
 
@@ -745,15 +1055,35 @@ function setWallpaper(type, url = null) {
     layer.style.backgroundImage = `url("${url}")`;
     layer.style.backgroundSize = 'cover';
     layer.style.backgroundPosition = 'center';
-  } else {
+  } else if (type) {
     layer.classList.add(`wp-${type}`);
   }
 
   document.querySelectorAll('.wp-thumb').forEach(t => t.classList.remove('active'));
-  document.querySelector(`.wp-thumb.wp-${type}`)?.classList.add('active');
+  if (type !== 'custom') {
+    document.querySelector(`.wp-thumb.wp-${type}`)?.classList.add('active');
+  }
+}
 
-  saveSetting('wallpaper_type', type);
-  if (url) saveSetting('wallpaper_filename', url.split('/').pop());
+window.__applyWallpaperImmediate = applyWallpaperImmediate;
+
+function setWallpaper(type, url = null, opts = {}) {
+  const { skipAnim = true, skipSave = true } = opts;
+  state._pendingWallpaper = { type, url };
+  applyWallpaperImmediate(type, url);
+
+  if (!skipAnim && typeof SettingsAnimations !== 'undefined') {
+    AnimationController.play(SettingsAnimations.animWallpaperChange, {
+      type,
+      url,
+      label: SettingsAnimations.wallpaperLabels[type] || type,
+    });
+  }
+
+  if (!skipSave) {
+    saveSetting('wallpaper_type', type);
+    if (url) saveSetting('wallpaper_filename', url.split('/').pop()?.split('?')[0] || '');
+  }
 }
 
 async function restoreWallpaper() {
@@ -762,9 +1092,11 @@ async function restoreWallpaper() {
 
   if (type === 'custom' && state.settings.wallpaper_filename) {
     const url = `http://127.0.0.1:${state._staticPort}/wallpapers/${state.settings.wallpaper_filename}`;
-    setWallpaper('custom', url);
-  } else if (type) {
-    setWallpaper(type);
+    state._pendingWallpaper = { type: 'custom', url };
+    applyWallpaperImmediate('custom', url);
+  } else {
+    state._pendingWallpaper = { type, url: null };
+    applyWallpaperImmediate(type);
   }
 }
 
@@ -778,16 +1110,28 @@ async function uploadWallpaper(file) {
     const b64 = await fileToBase64(file);
     const result = await api.call('save_wallpaper', b64, file.name);
     if (result.success) {
-      showToast('Image importée ✓', 'success');
       const url = `http://127.0.0.1:${state._staticPort}/wallpapers/${result.filename}`;
       setWallpaper('custom', url);
       await loadCustomWallpapers();
+      AnimationController.play(SettingsAnimations.animWallpaperImport, {
+        filename: result.filename,
+        url,
+      });
+      saveSetting('wallpaper_type', 'custom');
+      saveSetting('wallpaper_filename', result.filename);
     } else {
       showToast('Erreur: ' + result.error, 'error');
     }
-  } catch(e) {
+  } catch (e) {
     showToast('Erreur import', 'error');
   }
+}
+
+function setGlassIntensity(value) {
+  const blur = 4 + (value / 100) * 36;
+  const alpha = 0.18 - (value / 100) * 0.16;
+  document.documentElement.style.setProperty('--glass-blur', `${blur}px`);
+  document.documentElement.style.setProperty('--glass-alpha', alpha);
 }
 
 async function loadCustomWallpapers() {
@@ -827,7 +1171,27 @@ async function initWidgets() {
   setInterval(loadMemoryWidget, 30 * 1000);
 
   loadShortcutsWidget();
+  loadDaySummary();
+  setInterval(loadDaySummary, 60 * 1000);
   updateBattery();
+}
+
+async function loadDaySummary() {
+  try {
+    const data = await api.call('get_day_summary') || {};
+    const tasksLabel = document.getElementById('wlabel-tasks');
+    const tasksVal = document.getElementById('wval-tasks');
+    const rappelsVal = document.getElementById('wval-rappels');
+
+    if (tasksLabel) tasksLabel.textContent = data.tasks_label || 'Aucune tâche';
+    if (tasksVal) tasksVal.textContent = data.tasks_detail || (data.tasks_count ? String(data.tasks_count) : '');
+    if (rappelsVal) rappelsVal.textContent = data.rappels_label || '—';
+  } catch (_) {
+    const tasksLabel = document.getElementById('wlabel-tasks');
+    if (tasksLabel?.textContent === 'Chargement...') {
+      tasksLabel.textContent = 'Aucune tâche planifiée';
+    }
+  }
 }
 
 function updateClock() {
@@ -862,11 +1226,6 @@ function updateClock() {
   }
   if (subEl) {
     subEl.textContent = state.settings?.sub_text || 'Comment puis-je vous aider aujourd\'hui ?';
-  }
-
-  const tasksLabel = document.getElementById('wlabel-tasks');
-  if (tasksLabel && tasksLabel.textContent === 'Chargement...') {
-    tasksLabel.textContent = 'Aucune tâche planifiée';
   }
 }
 
@@ -943,9 +1302,10 @@ function drawMemoryDonut(pct) {
   const canvas = document.getElementById('memory-donut');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
-  const cx = 50; const cy = 50; const r = 38; const lw = 8;
+  const cx = 55; const cy = 55; const r = 42; const lw = 8;
+  const size = canvas.width || 110;
 
-  ctx.clearRect(0, 0, 100, 100);
+  ctx.clearRect(0, 0, size, size);
 
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -954,7 +1314,7 @@ function drawMemoryDonut(pct) {
   ctx.stroke();
 
   const angle = (pct / 100) * Math.PI * 2 - Math.PI / 2;
-  const grad = ctx.createLinearGradient(0, 0, 100, 100);
+  const grad = ctx.createLinearGradient(0, 0, size, size);
   grad.addColorStop(0, '#6C8EFF');
   grad.addColorStop(1, '#A78BFA');
   ctx.beginPath();
@@ -966,36 +1326,35 @@ function drawMemoryDonut(pct) {
 }
 
 async function loadShortcutsWidget() {
+  const grid = document.getElementById('shortcuts-grid');
+  if (!grid) return;
+
+  const fixed = [
+    { icon: '✉️', label: 'Rédiger un email', action: 'rédige un email professionnel', color: '#6C8EFF' },
+    { icon: '🎯', label: 'Démarrer focus', action: 'active le mode focus', color: '#A78BFA' },
+    { icon: '📊', label: 'Analyse système', action: 'analyse le système', color: '#4ADE80' },
+  ];
+
+  let presetShortcuts = [];
   try {
     const presets = await api.call('get_presets') || [];
-    const grid = document.getElementById('shortcuts-grid');
-    if (!grid) return;
-
-    const fixed = [
-      { icon: '✉️', label: 'Rédiger un email', action: 'rédige un email', color: '#6C8EFF' },
-      { icon: '🎯', label: 'Démarrer focus', action: 'active le mode focus', color: '#A78BFA' },
-      { icon: '📊', label: 'Analyse système', action: 'analyse le système', color: '#4ADE80' },
-    ];
-
-    const presetShortcuts = presets.slice(0, 3).map(p => ({
+    presetShortcuts = presets.slice(0, 1).map(p => ({
       icon: p.icon || '⚡',
-      label: `Mode ${p.name}`,
-      action: `active le mode ${p.name}`,
+      label: `Mode ${p.name || p.id}`,
+      action: `active le mode ${p.name || p.id}`,
       color: '#F59E0B',
     }));
+  } catch (_) {}
 
-    const all = [...fixed, ...presetShortcuts].slice(0, 6);
+  const all = [...fixed, ...presetShortcuts].slice(0, 4);
 
-    grid.innerHTML = all.map(s => `
-      <button class="shortcut-btn" onclick="app.quickAction(${JSON.stringify(s.action)})"
-              style="--shortcut-color: ${s.color}">
-        <span class="shortcut-icon">${s.icon}</span>
-        <span class="shortcut-label">${esc(s.label)}</span>
-      </button>
-    `).join('');
-  } catch (e) {
-    console.warn('loadShortcutsWidget:', e);
-  }
+  grid.innerHTML = all.map(s => `
+    <button class="shortcut-btn" onclick="app.quickAction(${JSON.stringify(s.action)})"
+            style="--shortcut-color: ${s.color}">
+      <span class="shortcut-icon">${s.icon}</span>
+      <span class="shortcut-label">${esc(s.label)}</span>
+    </button>
+  `).join('');
 }
 
 async function quickAction(text) {
@@ -1041,6 +1400,7 @@ function navigate(page) {
   if (page === 'conversations') loadFullConversationList();
   if (page === 'agents') loadAgentsPage();
   if (page === 'memory') loadMemoryPage();
+  if (page === 'routines') loadPresetsPage();
   if (page === 'settings') {
     loadModelSettings();
     loadApiKeys();
@@ -1069,7 +1429,11 @@ function applyGreeting() {
   if (hello) saveSetting('hello_text', hello);
   if (sub) saveSetting('sub_text', sub);
   updateClock();
-  showStyledSettingToast('✓ Salutation mise à jour', '#4ADE80');
+  if (typeof window.showStyledSettingToast === 'function') {
+    window.showStyledSettingToast('✓ Salutation mise à jour', '#4ADE80');
+  } else {
+    showToast('✓ Salutation mise à jour', 'success');
+  }
 }
 
 function applySettingsForm() {
@@ -1083,15 +1447,293 @@ function applySettingsForm() {
   if (helloEl && s.hello_text) helloEl.value = s.hello_text;
   if (subEl && s.sub_text) subEl.value = s.sub_text;
   if (glassEl && s.glass_intensity != null) glassEl.value = s.glass_intensity;
+
+  const ttsEl = document.getElementById('set-tts');
+  if (ttsEl) ttsEl.checked = s.tts_enabled !== false;
+
+  const ttsRateEl = document.getElementById('set-tts-rate');
+  if (ttsRateEl && s.tts_rate != null) ttsRateEl.value = s.tts_rate;
+
+  const soundsEl = document.getElementById('set-sounds');
+  if (soundsEl) soundsEl.checked = s.sounds_enabled !== false;
+
+  const briefEl = document.getElementById('set-daily-brief');
+  if (briefEl) briefEl.checked = s.daily_brief_enabled !== false;
+
+  const wakeEl = document.getElementById('set-wake-word');
+  if (wakeEl) wakeEl.checked = !!s.wake_word_enabled;
+
+  const realtimeEl = document.getElementById('set-realtime-stt');
+  if (realtimeEl) realtimeEl.checked = !!s.realtime_transcription;
+
+  const focusEl = document.getElementById('set-focus');
+  if (focusEl) focusEl.checked = !!s.focus_mode;
+
+  const killOllamaEl = document.getElementById('set-kill-ollama');
+  if (killOllamaEl) killOllamaEl.checked = s.kill_ollama_on_exit !== false;
+
+  const deviceEl = document.getElementById('set-device-index');
+  const deviceIdx = s.stt?.device_index ?? s['stt.device_index'];
+  if (deviceEl && deviceIdx != null) deviceEl.value = deviceIdx;
+
+  const whisperEl = document.getElementById('set-whisper-model');
+  const whisperModel = s.stt?.model || s.whisper_model;
+  if (whisperEl && whisperModel) whisperEl.value = whisperModel;
 }
 
-function showStyledSettingToast(message, color) {
-  showToast(message, 'success');
-  void color;
+function styledSettingToast(message, color) {
+  if (typeof window.showStyledSettingToast === 'function') {
+    window.showStyledSettingToast(message, color);
+  } else {
+    showToast(message, 'success');
+  }
 }
 
-function validateSection(section) {
-  showStyledSettingToast(`✓ Section ${section} appliquée`, '#4ADE80');
+async function validateSection(section) {
+  const btn = document.querySelector(`#acc-${section} .settings-validate-btn`);
+  if (btn) {
+    btn.textContent = '⟳ Application...';
+    btn.disabled = true;
+  }
+
+  try {
+    switch (section) {
+      case 'apparence': {
+        const theme = state._pendingTheme || state.settings.theme || 'slate';
+        const glassVal = parseInt(document.getElementById('set-glass')?.value ?? '60', 10);
+        await saveSetting('theme', theme);
+        await saveSetting('glass_intensity', glassVal);
+        state._pendingTheme = null;
+
+        const wp = state._pendingWallpaper;
+        if (wp?.type) {
+          await saveSetting('wallpaper_type', wp.type);
+          if (wp.url) {
+            await saveSetting('wallpaper_filename', wp.url.split('/').pop()?.split('?')[0] || '');
+          }
+        }
+
+        AnimationController.play(SettingsAnimations.animThemeChange, {
+          newTheme: theme,
+          accentColor: SettingsAnimations.themeColors[theme]
+            || getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),
+        });
+        setTimeout(() => {
+          AnimationController.play(SettingsAnimations.animGlassIntensity, { value: glassVal });
+        }, 900);
+        if (wp?.type) {
+          setTimeout(() => {
+            AnimationController.play(SettingsAnimations.animWallpaperChange, {
+              type: wp.type,
+              url: wp.url,
+              label: SettingsAnimations.wallpaperLabels[wp.type] || wp.type,
+            });
+          }, 1800);
+        }
+        break;
+      }
+      case 'greeting':
+        applyGreeting();
+        break;
+      case 'voix': {
+        const ttsEnabled = document.getElementById('set-tts')?.checked;
+        const ttsRate = parseInt(document.getElementById('set-tts-rate')?.value || '0', 10);
+        const soundsEnabled = document.getElementById('set-sounds')?.checked;
+        const briefEnabled = document.getElementById('set-daily-brief')?.checked;
+        const wakeEnabled = document.getElementById('set-wake-word')?.checked;
+        const realtimeEnabled = document.getElementById('set-realtime-stt')?.checked;
+        await saveSetting('tts_enabled', !!ttsEnabled);
+        await saveSetting('tts_rate', ttsRate);
+        await saveSetting('sounds_enabled', !!soundsEnabled);
+        try { await api.call('set_daily_brief', !!briefEnabled); } catch (_) {}
+        try { await api.call('set_wake_word', !!wakeEnabled); } catch (_) {}
+        try { await api.call('set_realtime_stt', !!realtimeEnabled); } catch (_) {}
+        AnimationController.play(SettingsAnimations.animTTSToggle, { enabled: !!ttsEnabled });
+        setTimeout(() => {
+          AnimationController.play(SettingsAnimations.animTTSRate, { rate: ttsRate });
+        }, ttsEnabled ? 1100 : 400);
+        if (document.getElementById('set-daily-brief')) {
+          setTimeout(() => {
+            AnimationController.play(SettingsAnimations.animDailyBriefToggle, { enabled: !!briefEnabled });
+          }, 1600);
+        }
+        break;
+      }
+      case 'micro': {
+        const deviceVal = document.getElementById('set-device-index')?.value;
+        const deviceIdx = deviceVal === '' || deviceVal == null ? null : parseInt(deviceVal, 10);
+        const whisperModel = document.getElementById('set-whisper-model')?.value;
+        try { await api.call('set_stt_device_index', deviceIdx ?? ''); } catch (_) {}
+        try { await api.call('set_whisper_model', whisperModel); } catch (_) {}
+        await saveSetting('stt.device_index', deviceIdx);
+        await saveSetting('stt.model', whisperModel);
+        AnimationController.play(SettingsAnimations.animDeviceChange, { deviceIndex: deviceIdx });
+        if (whisperModel) {
+          setTimeout(() => {
+            AnimationController.play(SettingsAnimations.animWhisperModelChange, { modelName: whisperModel });
+          }, 1200);
+        }
+        break;
+      }
+      case 'systeme': {
+        const focusEnabled = document.getElementById('set-focus')?.checked;
+        const killOllama = document.getElementById('set-kill-ollama')?.checked;
+        try { await api.call('set_focus_mode', !!focusEnabled); } catch (_) {}
+        if (focusEnabled != null) await saveSetting('focus_mode', !!focusEnabled);
+        if (killOllama != null) await saveSetting('kill_ollama_on_exit', !!killOllama);
+        if (document.getElementById('set-focus')) {
+          AnimationController.play(SettingsAnimations.animFocusMode, { enabled: !!focusEnabled });
+        } else {
+          styledSettingToast('✓ Paramètres système appliqués', '#4ADE80');
+        }
+        break;
+      }
+      default:
+        styledSettingToast(`✓ Section ${section} appliquée`, '#4ADE80');
+    }
+  } catch (e) {
+    console.warn('validateSection', e);
+    styledSettingToast('Erreur lors de l\'application', '#F87171');
+  }
+
+  setTimeout(() => {
+    if (btn) {
+      btn.textContent = '✓ Appliquer';
+      btn.disabled = false;
+    }
+  }, 2200);
+}
+
+async function optimizeMemory() {
+  showToast('Optimisation de la mémoire...', 'info');
+  try {
+    const result = await api.call('optimize_memory');
+    if (result?.success) {
+      showToast(result.message || 'Mémoire optimisée ✓', 'success');
+      await loadMemoryWidget();
+      if (state.currentPage === 'memory') await loadMemoryPage();
+    } else {
+      showToast('Optimisation non disponible pour le moment', 'info');
+    }
+  } catch (_) {
+    showToast('Optimisation non disponible pour le moment', 'info');
+  }
+}
+
+async function loadPresetsPage() {
+  const container = document.getElementById('presets-page-list');
+  if (!container) return;
+  container.innerHTML = '<div class="loading-text">Chargement...</div>';
+  try {
+    const presets = await api.call('get_presets_full') || [];
+    if (!presets.length) {
+      container.innerHTML = '<div class="info-text">Aucune routine configurée</div>';
+      return;
+    }
+    container.innerHTML = presets.map(p => `
+      <div class="agent-card" style="margin-bottom:8px;display:flex;align-items:center;gap:10px">
+        <span class="agent-card-icon">${p.icon || '⚡'}</span>
+        <div style="flex:1;min-width:0">
+          <div class="agent-card-name">${esc(p.name || p.label || p.id)}</div>
+          <div class="agent-card-desc">${esc((p.apps_open || []).join(', ') || '—')}</div>
+        </div>
+        <button type="button" class="page-action-btn" style="padding:6px 10px" onclick="event.stopPropagation();app.openPresetEditor('${esc(p.id)}')">✎</button>
+        <button type="button" class="page-action-btn" onclick="app.runPreset('${esc(p.id)}')">▶</button>
+      </div>
+    `).join('');
+  } catch (e) {
+    container.innerHTML = `<div class="error-text">Erreur: ${esc(e.message)}</div>`;
+  }
+}
+
+async function runPreset(presetId) {
+  try {
+    const result = await api.call('run_preset', presetId);
+    if (result.success) showToast(result.message || 'Routine activée ✓', 'success');
+    else showToast('Erreur: ' + (result.error || '?'), 'error');
+  } catch (e) {
+    showToast('Erreur lancement routine', 'error');
+  }
+}
+
+function openPresetEditor(presetId) {
+  openPresetEditorImpl(presetId).catch(e => console.error('openPresetEditor:', e));
+}
+
+async function openPresetEditorImpl(presetId) {
+  state._editingPresetId = presetId;
+
+  if (presetId) {
+    const presets = await api.call('get_presets_full') || [];
+    const preset = presets.find(p => p.id === presetId);
+    if (preset) {
+      document.getElementById('preset-icon-input').value = preset.icon || '⚡';
+      document.getElementById('preset-name-input').value = preset.name || preset.label || presetId;
+      document.getElementById('preset-volume').value = preset.volume ?? 50;
+      document.getElementById('preset-apps-open').value = (preset.apps_open || []).join(', ');
+      document.getElementById('preset-apps-close').value = (preset.apps_close || []).join(', ');
+      document.getElementById('preset-message').value = preset.message || '';
+    }
+  } else {
+    document.getElementById('preset-icon-input').value = '⚡';
+    document.getElementById('preset-name-input').value = '';
+    document.getElementById('preset-volume').value = 50;
+    document.getElementById('preset-apps-open').value = '';
+    document.getElementById('preset-apps-close').value = '';
+    document.getElementById('preset-message').value = '';
+  }
+
+  updatePresetPreview();
+  const modal = document.getElementById('preset-editor-modal');
+  modal?.classList.remove('hidden');
+  requestAnimationFrame(() => modal?.classList.add('modal-open'));
+}
+
+function closePresetEditor() {
+  const modal = document.getElementById('preset-editor-modal');
+  modal?.classList.remove('modal-open');
+  setTimeout(() => modal?.classList.add('hidden'), 250);
+}
+
+function updatePresetPreview() {
+  const name = document.getElementById('preset-name-input')?.value || 'Nouvelle routine';
+  const icon = document.getElementById('preset-icon-input')?.value || '⚡';
+  const previewName = document.getElementById('preset-preview-name');
+  const previewIcon = document.getElementById('preset-preview-icon');
+  if (previewName) previewName.textContent = name;
+  if (previewIcon) previewIcon.textContent = icon;
+}
+
+async function savePreset() {
+  const name = document.getElementById('preset-name-input')?.value?.trim();
+  if (!name) {
+    showToast('Le nom est obligatoire', 'error');
+    return;
+  }
+
+  const key = name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '_');
+  const data = {
+    name,
+    icon: document.getElementById('preset-icon-input')?.value?.trim() || '⚡',
+    volume: parseInt(document.getElementById('preset-volume')?.value || '50', 10),
+    apps_open: (document.getElementById('preset-apps-open')?.value || '').split(',').map(s => s.trim()).filter(Boolean),
+    apps_close: (document.getElementById('preset-apps-close')?.value || '').split(',').map(s => s.trim()).filter(Boolean),
+    message: document.getElementById('preset-message')?.value?.trim() || `Mode ${name} activé.`,
+  };
+
+  try {
+    const result = await api.call('save_preset', state._editingPresetId || key, JSON.stringify(data));
+    if (result.success) {
+      showToast('Routine enregistrée ✓', 'success');
+      closePresetEditor();
+      loadPresetsPage();
+      loadShortcutsWidget();
+    } else {
+      showToast('Erreur: ' + (result.error || '?'), 'error');
+    }
+  } catch (e) {
+    showToast('Erreur enregistrement routine', 'error');
+  }
 }
 
 function toggleWidget(name) {
@@ -1104,13 +1746,28 @@ function toggleModeMenu() {
 }
 
 function toggleAgentDropdown() {
-  document.getElementById('agent-dropdown')?.classList.toggle('hidden');
+  const dropdown = document.getElementById('agent-dropdown');
+  if (!dropdown) return;
+  dropdown.classList.toggle('hidden');
+  if (!dropdown.classList.contains('hidden')) {
+    bindAgentDropdownEvents();
+  }
 }
 
-function setPrivacyMode(enabled) {
+const PRIVACY_MODE_LABELS = {
+  local: 'Mode Privé',
+  hybrid: 'Mode Hybride',
+  cloud: 'Mode Cloud',
+};
+
+function setPrivacyMode(mode) {
+  const m = ['local', 'hybrid', 'cloud'].includes(mode) ? mode : 'local';
   const badge = document.getElementById('home-mode-badge');
-  if (badge) badge.classList.toggle('private', !!enabled);
-  saveSetting('privacy_mode', !!enabled);
+  const labelEl = document.getElementById('home-mode-label');
+  if (labelEl) labelEl.textContent = PRIVACY_MODE_LABELS[m] || PRIVACY_MODE_LABELS.local;
+  if (badge) badge.classList.toggle('private', m === 'local');
+  saveSetting('privacy_mode', m);
+  document.getElementById('mode-menu')?.classList.add('hidden');
 }
 
 async function loadMemoryPage() {
@@ -1119,11 +1776,27 @@ async function loadMemoryPage() {
   if (!content) return;
   try {
     const data = await api.call('get_memory_stats') || {};
+    let engineStats = {};
+    try {
+      engineStats = await api.call('get_memory_engine_stats') || {};
+    } catch (_) {}
+
+    const pct = Math.min(100, Math.round((data.messages || 0) / 5));
     content.innerHTML = `
       <div class="memory-page-stats">
         <div class="mem-stat-card"><div class="mem-stat-val">${data.conversations ?? 0}</div><div class="mem-stat-label">Conversations</div></div>
         <div class="mem-stat-card"><div class="mem-stat-val">${data.messages ?? 0}</div><div class="mem-stat-label">Messages</div></div>
         <div class="mem-stat-card"><div class="mem-stat-val">${data.sessions ?? 0}</div><div class="mem-stat-label">Sessions</div></div>
+      </div>
+      <div class="memory-insight-card">
+        <div class="memory-insight-title">Utilisation mémoire</div>
+        <div class="memory-insight-row"><span>Capacité estimée</span><span>${pct}%</span></div>
+        <div class="memory-insight-row"><span>Satisfaction</span><span>${engineStats.satisfaction || '—'}</span></div>
+        <div class="memory-insight-row"><span>App la plus utilisée</span><span>${engineStats.top_app || '—'}</span></div>
+        <div class="memory-insight-row"><span>Sujet fréquent</span><span>${engineStats.top_topic || '—'}</span></div>
+      </div>
+      <div style="padding:0 24px 24px">
+        <button class="widget-action-btn" onclick="app.optimizeMemory()" style="width:100%">Optimiser la mémoire</button>
       </div>`;
   } catch {
     content.innerHTML = '<div class="error-text">Impossible de charger la mémoire</div>';
@@ -1155,7 +1828,344 @@ async function loadAgentsPage() {
 }
 
 function openAgentEditor(agentId) {
-  showToast(agentId ? 'Éditeur agent — bientôt disponible' : 'Création agent — bientôt disponible', 'info');
+  openAgentEditorImpl(agentId).catch(e => console.error('openAgentEditor:', e));
+}
+
+async function openAgentEditorImpl(agentId) {
+  state._editingAgentId = agentId;
+  state._agentRules = [];
+  state._agentRepos = [];
+
+  let modelsData = {};
+  try {
+    modelsData = await api.call('get_available_models') || {};
+  } catch (_) {}
+
+  const models = modelsData.local_models || [];
+  const cloudModels = modelsData.cloud_models || [];
+
+  const modelSelect = document.getElementById('agent-model-select');
+  if (modelSelect) {
+    let html = '';
+    if (models.length) {
+      html += `<optgroup label="💻 Local">${models.map(m =>
+        `<option value="${esc(m)}">${esc(m)}</option>`
+      ).join('')}</optgroup>`;
+    }
+    if (cloudModels.length) {
+      html += `<optgroup label="☁️ Cloud (API)">${cloudModels.map(cm =>
+        `<option value="${esc(cm.id)}">☁️ ${esc(cm.label)} (${esc(cm.provider_name)})</option>`
+      ).join('')}</optgroup>`;
+    }
+    modelSelect.innerHTML = html || '<option value="">Aucun modèle disponible</option>';
+  }
+
+  const picker = document.getElementById('agent-emoji-picker');
+  if (picker) {
+    picker.innerHTML = AGENT_EMOJIS.map(e =>
+      `<button type="button" class="emoji-option" onclick="app.selectAgentEmoji('${e}')">${e}</button>`
+    ).join('');
+  }
+
+  const colorSwatches = document.getElementById('agent-color-swatches');
+  if (colorSwatches) {
+    colorSwatches.innerHTML = AGENT_COLORS.map(c => `
+      <button type="button" class="color-swatch" style="background:${c}"
+        onclick="app.selectAgentColor('${c}')"
+        title="${c}">
+      </button>
+    `).join('');
+  }
+
+  if (agentId) {
+    const agents = await api.call('get_agents') || [];
+    const agent = agents.find(a => a.id === agentId);
+    if (agent) {
+      document.getElementById('agent-name-input').value = agent.name;
+      document.getElementById('agent-icon-btn').textContent = agent.icon || '🤖';
+      document.getElementById('agent-system-prompt').value = agent.system_prompt || '';
+      if (modelSelect) modelSelect.value = agent.model || models[0] || '';
+      state._agentRules = [...(agent.rules || [])];
+      state._agentRepos = [...(agent.git_repos || [])];
+      state._selectedColor = agent.color || '#6C8EFF';
+      const deleteBtn = document.getElementById('agent-delete-btn');
+      if (deleteBtn) deleteBtn.style.display = agentId === 'default' ? 'none' : 'flex';
+    }
+  } else {
+    document.getElementById('agent-name-input').value = '';
+    document.getElementById('agent-icon-btn').textContent = '🤖';
+    document.getElementById('agent-system-prompt').value = '';
+    state._selectedColor = '#6C8EFF';
+    document.getElementById('agent-delete-btn').style.display = 'none';
+    if (modelSelect && models[0]) modelSelect.value = models[0];
+  }
+
+  renderAgentRulesList();
+  renderAgentReposList();
+  updateAgentPreview();
+  selectAgentColor(state._selectedColor);
+
+  const modal = document.getElementById('agent-editor-modal');
+  modal?.classList.remove('hidden');
+  requestAnimationFrame(() => modal?.classList.add('modal-open'));
+}
+
+function closeAgentEditor() {
+  const modal = document.getElementById('agent-editor-modal');
+  modal?.classList.remove('modal-open');
+  setTimeout(() => modal?.classList.add('hidden'), 250);
+}
+
+function updateAgentPreview() {
+  const name = document.getElementById('agent-name-input')?.value || 'Nouvel agent';
+  const icon = document.getElementById('agent-icon-btn')?.textContent || '🤖';
+  const previewName = document.getElementById('agent-preview-name');
+  const previewIcon = document.getElementById('agent-preview-icon');
+  if (previewName) previewName.textContent = name;
+  if (previewIcon) previewIcon.textContent = icon;
+}
+
+function selectAgentEmoji(emoji) {
+  document.getElementById('agent-icon-btn').textContent = emoji;
+  document.getElementById('agent-emoji-picker').style.display = 'none';
+  updateAgentPreview();
+}
+
+function selectAgentColor(color) {
+  state._selectedColor = color;
+  document.querySelectorAll('#agent-color-swatches .color-swatch').forEach(s => {
+    s.classList.toggle('active', s.getAttribute('title') === color);
+  });
+}
+
+function toggleAgentEmojiPicker() {
+  const picker = document.getElementById('agent-emoji-picker');
+  if (!picker) return;
+  document.querySelectorAll('.emoji-picker').forEach(p => {
+    if (p.id !== 'agent-emoji-picker') p.style.display = 'none';
+  });
+  picker.style.display = picker.style.display === 'none' ? 'grid' : 'none';
+}
+
+function addAgentRule() {
+  const input = document.getElementById('agent-rule-input');
+  const rule = input?.value?.trim();
+  if (!rule) return;
+  state._agentRules.push(rule);
+  input.value = '';
+  renderAgentRulesList();
+}
+
+function removeAgentRule(idx) {
+  state._agentRules.splice(idx, 1);
+  renderAgentRulesList();
+}
+
+function renderAgentRulesList() {
+  const list = document.getElementById('agent-rules-list');
+  if (!list) return;
+  list.innerHTML = state._agentRules.map((rule, i) => `
+    <div class="agent-tag-item">
+      <span>${esc(rule)}</span>
+      <button type="button" onclick="app.removeAgentRule(${i})">✕</button>
+    </div>
+  `).join('');
+}
+
+async function addAgentRepo() {
+  const input = document.getElementById('agent-repo-input');
+  const path = input?.value?.trim();
+  if (!path) return;
+
+  const statusEl = document.getElementById('agent-repo-status');
+  if (statusEl) {
+    statusEl.textContent = 'Vérification...';
+    statusEl.style.color = 'var(--text3)';
+  }
+
+  try {
+    const result = await api.call('validate_git_repo', path);
+    if (result.valid) {
+      state._agentRepos.push(result.path);
+      input.value = '';
+      if (statusEl) {
+        statusEl.textContent = '✅ Repo Git valide';
+        statusEl.style.color = 'var(--success)';
+      }
+      renderAgentReposList();
+      setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 2000);
+    } else if (statusEl) {
+      statusEl.textContent = '❌ Chemin invalide ou pas un repo Git';
+      statusEl.style.color = 'var(--error)';
+    }
+  } catch (_) {
+    if (statusEl) {
+      statusEl.textContent = '❌ Erreur de validation';
+      statusEl.style.color = 'var(--error)';
+    }
+  }
+}
+
+function removeAgentRepo(idx) {
+  state._agentRepos.splice(idx, 1);
+  renderAgentReposList();
+}
+
+function renderAgentReposList() {
+  const list = document.getElementById('agent-repos-list');
+  if (!list) return;
+  list.innerHTML = state._agentRepos.map((repo, i) => `
+    <div class="agent-tag-item agent-repo-item">
+      <span style="font-size:11px">📁 ${esc(repo)}</span>
+      <button type="button" onclick="app.removeAgentRepo(${i})">✕</button>
+    </div>
+  `).join('');
+}
+
+async function saveAgent() {
+  const name = document.getElementById('agent-name-input')?.value?.trim();
+  if (!name) {
+    showToast('Le nom est obligatoire', 'error');
+    return;
+  }
+
+  const data = {
+    name,
+    icon: document.getElementById('agent-icon-btn')?.textContent || '🤖',
+    color: state._selectedColor || '#6C8EFF',
+    model: document.getElementById('agent-model-select')?.value,
+    system_prompt: document.getElementById('agent-system-prompt')?.value || '',
+    rules: state._agentRules,
+    git_repos: state._agentRepos,
+  };
+
+  let result;
+  if (state._editingAgentId) {
+    result = await api.call('update_agent', state._editingAgentId, JSON.stringify(data));
+  } else {
+    result = await api.call('create_agent', JSON.stringify(data));
+  }
+
+  if (result.success) {
+    showToast(`Agent "${data.icon} ${data.name}" sauvegardé ✓`, 'success');
+    closeAgentEditor();
+    await loadAgentsPage();
+    await loadAgentDropdown();
+  } else {
+    showToast('Erreur: ' + (result.error || 'inconnue'), 'error');
+  }
+}
+
+async function deleteCurrentAgent() {
+  if (!state._editingAgentId || state._editingAgentId === 'default') return;
+  if (!confirm('Supprimer cet agent ? Cette action est irréversible.')) return;
+
+  const result = await api.call('delete_agent', state._editingAgentId);
+  if (result.success) {
+    showToast('Agent supprimé', 'success');
+    closeAgentEditor();
+    await loadAgentsPage();
+    await loadAgentDropdown();
+  }
+}
+
+function applyActiveAgentUI(agent) {
+  if (!agent) return;
+  state._activeAgentId = agent.id || 'default';
+  state._activeAgentIcon = agent.icon || '🤖';
+  state._activeAgentName = agent.name || 'ARIA';
+  const color = agent.color || '#6C8EFF';
+
+  const chipIcon = document.getElementById('agent-chip-icon');
+  const chipName = document.getElementById('agent-chip-name');
+  const inputIcon = document.getElementById('input-agent-icon');
+  const inputName = document.getElementById('input-agent-name');
+  const selector = document.getElementById('input-agent-selector');
+
+  if (chipIcon) chipIcon.textContent = state._activeAgentIcon;
+  if (chipName) chipName.textContent = state._activeAgentName;
+  if (inputIcon) inputIcon.textContent = state._activeAgentIcon;
+  if (inputName) {
+    inputName.textContent = agent.id === 'default'
+      ? 'Assistant Avancé'
+      : (state._activeAgentName || 'Assistant Avancé');
+  }
+  if (selector) selector.style.borderColor = color;
+  document.documentElement.style.setProperty('--agent-color', color);
+}
+
+async function loadActiveAgent() {
+  try {
+    const active = await api.call('get_active_agent') || {};
+    applyActiveAgentUI(active);
+  } catch (e) {
+    console.warn('loadActiveAgent:', e);
+  }
+}
+
+async function loadAgentDropdown() {
+  try {
+    const agents = await api.call('get_agents') || [];
+    renderAgentDropdown(agents);
+  } catch (e) {
+    console.warn('loadAgentDropdown:', e);
+  }
+}
+
+function renderAgentDropdown(agents) {
+  const dropdown = document.getElementById('agent-dropdown');
+  if (!dropdown) return;
+  const activeId = state._activeAgentId || 'default';
+
+  dropdown.innerHTML = agents.map(agent => {
+    const active = agent.id === activeId;
+    return `
+      <div class="agent-dropdown-item${active ? ' active' : ''}" data-agent-id="${esc(agent.id)}">
+        <span style="font-size:18px">${agent.icon || '🤖'}</span>
+        <div style="min-width:0;flex:1">
+          <div style="font-size:13px;color:var(--text)">${esc(agent.name)}</div>
+          <div style="font-size:10px;color:var(--text3)">${esc(agent.model || '')}</div>
+        </div>
+        ${active ? '<span style="color:var(--accent);font-size:12px">✓</span>' : ''}
+      </div>`;
+  }).join('') + `
+    <div class="agent-dropdown-divider"></div>
+    <div class="agent-dropdown-item" data-agent-create>
+      <span style="font-size:16px">+</span>
+      <div style="font-size:13px;color:var(--accent)">Créer un agent</div>
+    </div>
+  `;
+  bindAgentDropdownEvents();
+}
+
+function bindAgentDropdownEvents() {
+  const dropdown = document.getElementById('agent-dropdown');
+  if (!dropdown || dropdown._pickBound) return;
+  dropdown._pickBound = true;
+  dropdown.addEventListener('mousedown', e => e.stopPropagation());
+  dropdown.addEventListener('click', e => {
+    const createBtn = e.target.closest('[data-agent-create]');
+    if (createBtn) {
+      e.stopPropagation();
+      openAgentEditor(null);
+      dropdown.classList.add('hidden');
+      return;
+    }
+    const item = e.target.closest('.agent-dropdown-item[data-agent-id]');
+    if (!item) return;
+    e.stopPropagation();
+    setActiveAgent(item.getAttribute('data-agent-id'));
+  });
+}
+
+async function setActiveAgent(agentId) {
+  const result = await api.call('set_active_agent', agentId);
+  if (result.success) {
+    applyActiveAgentUI(result.agent);
+    document.getElementById('agent-dropdown')?.classList.add('hidden');
+    await loadAgentDropdown();
+    showToast(`Agent "${result.agent.icon} ${result.agent.name}" activé`, 'success');
+  }
 }
 
 async function loadApiKeys() {
@@ -1417,6 +2427,18 @@ function bindMainUiButtons() {
   const textInput = document.getElementById('text-input');
   textInput?.addEventListener('keydown', handleInputKeydown);
   textInput?.addEventListener('input', function onInput() { adjustTextarea(this); });
+
+  const inputZone = document.getElementById('input-zone');
+  if (inputZone && !inputZone._dropBound) {
+    inputZone._dropBound = true;
+    inputZone.addEventListener('dragover', e => { e.preventDefault(); inputZone.classList.add('drag-over'); });
+    inputZone.addEventListener('dragleave', () => inputZone.classList.remove('drag-over'));
+    inputZone.addEventListener('drop', e => {
+      e.preventDefault();
+      inputZone.classList.remove('drag-over');
+      if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files);
+    });
+  }
 }
 
 function bindModeSelectorButtons() {
@@ -1460,6 +2482,27 @@ function exposeGlobalApp() {
     toggleAgentDropdown,
     setPrivacyMode,
     openAgentEditor,
+    closeAgentEditor,
+    saveAgent,
+    deleteCurrentAgent,
+    selectAgentEmoji,
+    selectAgentColor,
+    toggleAgentEmojiPicker,
+    addAgentRule,
+    removeAgentRule,
+    addAgentRepo,
+    removeAgentRepo,
+    updateAgentPreview,
+    setActiveAgent,
+    loadAgentDropdown,
+    loadActiveAgent,
+    loadPresetsPage,
+    runPreset,
+    openPresetEditor,
+    closePresetEditor,
+    savePreset,
+    updatePresetPreview,
+    optimizeMemory,
     loadApiKeys,
     saveApiKey,
     deleteApiKey,
@@ -1467,7 +2510,8 @@ function exposeGlobalApp() {
     showApiKeyInput,
     exportConversation: () => api.call('export_current_conversation'),
     runMicDiagnostic: () => api.call('run_mic_diagnostic'),
-    handleFiles: () => showToast('Pièces jointes — bientôt disponible', 'info'),
+    handleFiles,
+    askFilePrompt,
   };
 
   Object.assign(window, {

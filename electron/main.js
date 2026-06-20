@@ -203,7 +203,7 @@ function createWindow() {
     height: height,
     minWidth: 900,
     minHeight: 600,
-    backgroundColor: '#0C0C0F',
+    backgroundColor: '#060B1A',
     titleBarStyle: 'hidden',
     frame: false,
     transparent: false,

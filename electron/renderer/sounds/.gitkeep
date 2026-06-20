@@ -1,0 +1,2 @@
+# Place optional MP3 files here: activate.mp3, listening.mp3, response.mp3
+# Web Audio synth fallback is used if files are missing.

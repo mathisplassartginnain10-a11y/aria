@@ -37,12 +37,10 @@
 
     <!-- Logo + nom -->
     <div id="sidebar-brand">
-      <div id="sidebar-logo-wrap">
-        <img src="../assets/icon-128.png"
-             srcset="../assets/icon-128.png 1x, ../assets/icon-256.png 2x"
-             id="sidebar-logo-img" alt="ARIA">
-        <div class="sidebar-logo-ring sidebar-logo-ring-1"></div>
-        <div class="sidebar-logo-ring sidebar-logo-ring-2"></div>
+      <div id="sidebar-logo-wrap" class="sidebar-orbe-wrap">
+        <div class="sidebar-orbe-core"><span>A</span></div>
+        <div class="sidebar-orbe-ring sidebar-orbe-ring-1"></div>
+        <div class="sidebar-orbe-ring sidebar-orbe-ring-2"></div>
       </div>
       <div id="sidebar-brand-text">
         <div id="sidebar-title">ARIA</div>
@@ -102,45 +100,54 @@
     <div id="page-home" class="page active">
       <!-- Header -->
       <div id="home-header">
-        <div id="home-greeting"></div>
-        <div id="home-date"></div>
-        <div id="home-mode-badge" onclick="app.toggleModeMenu()">
-          <span>🔒</span>
-          <span id="home-mode-label">Mode Local</span>
-          <span style="opacity:0.5;font-size:10px">▾</span>
+        <div class="home-header-side home-header-left">
+          <div id="home-greeting"></div>
+          <div id="home-date"></div>
         </div>
-        <div id="mode-menu" class="hidden">
-          <div onclick="app.setPrivacyMode('local')">🔒 100% Local</div>
-          <div onclick="app.setPrivacyMode('hybrid')">🌐 Hybride (Local + API)</div>
-          <div onclick="app.setPrivacyMode('cloud')">☁️ Cloud uniquement</div>
+        <div class="home-header-center">
+          <div id="home-mode-badge" onclick="app.toggleModeMenu()">
+            <span>🔒</span>
+            <span id="home-mode-label">Mode Privé</span>
+            <span class="badge-chevron">▾</span>
+          </div>
+          <div id="mode-menu" class="hidden">
+            <div onclick="app.setPrivacyMode('local')">🔒 100% Local</div>
+            <div onclick="app.setPrivacyMode('hybrid')">🌐 Hybride (Local + API)</div>
+            <div onclick="app.setPrivacyMode('cloud')">☁️ Cloud uniquement</div>
+          </div>
         </div>
-        <button id="mic-visual-btn" onclick="app.toggleMic()">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
-            <rect x="9" y="2" width="6" height="13" rx="3" stroke="currentColor" stroke-width="1.5"/>
-            <path d="M5 10a7 7 0 0014 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            <line x1="12" y1="21" x2="12" y2="17" stroke="currentColor" stroke-width="1.5"/>
-          </svg>
-        </button>
+        <div class="home-header-side home-header-right">
+          <button id="mic-visual-btn" class="mic-round-header" onclick="app.toggleMic()" title="Micro">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
+              <rect x="9" y="2" width="6" height="13" rx="3" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M5 10a7 7 0 0014 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <line x1="12" y1="21" x2="12" y2="17" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+          </button>
+        </div>
       </div>
+
+      <div id="focus-indicator">🎯 Mode focus</div>
 
       <!-- Logo animé central -->
       <div id="home-logo-container">
-        <div id="home-logo" class="logo-idle">
-          <div class="home-logo-rings">
-            <div class="h-ring h-ring-1"></div>
-            <div class="h-ring h-ring-2"></div>
-            <div class="h-ring h-ring-3"></div>
-            <div class="h-ring h-ring-4"></div>
-            <div class="h-scan-line"></div>
-          </div>
-          <img src="../assets/icon-128.png"
-               srcset="../assets/icon-128.png 1x, ../assets/icon-256.png 2x"
-               id="home-logo-img" alt="ARIA">
-          <div id="home-logo-particles"></div>
+        <div id="home-orbe" class="orbe-container orbe-idle">
+          <div class="halo halo-outer"></div>
+          <div class="halo halo-inner"></div>
+          <div class="ring ring-5"></div>
+          <div class="ring ring-4"></div>
+          <div class="ring ring-3"></div>
+          <div class="ring ring-2"></div>
+          <div class="ring ring-1"></div>
+          <div class="scan scan-blue"></div>
+          <div class="scan scan-violet"></div>
+          <div class="crosshair"></div>
+          <div class="ticks"></div>
+          <div class="orbe-core"><span class="orbe-letter">A</span></div>
         </div>
         <div id="home-logo-label">
-          <div id="home-hello-text">Bonjour.</div>
-          <div id="home-sub-text">Comment puis-je vous aider aujourd'hui ?</div>
+          <div id="home-hello-text" class="hello-text">Bonjour.</div>
+          <div id="home-sub-text" class="sub-text">Comment puis-je vous aider aujourd'hui ?</div>
         </div>
       </div>
 
@@ -149,44 +156,44 @@
         <div id="messages"></div>
       </div>
 
-      <!-- Zone de saisie -->
+      <!-- Zone de saisie (2 lignes — UI Bible) -->
       <div id="input-area">
         <div id="input-zone">
-          <label id="attach-btn" title="Joindre un fichier">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
-              <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"
-                stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            </svg>
-            <input type="file" id="file-input" multiple style="display:none"
-              onchange="app.handleFiles(this.files)">
-          </label>
-
-          <textarea
-            id="text-input"
-            placeholder="Demandez à ARIA..."
-            rows="1"
-            onkeydown="app.handleInputKeydown(event)"
-            oninput="app.adjustTextarea(this)">
-          </textarea>
-
-          <!-- Sélecteur d'agent dans l'input -->
-          <div id="input-agent-selector" onclick="app.toggleAgentDropdown()">
-            <span id="input-agent-icon">🤖</span>
-            <span id="input-agent-name">Assistant</span>
-            <span style="opacity:0.4;font-size:9px">▾</span>
+          <div class="input-row input-row-main">
+            <textarea
+              id="text-input"
+              placeholder="Demandez à ARIA..."
+              rows="1"
+              onkeydown="app.handleInputKeydown(event)"
+              oninput="app.adjustTextarea(this)">
+            </textarea>
           </div>
-
-          <!-- Bouton micro -->
-          <div id="mic-btn-wrap">
-            <div class="mic-ring" id="mic-ring-1"></div>
-            <div class="mic-ring" id="mic-ring-2"></div>
-            <button id="mic-btn" onclick="app.toggleMic()" class="mic-idle">
+          <div class="input-row input-row-tools">
+            <label id="attach-btn" title="Joindre un fichier">
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
-                <rect x="9" y="2" width="6" height="13" rx="3" stroke="currentColor" stroke-width="1.5"/>
-                <path d="M5 10a7 7 0 0014 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                <line x1="12" y1="21" x2="12" y2="17" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"
+                  stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
               </svg>
-            </button>
+              <input type="file" id="file-input" multiple style="display:none"
+                onchange="app.handleFiles(this.files)">
+            </label>
+            <div id="input-agent-selector" onclick="app.toggleAgentDropdown()">
+              <span id="input-agent-icon">🤖</span>
+              <span id="input-agent-name">Assistant Avancé</span>
+              <span class="selector-chevron">▾</span>
+            </div>
+            <div class="input-tools-spacer"></div>
+            <div id="mic-btn-wrap">
+              <div class="mic-ring" id="mic-ring-1"></div>
+              <div class="mic-ring" id="mic-ring-2"></div>
+              <button id="mic-btn" onclick="app.toggleMic()" class="mic-idle mic-round" type="button">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
+                  <rect x="9" y="2" width="6" height="13" rx="3" stroke="currentColor" stroke-width="1.5"/>
+                  <path d="M5 10a7 7 0 0014 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                  <line x1="12" y1="21" x2="12" y2="17" stroke="currentColor" stroke-width="1.5"/>
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -229,7 +236,10 @@
         <div style="font-size:18px;font-weight:700;color:var(--text);margin-bottom:16px">
           Routines
         </div>
-        <div style="color:var(--text3);font-size:13px">Bientôt disponible</div>
+        <div id="presets-page-list"></div>
+        <button onclick="app.openPresetEditor(null)" class="page-action-btn" style="margin-top:12px">
+          + Créer une routine
+        </button>
       </div>
     </div>
 
@@ -254,6 +264,7 @@
                   <button onclick="app.setTheme('warm')" class="theme-pill" data-theme="warm">Warm</button>
                   <button onclick="app.setTheme('forest')" class="theme-pill" data-theme="forest">Forest</button>
                   <button onclick="app.setTheme('rose')" class="theme-pill" data-theme="rose">Rose</button>
+                  <button onclick="app.setTheme('mono')" class="theme-pill" data-theme="mono">Mono</button>
                 </div>
               </div>
               <div class="setting-row">
@@ -322,6 +333,29 @@
                 <input type="range" id="set-tts-rate" min="-50" max="50" value="0"
                   oninput="app.saveSetting('tts_rate', parseInt(this.value))">
               </div>
+              <div class="setting-row">
+                <label>Sons ambiance</label>
+                <input type="checkbox" id="set-sounds" checked
+                  onchange="app.saveSetting('sounds_enabled', this.checked)">
+              </div>
+              <div class="setting-row">
+                <label>Activation vocale (« Hey Jarvis »)</label>
+                <input type="checkbox" id="set-wake-word">
+              </div>
+              <div style="font-size:11px;color:var(--text3);margin:-6px 0 10px 0">
+                Dis « Hey Jarvis » pour activer le micro sans clavier
+              </div>
+              <div class="setting-row">
+                <label>Transcription temps réel</label>
+                <input type="checkbox" id="set-realtime-stt">
+              </div>
+              <div style="font-size:11px;color:var(--text3);margin:-6px 0 10px 0">
+                Affiche le texte au fur et à mesure (plus de ressources GPU)
+              </div>
+              <div class="setting-row">
+                <label>Brief quotidien automatique</label>
+                <input type="checkbox" id="set-daily-brief" checked>
+              </div>
               <button class="settings-validate-btn" onclick="app.validateSection('voix')">✓ Appliquer</button>
             </div>
           </div>
@@ -375,6 +409,11 @@
             <div class="acc-header" onclick="app.toggleAccordion('systeme')">⚙️ Système <span class="acc-chevron">▸</span></div>
             <div class="acc-body hidden">
               <div class="setting-row">
+                <label>Mode focus (distractions réduites)</label>
+                <input type="checkbox" id="set-focus"
+                  onchange="app.saveSetting('focus_mode', this.checked)">
+              </div>
+              <div class="setting-row">
                 <label>Tuer Ollama à la fermeture</label>
                 <input type="checkbox" id="set-kill-ollama" checked
                   onchange="app.saveSetting('kill_ollama_on_exit', this.checked)">
@@ -403,14 +442,19 @@
           <span class="widget-label" id="wlabel-tasks">Chargement...</span>
           <span class="widget-value" id="wval-tasks"></span>
         </div>
+        <div class="widget-row" id="wrow-rappels">
+          <span class="widget-icon">🔔</span>
+          <span class="widget-label">Rappels</span>
+          <span class="widget-value" id="wval-rappels">—</span>
+        </div>
         <div class="widget-row" id="wrow-meteo">
           <span class="widget-icon" id="wicon-meteo">🌡️</span>
           <span class="widget-label">Météo</span>
           <span class="widget-value" id="wval-meteo">...</span>
         </div>
         <div class="widget-row" id="wrow-battery">
-          <span class="widget-icon">🔋</span>
-          <span class="widget-label">Batterie</span>
+          <span class="widget-icon">⚡</span>
+          <span class="widget-label">Énergie</span>
           <span class="widget-value" id="wval-battery">...</span>
         </div>
         <div class="widget-row" id="wrow-time">
@@ -429,7 +473,7 @@
       </div>
       <div class="widget-body" id="widget-memory-body">
         <div id="memory-donut-container">
-          <canvas id="memory-donut" width="100" height="100"></canvas>
+          <canvas id="memory-donut" width="110" height="110"></canvas>
           <div id="memory-donut-label">
             <div id="memory-pct">...</div>
             <div style="font-size:9px;color:var(--text3)">Utilisée</div>
@@ -449,8 +493,8 @@
             <span id="mem-sessions">...</span>
           </div>
         </div>
-        <button class="widget-action-btn" onclick="app.navigate('memory')">
-          Explorer la mémoire
+        <button class="widget-action-btn" onclick="app.optimizeMemory()">
+          Optimiser
         </button>
       </div>
     </div>
@@ -492,11 +536,147 @@
   </div>
 </div>
 
-<div id="agent-editor-modal" class="modal-overlay hidden"></div>
+<div id="agent-editor-modal" class="modal-overlay hidden">
+  <div class="agent-editor-card">
+    <div class="agent-editor-header">
+      <div class="agent-preview" id="agent-preview">
+        <span id="agent-preview-icon">🤖</span>
+        <span id="agent-preview-name">Nouvel agent</span>
+      </div>
+      <button type="button" class="hbtn" onclick="app.closeAgentEditor()">✕</button>
+    </div>
+
+    <div class="agent-editor-body">
+      <div class="agent-editor-section">
+        <div class="agent-section-title">Identité</div>
+        <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:12px">
+          <div>
+            <label class="agent-label">Icône</label>
+            <div class="emoji-picker-wrapper">
+              <button type="button" class="emoji-btn" id="agent-icon-btn" onclick="app.toggleAgentEmojiPicker()">🤖</button>
+              <div class="emoji-picker" id="agent-emoji-picker" style="display:none"></div>
+            </div>
+          </div>
+          <div style="flex:1">
+            <label class="agent-label">Nom de l'agent</label>
+            <input type="text" id="agent-name-input" placeholder="DevBot, Coach Maths, Copilote..."
+              maxlength="30" oninput="app.updateAgentPreview()" class="agent-input">
+          </div>
+          <div style="width:100px">
+            <label class="agent-label">Couleur</label>
+            <div class="color-swatches" id="agent-color-swatches"></div>
+          </div>
+        </div>
+        <div style="margin-bottom:12px">
+          <label class="agent-label">Modèle IA local</label>
+          <select id="agent-model-select" class="agent-select"></select>
+          <div style="font-size:10px;color:var(--text3);margin-top:4px">
+            100% local — aucune donnée envoyée en ligne
+          </div>
+        </div>
+      </div>
+
+      <div class="agent-editor-section">
+        <div class="agent-section-title">Comportement</div>
+        <div style="margin-bottom:12px">
+          <label class="agent-label">Instructions personnalisées</label>
+          <textarea id="agent-system-prompt"
+            placeholder="Ex: Tu es un expert en mathématiques. Explique toujours avec des exemples concrets."
+            rows="4" class="agent-textarea"></textarea>
+        </div>
+        <div style="margin-bottom:12px">
+          <label class="agent-label">Règles supplémentaires</label>
+          <div id="agent-rules-list"></div>
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <input type="text" id="agent-rule-input"
+              placeholder="Ex: Toujours proposer des alternatives"
+              class="agent-input" style="flex:1"
+              onkeydown="if(event.key==='Enter') app.addAgentRule()">
+            <button type="button" class="agent-add-btn" onclick="app.addAgentRule()">+</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="agent-editor-section">
+        <div class="agent-section-title">Contexte de code (Git)</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:10px">
+          L'agent accédera aux fichiers récemment modifiés dans ces repos
+          pour mieux comprendre ton code.
+        </div>
+        <div id="agent-repos-list"></div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <input type="text" id="agent-repo-input"
+            placeholder="C:\Users\mathi\projets\mon-repo"
+            class="agent-input" style="flex:1"
+            onkeydown="if(event.key==='Enter') app.addAgentRepo()">
+          <button type="button" class="agent-add-btn" onclick="app.addAgentRepo()" title="Ajouter">+</button>
+        </div>
+        <div id="agent-repo-status" style="font-size:10px;margin-top:4px;height:14px"></div>
+        <div id="agent-repo-stats" style="margin-top:8px"></div>
+      </div>
+    </div>
+
+    <div class="agent-editor-footer">
+      <button type="button" class="agent-delete-btn" id="agent-delete-btn" onclick="app.deleteCurrentAgent()" style="display:none">
+        🗑️ Supprimer
+      </button>
+      <div style="flex:1"></div>
+      <button type="button" class="agent-cancel-btn" onclick="app.closeAgentEditor()">Annuler</button>
+      <button type="button" class="agent-save-btn" onclick="app.saveAgent()">✓ Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal éditeur routine / preset -->
+<div id="preset-editor-modal" class="modal-overlay hidden">
+  <div class="agent-editor-card preset-editor-card">
+    <div class="agent-editor-header">
+      <div class="agent-preview">
+        <span id="preset-preview-icon">⚡</span>
+        <span id="preset-preview-name">Nouvelle routine</span>
+      </div>
+      <button type="button" class="hbtn" onclick="app.closePresetEditor()">✕</button>
+    </div>
+    <div class="preset-editor-body">
+      <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
+        <label class="agent-label">Icône</label>
+        <input type="text" id="preset-icon-input" class="agent-input" maxlength="4" value="⚡"
+          oninput="app.updatePresetPreview()">
+      </div>
+      <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
+        <label class="agent-label">Nom</label>
+        <input type="text" id="preset-name-input" class="agent-input" placeholder="Travail, Sport..."
+          oninput="app.updatePresetPreview()">
+      </div>
+      <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
+        <label class="agent-label">Volume (%)</label>
+        <input type="range" id="preset-volume" min="0" max="100" value="50" class="agent-input">
+      </div>
+      <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
+        <label class="agent-label">Apps à ouvrir (virgules)</label>
+        <input type="text" id="preset-apps-open" class="agent-input" placeholder="vscode, chrome">
+      </div>
+      <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
+        <label class="agent-label">Apps à fermer (virgules)</label>
+        <input type="text" id="preset-apps-close" class="agent-input" placeholder="discord, steam">
+      </div>
+      <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
+        <label class="agent-label">Message de confirmation</label>
+        <input type="text" id="preset-message" class="agent-input" placeholder="Mode activé !">
+      </div>
+    </div>
+    <div class="agent-editor-footer">
+      <div style="flex:1"></div>
+      <button type="button" class="agent-cancel-btn" onclick="app.closePresetEditor()">Annuler</button>
+      <button type="button" class="agent-save-btn" onclick="app.savePreset()">✓ Enregistrer</button>
+    </div>
+  </div>
+</div>
 
 <!-- Toast container -->
 <div id="toast-container"></div>
 
+<script src="settings-animations.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
