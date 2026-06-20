@@ -33,18 +33,44 @@ _training_status = "idle"
 _installed_apps_cache = None
 _installed_apps_cache_time = 0.0
 
-_STATIC_PORT = 8765
+_STATIC_PORT: int | None = None
 _static_server_started = False
 
 
+def _find_free_port(start: int = 8765) -> int:
+    """Trouve un port libre entre start et start+19 (8765–8784 par défaut)."""
+    import socket
+
+    for port in range(start, start + 20):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind(("127.0.0.1", port))
+                return port
+        except OSError:
+            continue
+    raise RuntimeError("Aucun port libre disponible")
+
+
 def _wallpaper_http_url(filename: str) -> str:
-    return f"http://127.0.0.1:{_STATIC_PORT}/wallpapers/{filename}"
+    port = _STATIC_PORT or 8765
+    return f"http://127.0.0.1:{port}/wallpapers/{filename}"
+
+
+def get_static_port() -> int:
+    """Port du serveur statique (wallpapers)."""
+    return _STATIC_PORT or 8765
 
 
 def _start_static_server() -> None:
     """Démarre un serveur HTTP local pour servir data/ via http://127.0.0.1."""
-    global _static_server_started
+    global _static_server_started, _STATIC_PORT
     if _static_server_started:
+        return
+
+    try:
+        _STATIC_PORT = _find_free_port(8765)
+    except RuntimeError as exc:
+        logger.error("Impossible de trouver un port libre: %s", exc)
         return
 
     data_dir = app_paths.data_dir()
@@ -56,17 +82,19 @@ def _start_static_server() -> None:
         def log_message(self, format, *args):
             pass
 
+    port = _STATIC_PORT
+
     def _run() -> None:
         try:
             socketserver.TCPServer.allow_reuse_address = True
-            with socketserver.TCPServer(("127.0.0.1", _STATIC_PORT), Handler) as httpd:
+            with socketserver.TCPServer(("127.0.0.1", port), Handler) as httpd:
+                logger.info("Serveur statique: http://127.0.0.1:%d", port)
                 httpd.serve_forever()
         except Exception as exc:
             logger.error("Erreur serveur statique: %s", exc)
 
     threading.Thread(target=_run, daemon=True, name="ARIA-StaticHTTP").start()
     _static_server_started = True
-    logger.info("Serveur statique démarré sur http://127.0.0.1:%d", _STATIC_PORT)
 
 
 def _html_path() -> Path:
@@ -130,6 +158,16 @@ class AriaAPI:
                     existing[key] = value
             with state_path.open("w", encoding="utf-8") as f:
                 json.dump(existing, f, indent=2, ensure_ascii=False)
+
+            import llm
+
+            if any(k in settings for k in ("model_fast", "model_heavy", "model_code", "auto_routing")):
+                llm.apply_model_settings(
+                    model_fast=settings.get("model_fast"),
+                    model_heavy=settings.get("model_heavy"),
+                    model_code=settings.get("model_code"),
+                    auto_routing=settings.get("auto_routing"),
+                )
         except Exception:
             logger.exception("Erreur sauvegarde settings")
 
@@ -152,8 +190,13 @@ class AriaAPI:
             out_path.write_bytes(base64.b64decode(base64_data))
 
             url = _wallpaper_http_url(safe_name)
-            logger.info("Wallpaper sauvegardé: %s → %s", out_path, url)
-            return json.dumps({"success": True, "url": url, "filename": safe_name})
+            logger.info("Wallpaper sauvegardé: %s → %s", safe_name, url)
+            return json.dumps({
+                "success": True,
+                "url": url,
+                "filename": safe_name,
+                "port": get_static_port(),
+            })
         except Exception as exc:
             logger.error("Erreur save_wallpaper: %s", exc)
             return json.dumps({"success": False, "error": str(exc)})
@@ -341,6 +384,39 @@ class AriaAPI:
     def set_daily_brief(self, enabled: bool) -> None:
         self._update_config_field("daily_brief_enabled", enabled)
 
+    def set_setting(self, key: str, value) -> None:
+        """Met à jour un champ de config.yaml."""
+        self._update_config_field(key, value)
+
+    def _update_stt_field(self, key: str, value) -> None:
+        import yaml
+
+        cfg_path = app_paths.config_path()
+        with cfg_path.open("r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        stt_cfg = cfg.setdefault("stt", {})
+        stt_cfg[key] = value
+        with cfg_path.open("w", encoding="utf-8") as f:
+            yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
+
+    def set_stt_device_index(self, value: str) -> None:
+        idx = None
+        if value is not None and str(value).strip() != "":
+            try:
+                idx = int(value)
+            except ValueError:
+                idx = None
+        self._update_stt_field("device_index", idx)
+
+    def set_whisper_model(self, model: str) -> None:
+        self._update_config_field("whisper_model", model)
+        self._update_stt_field("model", model)
+
+    def set_focus_mode(self, enabled: bool) -> None:
+        import focus
+
+        focus.set_focus_mode(bool(enabled))
+
     def is_focus_active(self) -> bool:
         import focus
 
@@ -395,6 +471,10 @@ class AriaAPI:
             "realtime_transcription": cfg.get("realtime_transcription", False),
             "daily_brief_enabled": cfg.get("daily_brief_enabled", True),
             "german_mode": cfg.get("german_mode", False),
+            "focus_mode": cfg.get("focus_mode", False),
+            "device_index": (cfg.get("stt") or {}).get("device_index"),
+            "whisper_model": cfg.get("whisper_model")
+            or (cfg.get("stt") or {}).get("model", "small"),
         })
 
     def set_german_mode(self, enabled: bool) -> None:
@@ -423,6 +503,28 @@ class AriaAPI:
         conv_id = memory_engine.new_conversation()
         llm.clear_history()
         return conv_id
+
+    def delete_conversation(self, conv_id: str) -> str:
+        import json
+        import llm
+        import memory_engine as _me
+
+        was_current = _me.get_current_conversation_id() == conv_id
+        success = _me.delete_conversation(conv_id)
+        if success and was_current:
+            llm.clear_history()
+            messages = _me.get_engine().current_conversation.get("messages", [])
+            llm.load_conversation_messages(messages)
+        return json.dumps({"success": success})
+
+    def delete_all_conversations(self) -> str:
+        import json
+        import llm
+        import memory_engine as _me
+
+        count = _me.delete_all_conversations()
+        llm.clear_history()
+        return json.dumps({"success": True, "count": count})
 
     def get_current_conversation_id(self) -> str:
         import memory_engine
@@ -725,9 +827,9 @@ class AriaAPI:
         try:
             with app_paths.config_path().open(encoding="utf-8") as f:
                 cfg = yaml.safe_load(f)
-            active_model = cfg.get("model", "qwen3:14b")
+            active_model = cfg.get("active_model") or cfg.get("model", "qwen3:14b")
         except Exception:
-            active_model = "qwen3:14b"
+            active_model = "auto"
 
         custom_exists = False
         try:
@@ -752,69 +854,104 @@ class AriaAPI:
         })
 
     def get_available_models(self) -> str:
-        """Liste les modèles installés + le choix courant (sélecteur type Claude)."""
+        """Modèles Ollama locaux + config par rôle (+ options sélecteur en-tête)."""
         import json
-        import llm
-        import ollama_manager
 
+        running = False
+        local: list[str] = []
         try:
-            installed = ollama_manager.get_loaded_models() or []
-        except Exception:
-            installed = []
+            import ollama_manager
 
-        def norm(name: str) -> str:
-            return name.removesuffix(":latest") if name else ""
+            running = ollama_manager.is_running()
+            if not running:
+                try:
+                    running = ollama_manager.start_ollama()
+                except Exception:
+                    running = False
+            local = ollama_manager.list_local_models() if running else []
+        except Exception as exc:
+            logger.error("get_available_models error: %s", exc)
+            running = False
+            local = []
 
-        options: list[dict[str, str]] = [
-            {
+        configured: dict = {}
+        current = "auto"
+        options: list[dict[str, str]] = []
+        try:
+            import llm
+
+            configured = dict(llm.MODELS)
+            current = llm.FORCED_MODEL or "auto"
+
+            def norm(name: str) -> str:
+                return name.removesuffix(":latest") if name else ""
+
+            options.append({
                 "id": "auto",
                 "label": "Auto",
                 "subtitle": "Rapide par défaut, réflexion si la question est complexe",
-            },
-            {
-                "id": llm.MODEL_FAST,
-                "label": "Rapide",
-                "subtitle": llm.MODEL_FAST,
-            },
-            {
-                "id": llm.REASONING_MODEL,
-                "label": "Raisonnement",
-                "subtitle": llm.REASONING_MODEL,
-            },
-            {
-                "id": llm.MODEL_CODE,
-                "label": "Code",
-                "subtitle": llm.MODEL_CODE,
-            },
-        ]
+            })
+            seen = {norm("auto")}
+            if local:
+                for name in local:
+                    n = norm(name)
+                    if n and n not in seen:
+                        seen.add(n)
+                        options.append({
+                            "id": name,
+                            "label": n,
+                            "subtitle": "Installé localement",
+                        })
+            else:
+                for mid, label, subtitle in (
+                    (llm.MODEL_FAST, "Rapide", llm.MODEL_FAST),
+                    (llm.REASONING_MODEL, "Raisonnement", llm.REASONING_MODEL),
+                    (llm.MODEL_CODE, "Code", llm.MODEL_CODE),
+                ):
+                    n = norm(mid)
+                    if n and n not in seen:
+                        seen.add(n)
+                        options.append({"id": mid, "label": label, "subtitle": subtitle})
 
-        seen = {norm(o["id"]) for o in options}
-        for name in installed:
-            n = norm(name)
-            if n and n not in seen:
-                seen.add(n)
-                options.append({"id": name, "label": n, "subtitle": "Installé localement"})
+            if current != "auto" and norm(current) not in seen:
+                options.append({
+                    "id": current,
+                    "label": norm(current),
+                    "subtitle": "Modèle actif",
+                })
+        except Exception as exc:
+            logger.error("get_available_models llm error: %s", exc)
 
-        current = llm.FORCED_MODEL or "auto"
-        if current != "auto" and norm(current) not in {norm(o["id"]) for o in options}:
-            options.append({"id": current, "label": norm(current), "subtitle": "Modèle actif"})
+        result = {
+            "ollama_running": running,
+            "local_models": local,
+            "configured": configured,
+            "current": current,
+            "options": options,
+        }
+        logger.info("get_available_models: running=%s, models=%s", running, local)
+        return json.dumps(result)
 
-        return json.dumps({"current": current, "options": options})
+    def get_static_port(self) -> int:
+        return get_static_port()
+
+    def set_model(self, role: str, model_name: str) -> str:
+        """Change le modèle pour un rôle (intent/fast/heavy/vision)."""
+        import llm
+
+        try:
+            llm.set_model_role(role, model_name)
+            return json.dumps({"success": True})
+        except Exception as exc:
+            logger.error("set_model error: %s", exc)
+            return json.dumps({"success": False, "error": str(exc)})
 
     def switch_model(self, model_name: str) -> str:
         """Choisit le modèle utilisé (comme Claude). 'auto' = escalade intelligente."""
         import llm
-        import yaml
 
         try:
-            llm.FORCED_MODEL = None if model_name == "auto" else model_name
-            config_path = app_paths.config_path()
-            with config_path.open("r", encoding="utf-8") as f:
-                cfg = yaml.safe_load(f)
-            cfg["active_model"] = model_name
-            with config_path.open("w", encoding="utf-8") as f:
-                yaml.dump(cfg, f, allow_unicode=True)
-            logger.info("Modèle actif: %s", model_name)
+            llm.set_active_model(model_name)
             return "ok"
         except Exception as e:
             logger.error("switch_model error: %s", e)

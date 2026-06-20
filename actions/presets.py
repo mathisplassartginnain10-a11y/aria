@@ -1,12 +1,17 @@
 import copy
 import json
 import logging
+import re
+
+import yaml
 
 from actions import apps, system
 import app_paths
 
 logger = logging.getLogger(__name__)
 
+# Modes par défaut (libellé + icône + valeurs de repli). La config.yaml et l'éditeur
+# UI viennent par-dessus — voir get_merged_presets().
 PRESETS: dict[str, dict] = {
     "vol": {
         "label": "Vol",
@@ -60,36 +65,58 @@ _ALIASES = {
     "nuit": "nuit",
 }
 
-_active_preset: str | None = None
-
-
 def _normalize_key(key: str) -> str:
     return _ALIASES.get(key.lower().strip(), key.lower().strip())
 
 
-def _load_custom_presets() -> dict:
+# ---------------------------------------------------------------------------
+# Sources de modes : DÉFAUTS (PRESETS) < config.yaml < customs UI (ui_state.json)
+# ---------------------------------------------------------------------------
+
+def _state_path():
+    return app_paths.data_dir() / "ui_state.json"
+
+
+def _load_ui_state() -> dict:
     try:
-        state_path = app_paths.data_dir() / "ui_state.json"
-        if state_path.exists():
-            state = json.loads(state_path.read_text(encoding="utf-8"))
-            custom = state.get("presets", {})
-            if isinstance(custom, dict):
-                return custom
+        path = _state_path()
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
     except Exception:
-        logger.debug("Chargement presets personnalisés impossible", exc_info=True)
+        logger.debug("Lecture ui_state.json impossible", exc_info=True)
     return {}
 
 
-def _resolve_preset(key: str) -> tuple[dict | None, str]:
-    name = _normalize_key(key)
-    base = PRESETS.get(name)
-    if not base:
-        return None, name
-    preset = copy.deepcopy(base)
-    custom = _load_custom_presets().get(name, {})
-    if isinstance(custom, dict) and custom:
-        preset.update(custom)
-    return preset, name
+def _patch_ui_state(updates: dict) -> None:
+    """Met à jour quelques clés de ui_state.json sans écraser le reste (ex: presets)."""
+    try:
+        path = _state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = _load_ui_state()
+        data.update(updates)
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        logger.exception("Écriture ui_state.json impossible")
+
+
+def _load_custom_presets() -> dict:
+    custom = _load_ui_state().get("presets", {})
+    return custom if isinstance(custom, dict) else {}
+
+
+def _load_config_presets() -> dict:
+    """Lit la section `presets:` de config.yaml (jusqu'ici ignorée)."""
+    try:
+        with app_paths.config_path().open("r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        presets = cfg.get("presets", {})
+        if isinstance(presets, dict):
+            return {_normalize_key(k): v for k, v in presets.items() if isinstance(v, dict)}
+    except Exception:
+        logger.debug("Lecture presets config.yaml impossible", exc_info=True)
+    return {}
 
 
 def _as_app_list(value) -> list[str]:
@@ -102,39 +129,58 @@ def _as_app_list(value) -> list[str]:
     return []
 
 
+def get_merged_presets() -> dict[str, dict]:
+    """Fusionne défauts + config.yaml + customs UI. Tous tes modes, une seule source."""
+    config = _load_config_presets()
+    custom = _load_custom_presets()
+    keys = list(PRESETS.keys())
+    for k in list(config.keys()) + list(custom.keys()):
+        if k not in keys:
+            keys.append(k)
+
+    merged: dict[str, dict] = {}
+    for key in keys:
+        item = copy.deepcopy(PRESETS.get(key, {}))
+        if isinstance(config.get(key), dict):
+            item.update(config[key])
+        if isinstance(custom.get(key), dict):
+            item.update(custom[key])
+        item.setdefault("label", PRESETS.get(key, {}).get("label", key.capitalize()))
+        item.setdefault("icon", PRESETS.get(key, {}).get("icon", "⚡"))
+        merged[key] = item
+    return merged
+
+
 def list_presets() -> list[str]:
-    return list(PRESETS.keys())
+    return list(get_merged_presets().keys())
+
+
+def match_in_text(text: str) -> str | None:
+    """Retrouve un mode mentionné dans une phrase (gère les accents, plus long d'abord)."""
+    t = text.lower()
+    candidates: dict[str, str] = {k: k for k in get_merged_presets()}
+    candidates.update(_ALIASES)  # alias accentués (« étude », « détente »…)
+    for token in sorted(candidates, key=len, reverse=True):
+        if len(token) >= 3 and re.search(rf"\b{re.escape(token)}\b", t):
+            return _normalize_key(candidates[token])
+    return None
 
 
 def get_active_preset() -> str | None:
-    return _active_preset
+    return _load_ui_state().get("active_preset")
 
 
-def get_merged_presets() -> dict[str, dict]:
-    merged: dict[str, dict] = {}
-    custom = _load_custom_presets()
-    for key, base in PRESETS.items():
-        item = copy.deepcopy(base)
-        if isinstance(custom.get(key), dict):
-            item.update(custom[key])
-        merged[key] = item
-    return merged
+def _opened_by_mode() -> list[str]:
+    opened = _load_ui_state().get("active_preset_opened", [])
+    return [str(a) for a in opened] if isinstance(opened, list) else []
 
 
 def create_preset(name: str, config: dict) -> str:
     key = _normalize_key(name)
     try:
-        state_path = app_paths.data_dir() / "ui_state.json"
-        state_path.parent.mkdir(parents=True, exist_ok=True)
-        state: dict = {}
-        if state_path.exists():
-            state = json.loads(state_path.read_text(encoding="utf-8"))
-        presets = state.get("presets", {})
-        if not isinstance(presets, dict):
-            presets = {}
-        presets[key] = config
-        state["presets"] = presets
-        state_path.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+        custom = _load_custom_presets()
+        custom[key] = config
+        _patch_ui_state({"presets": custom})
         return f"Preset {key} enregistré."
     except Exception:
         logger.exception("Erreur création preset")
@@ -142,42 +188,76 @@ def create_preset(name: str, config: dict) -> str:
 
 
 def activate(key: str) -> str:
-    global _active_preset
-
-    preset, name = _resolve_preset(key)
+    name = _normalize_key(key)
+    merged = get_merged_presets()
+    preset = merged.get(name)
     if not preset:
-        return f"Preset {key} introuvable"
+        dispo = ", ".join(merged.keys())
+        return f"Mode « {key} » introuvable. Disponibles : {dispo}."
 
-    _active_preset = name
+    new_open = _as_app_list(preset.get("apps_open"))
+    new_open_lower = {a.lower() for a in new_open}
 
-    for app in _as_app_list(preset.get("apps_open")):
-        try:
-            apps.launch(app)
-        except Exception:
-            logger.debug("Impossible d'ouvrir %s", app, exc_info=True)
-
-    for app in _as_app_list(preset.get("apps_close")):
+    # Fermetures : apps_close explicites + apps ouvertes par le mode précédent
+    # qui ne font pas partie du nouveau mode (transition propre).
+    to_close = _as_app_list(preset.get("apps_close"))
+    for app in _opened_by_mode():
+        if app.lower() not in new_open_lower and app not in to_close:
+            to_close.append(app)
+    for app in to_close:
         try:
             apps.close(app)
         except Exception:
-            logger.debug("Impossible de fermer %s", app, exc_info=True)
+            logger.debug("Fermeture %s impossible", app, exc_info=True)
 
-    if "volume" in preset and preset["volume"] is not None and preset["volume"] != "":
+    # Ouvertures (avec retour sur ce qui a réellement démarré).
+    opened_ok: list[str] = []
+    failed: list[str] = []
+    for app in new_open:
+        try:
+            res = apps.launch(app)
+        except Exception:
+            res = "erreur"
+            logger.debug("Lancement %s impossible", app, exc_info=True)
+        (opened_ok if "lancé" in res.lower() else failed).append(app)
+
+    if preset.get("volume") not in (None, ""):
         try:
             system.set_volume(preset["volume"])
         except Exception:
             logger.debug("Réglage volume impossible", exc_info=True)
 
-    if "brightness" in preset and preset["brightness"] is not None and preset["brightness"] != "":
+    if preset.get("brightness") not in (None, ""):
         try:
             system.set_brightness(preset["brightness"])
         except Exception:
             logger.debug("Réglage luminosité impossible", exc_info=True)
 
-    return preset.get("message", f"Mode {name} activé")
+    _patch_ui_state({"active_preset": name, "active_preset_opened": opened_ok})
+
+    message = preset.get("message", f"Mode {name} activé.")
+    details: list[str] = []
+    if opened_ok:
+        details.append("ouvert : " + ", ".join(opened_ok))
+    if failed:
+        details.append("introuvable : " + ", ".join(failed))
+    return message + (" (" + " ; ".join(details) + ")" if details else "")
 
 
 def deactivate() -> str:
-    global _active_preset
-    _active_preset = None
-    return "Mode désactivé."
+    name = get_active_preset()
+    closed: list[str] = []
+    for app in _opened_by_mode():
+        try:
+            if "fermé" in apps.close(app).lower():
+                closed.append(app)
+        except Exception:
+            logger.debug("Fermeture %s impossible", app, exc_info=True)
+
+    _patch_ui_state({"active_preset": None, "active_preset_opened": []})
+
+    if name:
+        base = f"Mode {name} désactivé."
+    else:
+        base = "Aucun mode actif."
+    return base + (" Fermé : " + ", ".join(closed) + "." if closed else "")

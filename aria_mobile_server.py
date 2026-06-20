@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import secrets
 import socket
 import tempfile
@@ -36,7 +37,6 @@ logging.basicConfig(level=logging.INFO)
 PIN_CODE = "0000"
 MOBILE_PORT = 5000
 SESSIONS: dict[str, dict] = {}
-MOBILE_MODEL = "llama3.1:8b-instruct-q8_0"
 CACHE_TTL = 300
 _response_cache: dict[str, dict] = {}
 
@@ -61,6 +61,49 @@ def get_cached(text: str) -> str | None:
 def set_cached(text: str, response: str) -> None:
     key = hashlib.md5(text.lower().strip().encode()).hexdigest()
     _response_cache[key] = {"response": response, "time": time.time()}
+
+
+def _chat_model() -> str:
+    """Modèle de chat mobile : le sélecteur forcé sinon le modèle rapide.
+    Jamais le 14B par défaut (réservé au desktop / mode réflexion)."""
+    return llm.FORCED_MODEL or llm.CHAT_MODEL
+
+
+_THINK_OPEN = "<think>"
+_THINK_CLOSE = "</think>"
+
+
+def _filter_think(pending: str, in_think: bool, *, final: bool) -> tuple[str, str, bool]:
+    """Masque le contenu <think>…</think> d'un flux de tokens (modèles type qwen3).
+
+    Retourne (texte_visible, pending_restant, in_think). On retient une fin de
+    buffer potentiellement partielle pour gérer une balise coupée entre 2 tokens.
+    """
+    out = ""
+    while pending:
+        if in_think:
+            idx = pending.find(_THINK_CLOSE)
+            if idx == -1:
+                if final:
+                    return out, "", in_think
+                keep = len(_THINK_CLOSE) - 1
+                return out, pending[-keep:], in_think
+            pending = pending[idx + len(_THINK_CLOSE):]
+            in_think = False
+        else:
+            idx = pending.find(_THINK_OPEN)
+            if idx == -1:
+                if final:
+                    return out + pending, "", in_think
+                keep = len(_THINK_OPEN) - 1
+                if len(pending) <= keep:
+                    return out, pending, in_think
+                out += pending[:-keep]
+                return out, pending[-keep:], in_think
+            out += pending[:idx]
+            pending = pending[idx + len(_THINK_OPEN):]
+            in_think = True
+    return out, "", in_think
 
 
 def _load_config() -> dict:
@@ -198,23 +241,25 @@ def ask_fast():
     if cached:
         return jsonify({"response": cached, "source": "cache"})
 
-    fast = llm._fast_intent(text) if hasattr(llm, "_fast_intent") else None
-    if fast and fast != "question_libre":
+    fast = llm._fast_intent(text)
+    if fast:
+        f_intent, f_params = fast
         try:
-            params = llm._fast_intent_params(fast, text)
-            result = llm._dispatch_action(fast, params, text)
-            set_cached(text, result)
-            return jsonify({"response": result, "source": "action", "executed_on": "PC"})
+            result = llm._route_with_intelligence(f_intent, f_params, text, stream_to_ui=False)
+            if result:
+                set_cached(text, result)
+                return jsonify({"response": result, "source": "action", "executed_on": "PC"})
         except Exception:
-            pass
+            logger.exception("ask_fast: action regex échouée")
 
     try:
         response = req.post(
             "http://localhost:11434/api/generate",
             json={
-                "model": MOBILE_MODEL,
+                "model": _chat_model(),
                 "prompt": text,
                 "stream": False,
+                "keep_alive": llm.OLLAMA_KEEP_ALIVE,
                 "options": {
                     "num_predict": 150,
                     "temperature": 0.7,
@@ -241,7 +286,11 @@ def warmup():
         try:
             req.post(
                 "http://localhost:11434/api/generate",
-                json={"model": MOBILE_MODEL, "prompt": "", "keep_alive": "30m"},
+                json={
+                    "model": _chat_model(),
+                    "prompt": "",
+                    "keep_alive": llm.OLLAMA_KEEP_ALIVE,
+                },
                 timeout=30,
             )
         except Exception as exc:
@@ -296,36 +345,47 @@ def ask_stream():
         return jsonify({"error": "Texte vide"}), 400
 
     def generate():
-        intent_data = llm._detect_intent(text)
-        intent = intent_data.get("intent", "question_libre")
-        confidence = intent_data.get("confidence", 0)
-
-        if confidence > 0.8 and intent != "question_libre":
+        # 1) Action instantanée : intent détecté par REGEX (0 ms, aucun LLM).
+        #    Couvre ouvrir des apps/sites, volume, météo, presets… sans charger
+        #    le routeur 1B ni faire le moindre aller-retour modèle.
+        fast = llm._fast_intent(text)
+        if fast:
+            f_intent, f_params = fast
             try:
-                action_result = llm._dispatch_action(
-                    intent,
-                    intent_data.get("params", {}),
-                    text,
+                result = llm._route_with_intelligence(
+                    f_intent, f_params, text, stream_to_ui=False
                 )
-                if action_result:
-                    yield f"data: {json.dumps({'token': action_result, 'type': 'action'})}\n\n"
-                    yield f"data: {json.dumps({'done': True})}\n\n"
-                    return
             except Exception as exc:
                 yield f"data: {json.dumps({'error': str(exc)})}\n\n"
                 return
+            if result:
+                llm._history.append({"role": "user", "content": text})
+                llm._history.append({"role": "assistant", "content": result})
+                llm._trim_history()
+                llm._save_history()
+                memory_engine.add_to_conversation("user", text)
+                memory_engine.add_to_conversation("assistant", result)
+                yield f"data: {json.dumps({'token': result, 'type': 'action'})}\n\n"
+                yield f"data: {json.dumps({'done': True})}\n\n"
+                return
+            # result vide -> on bascule en réponse libre ci-dessous.
 
+        # 2) Réponse libre — modèle de chat RAPIDE (8B), jamais le 14B sauf
+        #    si l'utilisateur a forcé un modèle via le sélecteur.
         llm._refresh_system_prompt()
         llm._history.append({"role": "user", "content": text})
         llm._trim_history()
         memory_engine.add_to_conversation("user", text)
 
-        response = llm._ollama_request(llm._history, stream=True)
+        response = llm._ollama_request(llm._history, stream=True, model=_chat_model())
         if response is None:
+            llm._history.pop()
             yield f"data: {json.dumps({'error': 'Ollama indisponible'})}\n\n"
             return
 
         full = ""
+        pending = ""
+        in_think = False
         try:
             for line in response.iter_lines():
                 if not line:
@@ -334,18 +394,26 @@ def ask_stream():
                 token = chunk.get("message", {}).get("content", "")
                 if token:
                     full += token
-                    yield f"data: {json.dumps({'token': token})}\n\n"
+                    pending += token
+                    visible, pending, in_think = _filter_think(pending, in_think, final=False)
+                    if visible:
+                        yield f"data: {json.dumps({'token': visible})}\n\n"
                 if chunk.get("done"):
                     break
         except Exception as exc:
             yield f"data: {json.dumps({'error': str(exc)})}\n\n"
             return
 
-        if full.strip():
-            llm._history.append({"role": "assistant", "content": full})
+        visible, _, _ = _filter_think(pending, in_think, final=True)
+        if visible:
+            yield f"data: {json.dumps({'token': visible})}\n\n"
+
+        clean = re.sub(r"<think>.*?</think>", "", full, flags=re.S).strip()
+        if clean:
+            llm._history.append({"role": "assistant", "content": clean})
             llm._trim_history()
             llm._save_history()
-            memory_engine.add_to_conversation("assistant", full)
+            memory_engine.add_to_conversation("assistant", clean)
 
         yield f"data: {json.dumps({'done': True})}\n\n"
 

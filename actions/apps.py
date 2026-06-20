@@ -5,6 +5,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import psutil
@@ -742,7 +743,47 @@ def _target_is_launchable(target: str) -> bool:
     return os.path.exists(target)
 
 
+def resolve_known(name: str) -> str | None:
+    """Résolution RAPIDE : KNOWN_APPS + config uniquement, AUCUN scan disque.
+
+    Sert à savoir si « ouvre X » désigne une app installée sans payer le crawl
+    multi-secondes de `_search_everywhere`. Retourne un chemin lançable ou None.
+    """
+    _load_custom_apps()
+    n = name.lower().strip()
+    path = _resolve_app(n)
+    if path and _target_is_launchable(path):
+        return path
+    for key in KNOWN_APPS:
+        if len(key) < 3:
+            continue
+        if key == n or re.search(rf"\b{re.escape(key)}\b", n):
+            candidate = _resolve_app(key)
+            if candidate and _target_is_launchable(candidate):
+                return candidate
+    return None
+
+
+# Cache de résolution : évite de re-crawler le disque (plusieurs secondes) à
+# chaque tentative sur une app introuvable ou rarement utilisée.
+_RESOLVE_CACHE: dict[str, tuple[str | None, float]] = {}
+_RESOLVE_TTL_HIT = 3600.0   # un chemin trouvé reste valide longtemps
+_RESOLVE_TTL_MISS = 30.0    # un échec est re-tenté vite (app installée entre-temps)
+
+
 def _resolve_launch_target(name_lower: str) -> str | None:
+    now = time.time()
+    cached = _RESOLVE_CACHE.get(name_lower)
+    if cached is not None:
+        path, ts = cached
+        if now - ts < (_RESOLVE_TTL_HIT if path else _RESOLVE_TTL_MISS):
+            return path
+    result = _resolve_launch_target_uncached(name_lower)
+    _RESOLVE_CACHE[name_lower] = (result, now)
+    return result
+
+
+def _resolve_launch_target_uncached(name_lower: str) -> str | None:
     _load_custom_apps()
 
     path = _resolve_app(name_lower)

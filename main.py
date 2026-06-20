@@ -303,37 +303,37 @@ try:
 
 
     def _start_ollama() -> None:
-        ollama_manager.start()
-        if not ollama_manager.wait_until_ready(timeout=60):
+        if _logger:
+            _logger.info("Vérification Ollama...")
+        if not ollama_manager.start_ollama():
             ui.show_toast("Ollama non disponible")
+            if _logger:
+                _logger.error("Ollama non disponible — certaines fonctions seront limitées")
             return
+
+        models = ollama_manager.list_local_models()
+        if _logger:
+            _logger.info("Modèles disponibles: %s", models)
         ui.show_toast("Ollama démarré")
 
-        # Modèles : on vérifie SEULEMENT maintenant (Ollama répond).
-        loaded = ollama_manager.get_loaded_models()
-        model = str(_config.get("model", "qwen3:14b"))
-        if loaded and model not in loaded:
-            if _logger:
-                _logger.info("Modèle %s absent — pull en arrière-plan", model)
-            threading.Thread(
-                target=ollama_manager.pull_model, args=(model,), daemon=True
-            ).start()
-        elif loaded and _logger:
-            _logger.info("Modèle %s : présent", model)
-
-        # Préchauffe : modèle intent (1b) + modèle conversation rapide (8b).
         import llm
 
-        threading.Thread(
-            target=ollama_manager.warmup_model,
-            args=(llm.MODELS["intent"],),
-            daemon=True,
-        ).start()
-        threading.Thread(
-            target=ollama_manager.warmup_model,
-            args=(llm.MODELS["fast"],),
-            daemon=True,
-        ).start()
+        for role, model_name in (("intent", llm.MODELS["intent"]), ("fast", llm.MODELS["fast"])):
+            if ollama_manager.model_exists(model_name):
+                threading.Thread(
+                    target=ollama_manager.warmup_model,
+                    args=(model_name,),
+                    daemon=True,
+                ).start()
+            elif _logger:
+                _logger.warning("Modèle '%s' (%s) absent — pas de warmup", model_name, role)
+
+        if llm.FORCED_MODEL and ollama_manager.model_exists(llm.FORCED_MODEL):
+            threading.Thread(
+                target=ollama_manager.warmup_model,
+                args=(llm.FORCED_MODEL,),
+                daemon=True,
+            ).start()
 
         if _config.get("wake_word_enabled", False):
             def _on_wake():

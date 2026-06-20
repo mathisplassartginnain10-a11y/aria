@@ -4,39 +4,46 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ARIA</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     :root {
-      --bg: #0B0B0D;
-      --surface: #141417;
-      --card: #1A1A1E;
-      --hover: rgba(255,255,255,0.05);
-      --border: rgba(255,255,255,0.07);
-      --border2: rgba(255,255,255,0.14);
-      --accent: #6E7BF2;
-      --accent-2: #8E97F8;
-      --accent-bg: rgba(110,123,242,0.12);
-      --accent-glow: rgba(110,123,242,0.30);
-      --text: #F4F4F6;
-      --text2: #A4A4AD;
-      --text3: #6A6A73;
+      /* Liquid Glass iOS 26 — playground defaults */
+      --glass-blur: 22px;
+      --glass-saturate: 180%;
+      --glass-alpha: 0.10;
+      --glass-tint: 255,255,255;
+      --glass-radius: 26px;
+      --glass-rim: 0.55;
+      --accent: #7B6CF6;
+      --accent-2: #00D4FF;
+      --text: #F4F6FF;
+      --text-dim: rgba(244,246,255,0.62);
+
+      /* Legacy aliases (JS / settings) */
+      --bg: #0a0a18;
+      --surface: rgba(255,255,255,0.06);
+      --card: rgba(255,255,255,0.08);
+      --hover: rgba(255,255,255,0.08);
+      --border: rgba(255,255,255, calc(var(--glass-rim) * 0.2));
+      --border2: rgba(255,255,255, calc(var(--glass-rim) * 0.34));
+      --accent-bg: rgba(123,108,246,0.18);
+      --accent-glow: rgba(0,212,255,0.35);
+      --text2: var(--text-dim);
+      --text3: rgba(244,246,255,0.42);
       --success: #34D399;
       --warning: #FBBF24;
       --error: #F87171;
-      --user-bg: #1E1F24;
-      --user-radius: 16px;
-      --user-font: 15px;
-      --aria-font: 15px;
-      --code-bg: #0E0E11;
-      --radius: 14px;
-      --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
-      --shadow-md: 0 6px 22px rgba(0,0,0,0.38);
-      --shadow-lg: 0 18px 50px rgba(0,0,0,0.50);
-      --glass-blur: 24px;
-      --glass-alpha: 0.06;
-      --surface-solid: rgba(20,20,28,0.88);
+      --user-bg: rgba(var(--glass-tint), calc(var(--glass-alpha) + 0.06));
+      --user-radius: 18px;
+      --user-font: 14px;
+      --aria-font: 14px;
+      --code-bg: rgba(0,0,0,0.35);
+      --radius: var(--glass-radius);
+      --shadow-sm: 0 4px 14px rgba(0,0,0,0.22);
+      --shadow-md: 0 10px 34px rgba(0,0,0,0.30);
+      --shadow-lg: 0 18px 50px rgba(0,0,0,0.45);
+      --surface-solid: rgba(10,10,24,0.88);
     }
 
     body.theme-warm { --accent:#F59E0B; --accent-bg:rgba(245,158,11,0.12); }
@@ -52,20 +59,17 @@
     }
 
     body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
       background: transparent;
       color: var(--text);
       height: 100vh;
       overflow: hidden;
-      display: flex;
       position: relative;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
-      text-rendering: optimizeLegibility;
-      letter-spacing: -0.01em;
     }
 
-    /* ── Wallpaper layer (Liquid Glass v13) ── */
+    /* ── Wallpaper (playground) ── */
     #wallpaper-layer {
       position: fixed;
       inset: 0;
@@ -78,38 +82,145 @@
       inset: 0;
       background-size: cover;
       background-position: center;
-      filter: blur(0px) brightness(0.9);
+      transition: background 0.5s;
     }
-    #wallpaper-overlay {
-      position: absolute;
-      inset: 0;
-      background: rgba(0,0,0,0.15);
-    }
-    .wp-aurora    { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 35%, #0f3460 70%, #533483 100%); }
-    .wp-sunset    { background: linear-gradient(135deg, #2d1b2e 0%, #5e2750 40%, #a8456b 75%, #e8845a 100%); }
-    .wp-forest    { background: linear-gradient(135deg, #0b1e14 0%, #163d2c 50%, #1f5c3d 100%); }
-    .wp-midnight  { background: linear-gradient(135deg, #050510 0%, #0a0a20 50%, #14143a 100%); }
-    .wp-mono      { background: #0C0C0F; }
-    .wp-mesh {
+    #wallpaper-overlay { display: none; }
+
+    .wp-mesh, .wp-mesh-animated {
       background:
-        radial-gradient(at 20% 30%, rgba(108,142,255,0.25) 0px, transparent 50%),
-        radial-gradient(at 80% 20%, rgba(167,139,250,0.2) 0px, transparent 50%),
-        radial-gradient(at 50% 80%, rgba(74,222,128,0.15) 0px, transparent 50%),
-        #0C0C0F;
+        radial-gradient(at 18% 22%, #5b2bd6 0px, transparent 45%),
+        radial-gradient(at 82% 18%, #00d4ff 0px, transparent 42%),
+        radial-gradient(at 75% 82%, #ff3d8b 0px, transparent 45%),
+        radial-gradient(at 22% 78%, #1c2bff 0px, transparent 45%),
+        #0a0a18;
+    }
+    .wp-aurora {
+      background:
+        radial-gradient(at 30% 30%, #00ffa3 0px, transparent 40%),
+        radial-gradient(at 70% 35%, #00a3ff 0px, transparent 45%),
+        radial-gradient(at 50% 80%, #7b2bff 0px, transparent 50%),
+        #04060f;
+    }
+    .wp-sunset {
+      background:
+        radial-gradient(at 25% 80%, #ff7a18 0px, transparent 45%),
+        radial-gradient(at 80% 70%, #ff2d7e 0px, transparent 45%),
+        radial-gradient(at 60% 15%, #5b2bd6 0px, transparent 50%),
+        #160820;
+    }
+    .wp-dark, .wp-mono, .wp-midnight { background: #0b0b12; }
+    .wp-photo, .wp-forest {
+      background: linear-gradient(135deg, #1f2937, #0f172a 40%, #312e81 75%, #0f172a);
     }
     .wp-mesh-animated {
-      background:
-        radial-gradient(at 20% 30%, rgba(108,142,255,0.25) 0px, transparent 50%),
-        radial-gradient(at 80% 20%, rgba(167,139,250,0.2) 0px, transparent 50%),
-        radial-gradient(at 50% 80%, rgba(74,222,128,0.15) 0px, transparent 50%),
-        #0C0C0F;
       background-size: 200% 200%;
       animation: meshShift 30s ease-in-out infinite alternate;
     }
     @keyframes meshShift {
-      0%   { background-position: 0% 0%, 100% 0%, 50% 100%; }
-      100% { background-position: 30% 20%, 70% 30%, 60% 80%; }
+      0%   { background-position: 0% 0%, 100% 0%, 50% 100%, 30% 70%; }
+      100% { background-position: 30% 20%, 70% 30%, 60% 80%, 10% 90%; }
     }
+
+    /* ── Liquid Glass material (playground iOS 26) ── */
+    .glass {
+      position: relative;
+      background: rgba(var(--glass-tint), var(--glass-alpha));
+      backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) brightness(1.08);
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) brightness(1.08);
+      border: 1px solid rgba(255,255,255, calc(var(--glass-rim) * 0.34));
+      border-radius: var(--glass-radius);
+      box-shadow:
+        inset 0 1px 0 0 rgba(255,255,255, calc(var(--glass-rim) * 0.9)),
+        inset 0 -1px 1px 0 rgba(0,0,0,0.18),
+        inset 0 0 22px 0 rgba(255,255,255, calc(var(--glass-rim) * 0.07)),
+        0 10px 34px rgba(0,0,0,0.30);
+      overflow: hidden;
+    }
+    .glass::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      border-radius: inherit;
+      background: linear-gradient(135deg,
+        rgba(255,255,255, calc(var(--glass-rim) * 0.22)) 0%,
+        rgba(255,255,255,0) 42%,
+        rgba(255,255,255,0) 60%,
+        rgba(255,255,255, calc(var(--glass-rim) * 0.10)) 100%);
+      mix-blend-mode: screen;
+    }
+    .ontop { position: relative; z-index: 1; }
+
+    /* ── Stage layout (playground) ── */
+    #app-stage.stage {
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 22px;
+      gap: 16px;
+      min-height: 0;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 18px;
+      flex-shrink: 0;
+    }
+    .topbar-logo {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: radial-gradient(circle at 35% 30%, var(--accent-2), var(--accent));
+      box-shadow: 0 0 18px var(--accent-2);
+    }
+    .topbar-brand .brand {
+      font-weight: 600;
+      letter-spacing: 4px;
+      font-size: 15px;
+    }
+    .topbar-brand .sub {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 1px;
+    }
+    .spacer { flex: 1; }
+    .pill {
+      padding: 7px 13px;
+      border-radius: 14px;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .body-row {
+      flex: 1;
+      display: flex;
+      gap: 16px;
+      min-height: 0;
+    }
+    .dock {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      padding: 12px;
+      flex-shrink: 0;
+    }
+    .gbtn {
+      width: 46px;
+      height: 46px;
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      cursor: pointer;
+      transition: transform 0.15s;
+      border: none;
+      color: var(--text);
+      font-family: inherit;
+    }
+    .gbtn:hover { transform: translateY(-3px) scale(1.05); }
+    .gbtn.active { color: var(--accent-2); }
     .wallpaper-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
     .wp-thumb { height: 60px; border-radius: 12px; cursor: pointer; border: 2px solid transparent; transition: border-color 0.15s; }
     .wp-thumb:hover, .wp-thumb.active { border-color: var(--accent); }
@@ -135,10 +246,12 @@
       -webkit-backdrop-filter: none !important;
     }
     body.no-glass #sidebar, body.no-glass #header,
-    body.no-glass #input-zone, body.no-glass #settings-panel {
-      background: var(--surface) !important;
+    body.no-glass #chat-column, body.no-glass #input-zone,
+    body.no-glass #dock, body.no-glass #settings-panel {
+      background: var(--surface-solid) !important;
       background-image: none !important;
     }
+    body.no-glass .glass::before { display: none; }
 
     .glass-btn {
       background: rgba(255,255,255,0.08);
@@ -203,42 +316,32 @@
     }
     .theme-swatch:active { transform: scale(0.95); }
 
-    /* ── Sidebar ── */
+    /* ── Sidebar panel ── */
     #sidebar {
-      width: 264px;
-      background: rgba(20,20,28, var(--glass-alpha));
-      backdrop-filter: blur(var(--glass-blur)) saturate(180%);
-      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
-      border-right: 0.5px solid rgba(255,255,255,0.1);
+      width: 236px;
+      padding: 16px;
       display: flex;
       flex-direction: column;
-      flex-shrink: 0;
-    }
-
-    .sidebar-brand {
-      display: flex;
-      align-items: center;
       gap: 10px;
-      padding: 16px 20px;
-      border-bottom: 0.5px solid rgba(255,255,255,0.08);
+      flex-shrink: 0;
+      min-height: 0;
+      border-right: none;
+      background: rgba(18, 18, 26, 0.6);
+      backdrop-filter: blur(24px) saturate(180%);
+      box-shadow: 4px 0 20px rgba(0,0,0,0.15);
+    }
+    #sidebar > .ontop {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
     }
 
-    .sidebar-brand-text { flex: 1; min-width: 0; }
+    .sidebar-brand { display: none; }
 
-    .sidebar-brand #assistant-name {
-      font-size: 16px;
-      font-weight: 600;
-      color: var(--text);
-      letter-spacing: 1px;
-    }
-
-    .sidebar-brand #status-text {
-      font-size: 11px;
-      color: var(--text3);
-      margin-top: 2px;
-      text-align: left;
-      padding: 0;
-    }
+    #orb-canvas { display: none; }
 
     /* ── Logo JARVIS (v14) ── */
     #aria-logo {
@@ -292,12 +395,6 @@
       backdrop-filter: blur(8px);
     }
 
-    #orb-canvas {
-      display: block;
-      margin: 4px auto 0;
-      opacity: 1;
-    }
-
     .sidebar-sep {
       height: 1px;
       background: var(--border);
@@ -311,10 +408,10 @@
     }
 
     .nav-item {
-      padding: 9px 12px;
-      border-radius: 8px;
+      padding: 9px 11px;
+      border-radius: 13px;
       font-size: 13px;
-      color: var(--text2);
+      color: var(--text-dim);
       cursor: pointer;
       transition: background 0.15s, color 0.15s;
       display: flex;
@@ -324,11 +421,12 @@
     }
 
     .nav-item:hover, .nav-item.active {
-      background: var(--hover);
+      background: rgba(var(--glass-tint), calc(var(--glass-alpha) + 0.08));
       color: var(--text);
+      border: 1px solid rgba(255,255,255, calc(var(--glass-rim) * 0.3));
     }
 
-    .nav-item.active { background: var(--accent-bg); color: var(--accent); }
+    .nav-item.active { color: var(--text); }
 
     .conv-item { padding:8px 10px;border-radius:6px;cursor:pointer;margin-bottom:2px;transition:background 0.15s; }
     .conv-item:hover { background:var(--hover); }
@@ -345,30 +443,53 @@
     .stat-val { font-size: 16px; font-weight: 600; color: var(--accent); }
     .stat-label { font-size: 10px; color: var(--text3); margin-top: 2px; }
 
-    .sidebar-section-label {
-      font-size: 10px;
-      color: var(--text3);
-      letter-spacing: 0.8px;
+    .sidebar-section-label, .panel h3 {
+      font-size: 12px;
+      letter-spacing: 2px;
+      color: var(--text-dim);
+      font-weight: 600;
+      margin-bottom: 4px;
       text-transform: uppercase;
-      padding: 8px 12px 4px;
+      padding: 8px 0 4px;
     }
 
-    .preset-row {
-      padding: 8px 12px;
-      border-radius: 8px;
+    .navrow, .preset-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 11px;
+      border-radius: 13px;
       font-size: 13px;
-      color: var(--text2);
+      color: var(--text-dim);
+      width: 100%;
+      text-align: left;
+      font-family: inherit;
       cursor: pointer;
-      transition: background 0.15s, color 0.15s;
       margin-bottom: 2px;
+      border: 1px solid transparent;
+      background: transparent;
+      transition: background 0.15s, color 0.15s;
     }
-
-    .preset-row:hover { background: var(--hover); color: var(--text); }
-    .preset-row.active { background: var(--accent-bg); color: var(--accent); }
+    .nav-item:hover, .navrow:hover, .preset-row:hover {
+      color: var(--text);
+      background: rgba(var(--glass-tint), calc(var(--glass-alpha) + 0.04));
+    }
+    .nav-item.active, .navrow.active, .preset-row.active {
+      background: rgba(var(--glass-tint), calc(var(--glass-alpha) + 0.08));
+      border: 1px solid rgba(255,255,255, calc(var(--glass-rim) * 0.3));
+      color: var(--text);
+    }
+    .nav-dot, .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      flex-shrink: 0;
+    }
 
     .sidebar-footer {
       padding: 12px 16px 16px;
-      border-top: 1px solid var(--border);
+      border-top: none;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -392,49 +513,56 @@
       color: var(--text3);
     }
 
-    /* ── Main ── */
-    #main {
+    .body-row #main {
       flex: 1;
+      min-width: 0;
+      min-height: 0;
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      min-width: 0;
+      background: transparent;
     }
 
     #header {
-      height: 56px;
-      display: grid;
-      grid-template-columns: 1fr auto 1fr;
+      height: auto;
+      display: flex;
       align-items: center;
-      padding: 0 24px;
+      gap: 14px;
+      padding: 14px 18px;
       flex-shrink: 0;
-      border-bottom: 0.5px solid rgba(255,255,255,0.08);
-      background: rgba(20,20,28, calc(var(--glass-alpha) + 0.02));
-      backdrop-filter: blur(var(--glass-blur)) saturate(180%);
-      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+      border-bottom: none;
+      background: transparent;
+      backdrop-filter: none;
+      box-shadow: 0 1px 20px rgba(0,0,0,0.08);
       z-index: 5;
     }
 
-    #header-title {
+    #header-title, #assistant-name {
+      font-weight: 600;
+      letter-spacing: 4px;
       font-size: 15px;
-      font-weight: 500;
-      color: var(--text2);
-      text-align: center;
-      letter-spacing: -0.01em;
+      color: var(--text);
+      text-align: left;
+    }
+
+    #status-text {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 1px;
     }
 
     .header-actions {
       display: flex;
       gap: 8px;
       align-items: center;
-      justify-self: end;
     }
 
-    .header-left {
-      display: flex;
-      align-items: center;
-      justify-self: start;
-    }
+    .header-left { display: flex; align-items: center; gap: 8px; }
+
+    #header .header-actions .hbtn,
+    #header #mic-btn,
+    #header #device-toggle,
+    #header #stop-btn { display: none; }
 
     .model-picker {
       position: relative;
@@ -477,12 +605,14 @@
       max-width: min(360px, 90vw);
       max-height: 320px;
       overflow-y: auto;
-      background: var(--card);
-      border: 1px solid var(--border2);
-      border-radius: 12px;
-      box-shadow: var(--shadow-lg);
+      background: rgba(var(--glass-tint), calc(var(--glass-alpha) + 0.12));
+      backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-saturate));
+      -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-saturate));
+      border: 1px solid rgba(255,255,255, calc(var(--glass-rim) * 0.34));
+      border-radius: calc(var(--glass-radius) - 4px);
+      box-shadow: 0 10px 34px rgba(0,0,0,0.35);
       z-index: 1000;
-      padding: 6px;
+      padding: 8px;
     }
 
     .model-picker.open .model-picker-menu {
@@ -661,19 +791,23 @@
       flex: 1;
       display: flex;
       flex-direction: column;
+      gap: 16px;
       overflow: hidden;
-      max-width: 720px;
+      min-height: 0;
+      max-width: none;
       width: 100%;
-      margin: 0 auto;
+      margin: 0;
+      padding: 18px;
     }
 
     #chat-messages {
       flex: 1;
       overflow-y: auto;
-      padding: 32px 20px 16px;
       display: flex;
       flex-direction: column;
-      gap: 28px;
+      gap: 16px;
+      padding: 24px 20px;
+      min-height: 0;
     }
 
     #empty-state {
@@ -693,15 +827,15 @@
     #empty-state .empty-icon {
       width: 52px;
       height: 52px;
-      border-radius: 16px;
-      background: linear-gradient(135deg, var(--accent-2), var(--accent));
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, var(--accent-2), var(--accent));
       color: #fff;
       display: flex;
       align-items: center;
       justify-content: center;
       font-size: 24px;
       font-weight: 700;
-      box-shadow: 0 10px 34px var(--accent-glow);
+      box-shadow: 0 0 18px var(--accent-2);
     }
 
     #empty-state .empty-title {
@@ -715,37 +849,55 @@
       color: var(--text3);
     }
 
-    /* ── Bubbles ── */
+    /* ── Bubbles (playground) ── */
     .bubble-user {
       align-self: flex-end;
-      max-width: 85%;
-      background: rgba(108,142,255, 0.18);
-      backdrop-filter: blur(20px) saturate(160%);
-      -webkit-backdrop-filter: blur(20px) saturate(160%);
-      border: 0.5px solid rgba(108,142,255,0.3);
-      border-radius: 20px 20px 6px 20px;
-      padding: 13px 17px;
+      max-width: 74%;
+      padding: 14px 18px;
+      border-radius: 18px 18px 4px 18px;
       font-size: var(--user-font);
-      line-height: 1.7;
+      line-height: 1.45;
       animation: glassMorphIn 0.4s cubic-bezier(0.34, 1.4, 0.64, 1);
       white-space: pre-wrap;
       word-break: break-word;
       color: var(--text);
-      box-shadow: 0 1px 0 rgba(255,255,255,0.1) inset, 0 4px 16px rgba(0,0,0,0.15);
+      background: rgba(108,142,255,0.12);
+      border: none;
+      box-shadow: 0 2px 12px rgba(108,142,255,0.1);
+      backdrop-filter: none;
     }
 
-    .bubble-user.center { align-self: center; }
+    .bubble-user.accent-bubble {
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: #fff;
+      border: none;
+      box-shadow: 0 6px 22px rgba(0,0,0,0.25);
+    }
 
     .bubble-aria-wrap {
       align-self: flex-start;
-      max-width: 100%;
+      max-width: 74%;
       display: flex;
-      gap: 14px;
+      gap: 10px;
       animation: glassMorphIn 0.4s cubic-bezier(0.34, 1.4, 0.64, 1);
     }
 
-    .bubble-aria-wrap.center { align-self: center; }
     .bubble-aria-wrap.no-avatar .bubble-avatar { display: none; }
+
+    .bubble-content {
+      font-size: var(--aria-font);
+      line-height: 1.45;
+      color: var(--text);
+      padding: 14px 18px;
+      border-radius: 4px 18px 18px 18px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: rgba(255,255,255,0.04);
+      border: none;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) brightness(1.08);
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) brightness(1.08);
+    }
 
     .bubble-avatar {
       width: 28px;
@@ -763,19 +915,7 @@
 
     .bubble-body { flex: 1; min-width: 0; }
 
-    .bubble-content {
-      font-size: var(--aria-font);
-      line-height: 1.75;
-      color: var(--text);
-      background: rgba(255,255,255, 0.05);
-      backdrop-filter: blur(16px) saturate(150%);
-      -webkit-backdrop-filter: blur(16px) saturate(150%);
-      border: 0.5px solid rgba(255,255,255,0.08);
-      border-radius: 6px 20px 20px 20px;
-      padding: 14px 18px;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
+    .bubble-user.center, .bubble-aria-wrap.center { align-self: center; }
 
     .bubble-content code {
       background: var(--code-bg);
@@ -832,14 +972,13 @@
       animation: blink 1s step-end infinite;
     }
 
-    /* ── Input zone (Dynamic Island) ── */
+    /* ── Input zone ── */
     #input-bar {
-      position: sticky;
-      bottom: 0;
-      background: linear-gradient(to top, rgba(11,11,13,0.85) 55%, transparent);
-      padding: 12px 0 24px;
-      max-width: 720px;
-      margin: 0 auto;
+      position: relative;
+      background: transparent;
+      padding: 0;
+      max-width: none;
+      margin: 0;
       width: 100%;
       flex-shrink: 0;
     }
@@ -848,21 +987,21 @@
       display: flex;
       align-items: flex-end;
       gap: 8px;
-      background: rgba(255,255,255,0.07);
-      backdrop-filter: blur(28px) saturate(180%);
-      -webkit-backdrop-filter: blur(28px) saturate(180%);
-      border: 0.5px solid rgba(255,255,255,0.12);
-      border-radius: 26px;
-      padding: 8px 8px 8px 12px;
-      margin: 0 20px;
-      transition: border-radius 0.3s, transform 0.2s, border-color 0.2s;
-      box-shadow: 0 4px 24px rgba(0,0,0,0.2);
+      background: rgba(255,255,255,0.06);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 24px;
+      padding: 6px 6px 6px 16px;
+      margin: 8px 16px 16px;
+      box-shadow: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
     }
 
     #input-zone:focus-within {
-      border-radius: 20px;
-      transform: scale(1.01);
-      border-color: rgba(108,142,255,0.4);
+      border-color: rgba(108,142,255,0.35);
+      box-shadow: 0 0 0 3px rgba(108,142,255,0.08);
+      transform: none;
     }
 
     #text-input {
@@ -896,7 +1035,7 @@
       width: 38px;
       height: 38px;
       border-radius: 50%;
-      background: var(--accent);
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
       border: none;
       color: #fff;
       cursor: pointer;
@@ -905,7 +1044,7 @@
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
-      box-shadow: 0 4px 14px var(--accent-glow);
+      box-shadow: 0 6px 22px rgba(0,0,0,0.25);
       transition: filter 0.15s, transform 0.25s cubic-bezier(0.34, 1.2, 0.64, 1), box-shadow 0.15s;
     }
 
@@ -953,10 +1092,20 @@
 
     .settings-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
     .settings-head h2 { font-size: 16px; font-weight: 600; }
-    .settings-section { margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+    .settings-section { margin-bottom: 20px; padding-bottom: 0; border-bottom: none; }
     .settings-section:last-child { border-bottom: none; }
     .settings-title { font-size: 11px; font-weight: 600; color: var(--text3); letter-spacing: 0.8px; text-transform: uppercase; margin-bottom: 12px; }
-    .setting-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; font-size: 13px; color: var(--text2); }
+    .setting-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; padding: 6px 0; font-size: 13px; color: var(--text2); border-bottom: none; }
+    .settings-accordion { margin-bottom: 8px; }
+    .settings-accordion-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px; background: rgba(255,255,255,0.04); border-radius: 10px;
+      cursor: pointer; margin-bottom: 4px; font-size: 13px; font-weight: 500;
+      color: var(--text2); transition: background 0.15s;
+    }
+    .settings-accordion-header:hover { background: rgba(255,255,255,0.07); }
+    .settings-accordion-body { padding: 8px 14px 12px; overflow: hidden; transition: max-height 0.25s ease; }
+    .settings-accordion-body.collapsed { max-height: 0; overflow: hidden; padding: 0 14px; }
     .setting-row input[type=range] { width: 120px; accent-color: var(--accent); }
     .setting-row select, .setting-row input[type=text], .setting-row input[type=color] {
       background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px;
@@ -1243,84 +1392,31 @@
 <body class="theme-slate">
 
 <div id="wallpaper-layer">
-  <div id="wallpaper-image" class="wp-mesh-animated"></div>
+  <div id="wallpaper-image" class="wp-mesh"></div>
   <div id="wallpaper-overlay"></div>
 </div>
 
-<!-- Sidebar -->
-<aside id="sidebar">
-  <div class="sidebar-brand">
-    <div id="aria-logo" class="logo-idle">
-      <svg viewBox="0 0 64 64" width="44" height="44" aria-hidden="true">
-        <defs>
-          <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#6C8EFF"/>
-            <stop offset="100%" stop-color="#A78BFA"/>
-          </linearGradient>
-          <linearGradient id="scanGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stop-color="rgba(108,142,255,0)"/>
-            <stop offset="50%" stop-color="rgba(108,142,255,0.9)"/>
-            <stop offset="100%" stop-color="rgba(108,142,255,0)"/>
-          </linearGradient>
-        </defs>
-        <g class="logo-ticks">
-          <line x1="32" y1="2" x2="32" y2="6" class="tick" style="--i:0"/>
-          <line x1="32" y1="58" x2="32" y2="62" class="tick" style="--i:1"/>
-          <line x1="2" y1="32" x2="6" y2="32" class="tick" style="--i:2"/>
-          <line x1="58" y1="32" x2="62" y2="32" class="tick" style="--i:3"/>
-          <line x1="11" y1="11" x2="14" y2="14" class="tick" style="--i:4"/>
-          <line x1="53" y1="11" x2="50" y2="14" class="tick" style="--i:5"/>
-          <line x1="11" y1="53" x2="14" y2="50" class="tick" style="--i:6"/>
-          <line x1="53" y1="53" x2="50" y2="50" class="tick" style="--i:7"/>
-        </g>
-        <circle class="logo-scan" cx="32" cy="32" r="29" fill="none" stroke="url(#scanGrad)" stroke-width="2" stroke-dasharray="15 200" stroke-linecap="round"/>
-        <circle class="logo-arc logo-arc-1" cx="32" cy="32" r="29" fill="none" stroke="url(#logoGrad)" stroke-width="1.5" stroke-dasharray="100 82" stroke-linecap="round"/>
-        <circle class="logo-arc logo-arc-2" cx="32" cy="32" r="23" fill="none" stroke="rgba(108,142,255,0.5)" stroke-width="1.5" stroke-dasharray="70 75" stroke-linecap="round"/>
-        <circle class="logo-arc logo-arc-3" cx="32" cy="32" r="17" fill="none" stroke="rgba(167,139,250,0.4)" stroke-width="1" stroke-dasharray="50 56" stroke-linecap="round"/>
-        <circle class="logo-core" cx="32" cy="32" r="9" fill="url(#logoGrad)"/>
-        <path class="logo-mark" d="M32 26 L37 38 L34 38 L32.5 34 L31.5 34 L30 38 L27 38 Z" fill="rgba(12,12,15,0.9)"/>
-      </svg>
+<div id="app-stage" class="stage">
+
+  <header id="header" class="topbar glass">
+    <div class="topbar-logo ontop" aria-hidden="true"></div>
+    <div class="topbar-brand ontop">
+      <div id="header-title" class="brand">A R I A</div>
+      <div id="status-text" class="sub">En veille</div>
+      <span id="assistant-name" class="sr-only">ARIA</span>
     </div>
-    <div class="sidebar-brand-text">
-      <div id="assistant-name">ARIA</div>
-      <div id="status-text">En veille</div>
-    </div>
-  </div>
-
-  <canvas id="orb-canvas" width="200" height="80"></canvas>
-
-  <div class="sidebar-sep"></div>
-
-  <div class="sidebar-nav">
-    <button type="button" onclick="aria.startNewConversation()" style="margin:8px;width:calc(100% - 16px);padding:8px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:8px;color:var(--accent);cursor:pointer;font-family:inherit;font-size:13px">
-      ✏️ Nouvelle conversation
-    </button>
-    <div style="padding:0 8px;font-size:10px;color:var(--text3);letter-spacing:1px;margin:8px 0 4px">HISTORIQUE</div>
-    <div id="conv-list" style="overflow-y:auto;max-height:180px;padding:0 8px"></div>
-    <div class="sidebar-section-label">Modes</div>
-    <div id="presets-list"></div>
-  </div>
-
-  <div class="sidebar-footer">
-    <button type="button" title="Paramètres" onclick="aria.toggleSettings()">⚙</button>
-    <span class="sidebar-version">v2.0.0</span>
-  </div>
-</aside>
-
-<!-- Main -->
-<main id="main">
-  <header id="header">
-    <div class="header-left">
+    <div class="spacer"></div>
+    <div class="header-left ontop">
       <div id="model-picker" class="model-picker">
-        <button type="button" id="model-picker-btn" class="model-picker-btn" onclick="aria.toggleModelMenu(event)" title="Choisir le modèle">
+        <button type="button" id="model-picker-btn" class="pill glass" onclick="aria.toggleModelMenu(event)" title="Choisir le modèle">
           <span id="model-picker-label">Auto</span>
-          <span class="model-picker-chevron">▾</span>
+          <span class="model-picker-chevron"> ▾</span>
         </button>
         <div id="model-picker-menu" class="model-picker-menu"></div>
       </div>
     </div>
-    <h1 id="header-title">ARIA</h1>
-    <div class="header-actions">
+    <div id="active-preset-pill" class="pill glass ontop">Mode libre</div>
+    <div class="header-actions ontop">
       <span id="weather-clock" class="sr-only" aria-hidden="true"></span>
       <span id="model-display" class="sr-only" aria-hidden="true"></span>
       <button type="button" class="hbtn glass-btn" title="Exporter en PDF" onclick="aria.exportCurrentConversation()">📄</button>
@@ -1330,44 +1426,92 @@
     </div>
   </header>
 
-  <div id="focus-indicator" style="display:none;position:fixed;top:12px;right:12px;background:rgba(167,139,250,0.15);border:1px solid rgba(167,139,250,0.3);color:#A78BFA;font-size:11px;padding:4px 10px;border-radius:8px;z-index:50">
-    🎯 Mode focus
-  </div>
+  <div class="body-row">
+    <aside id="sidebar" class="panel glass">
+      <div class="ontop">
+        <h3>NAVIGATION</h3>
+        <button type="button" class="navrow active" onclick="aria.startNewConversation()"><span class="dot"></span> Conversation</button>
+        <button type="button" class="navrow" onclick="aria.toggleSettings()">Apparence</button>
+        <button type="button" class="navrow" onclick="aria.toggleModelMenu(event)">Modèle · <span id="sidebar-model-label">auto</span></button>
+        <button type="button" class="navrow" onclick="aria.toggleMic()">Micro · <span id="sidebar-mic-label">prêt</span></button>
 
-  <div id="chat-column">
-    <div id="chat-messages">
-      <div id="empty-state">
-        <div class="empty-icon">A</div>
-        <div class="empty-title">Comment puis-je t'aider ?</div>
-        <div class="empty-sub">Parle ou écris un message</div>
-      </div>
-    </div>
+        <h3 style="margin-top:8px">HISTORIQUE</h3>
+        <div id="conv-list" style="overflow-y:auto;max-height:140px"></div>
+        <button
+          type="button"
+          id="conv-delete-all-btn"
+          onclick="aria.deleteAllConversations()"
+          style="width:100%;margin:6px 0 4px;padding:8px;
+                 background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);
+                 border-radius:8px;color:#f87171;font-size:11px;cursor:pointer;
+                 font-family:inherit;transition:background 0.15s"
+          onmouseenter="this.style.background='rgba(239,68,68,0.15)'"
+          onmouseleave="this.style.background='rgba(239,68,68,0.08)'"
+        >
+          🗑️ Tout supprimer
+        </button>
 
-    <div id="input-bar">
-      <div id="input-zone">
-        <div id="mic-orb-container">
-          <div class="mic-ring" id="mic-ring-1"></div>
-          <div class="mic-ring" id="mic-ring-2"></div>
-          <div class="mic-ring" id="mic-ring-3"></div>
-          <button type="button" id="input-mic-btn" title="Micro" onclick="aria.toggleMic()">🎤</button>
+        <h3 style="margin-top:8px">MODES</h3>
+        <div id="presets-list"></div>
+
+        <div class="sidebar-footer" style="margin-top:auto;padding-top:12px;display:flex;justify-content:space-between;align-items:center">
+          <button type="button" title="Paramètres" onclick="aria.toggleSettings()" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:18px">⚙</button>
+          <span class="sidebar-version" style="font-size:11px;color:var(--text-dim)">v2.0.0</span>
         </div>
-        <textarea id="text-input" rows="1" placeholder="Envoyer un message à ARIA…"></textarea>
-        <label id="file-btn" title="Joindre des fichiers">
-          📎
-          <input
-            type="file"
-            id="file-input"
-            multiple
-            accept="image/*,video/*,.pdf,.txt,.py,.js,.html,.css,.json,.yaml,.md,.csv,.xlsx,.docx"
-            style="display:none"
-            onchange="aria.handleFiles(this.files)"
-          >
-        </label>
-        <button type="button" id="send-btn" title="Envoyer" onclick="aria.sendText()">↑</button>
       </div>
-    </div>
+      <div id="aria-logo" class="logo-idle sr-only" aria-hidden="true"></div>
+      <canvas id="orb-canvas" width="200" height="80"></canvas>
+    </aside>
+
+    <main id="main">
+      <div id="focus-indicator" style="display:none;position:fixed;top:12px;right:12px;background:rgba(123,108,246,0.15);border:1px solid rgba(123,108,246,0.3);color:var(--accent);font-size:11px;padding:4px 10px;border-radius:8px;z-index:50">
+        🎯 Mode focus
+      </div>
+
+      <div id="chat-column" class="chat glass">
+        <div id="chat-messages" class="ontop">
+          <div id="empty-state">
+            <div class="empty-icon">A</div>
+            <div class="empty-title">Comment puis-je t'aider ?</div>
+            <div class="empty-sub">Parle ou écris un message</div>
+          </div>
+        </div>
+
+        <div id="input-bar" class="ontop">
+          <div id="input-zone">
+            <div id="mic-orb-container">
+              <div class="mic-ring" id="mic-ring-1"></div>
+              <div class="mic-ring" id="mic-ring-2"></div>
+              <div class="mic-ring" id="mic-ring-3"></div>
+              <button type="button" id="input-mic-btn" title="Micro" onclick="aria.toggleMic()">🎤</button>
+            </div>
+            <textarea id="text-input" rows="1" placeholder="Envoyer un message à ARIA…"></textarea>
+            <label id="file-btn" title="Joindre des fichiers">
+              📎
+              <input
+                type="file"
+                id="file-input"
+                multiple
+                accept="image/*,video/*,.pdf,.txt,.py,.js,.html,.css,.json,.yaml,.md,.csv,.xlsx,.docx"
+                style="display:none"
+                onchange="aria.handleFiles(this.files)"
+              >
+            </label>
+            <button type="button" id="send-btn" title="Envoyer" onclick="aria.sendText()">↑</button>
+          </div>
+        </div>
+      </div>
+    </main>
   </div>
-</main>
+
+  <div id="dock" class="dock glass">
+    <button type="button" class="gbtn glass ontop" id="dock-status" title="Statut" onclick="aria.cycleTheme()">◎</button>
+    <button type="button" class="gbtn glass ontop" id="dock-mic" title="Micro" onclick="aria.toggleMic()">🎙</button>
+    <button type="button" class="gbtn glass ontop" id="dock-settings" title="Paramètres" onclick="aria.toggleSettings()">⚙</button>
+    <button type="button" class="gbtn glass ontop" id="dock-presets" title="Presets" onclick="aria.toggleMobilePresets()">✈</button>
+  </div>
+
+</div>
 
 <div id="settings-panel"></div>
 
@@ -1432,7 +1576,7 @@ const aria = {
   orbCtx: null,
   reducedMotion: false,
   showTimestamps: true,
-  showAvatars: true,
+  showAvatars: false,
   ariaAlign: 'left',
   weatherText: '',
   conversationMode: null,
@@ -1468,6 +1612,7 @@ const aria = {
   wallpaperType: 'mesh-animated',
   wallpaperPath: '',
   wallpaperFilename: '',
+  _staticPort: 8765,
   WALLPAPER_STATIC_PORT: 8765,
   glassIntensity: 60,
   currentDevice: 'pc',
@@ -1657,15 +1802,25 @@ const aria = {
     if (this._initDone) return;
     this._initDone = true;
     await this.checkPin();
+    try {
+      let port = this.api('get_static_port');
+      if (port?.then) port = await port;
+      this._staticPort = Number(port) || 8765;
+      this.WALLPAPER_STATIC_PORT = this._staticPort;
+    } catch (e) {
+      this._staticPort = 8765;
+      this.WALLPAPER_STATIC_PORT = 8765;
+    }
     this.setGlassIntensity(60);
     this.orbCtx = document.getElementById('orb-canvas').getContext('2d');
     this.buildSettingsPanel();
     this.loadSettings();
-    this.restoreWallpaper();
+    await this.restoreWallpaper();
+    await this.loadWallpapers();
     this.detectDevice();
     this.loadPresets();
     this.loadConversations();
-    this.loadModelPicker();
+    await this.loadModelPicker();
     this.setStatus('idle');
     this._micActive = false;
     document.getElementById('mic-btn')?.classList.add('mic-idle');
@@ -1806,13 +1961,25 @@ const aria = {
     return { r: parseInt(h.slice(0,2),16), g: parseInt(h.slice(2,4),16), b: parseInt(h.slice(4,6),16) };
   },
 
-  show() { document.body.style.display = 'flex'; },
+  show() { document.body.style.display = 'block'; },
   hide() { document.body.style.display = 'none'; },
+
+  _formatBrandName(name) {
+    const n = (name || 'ARIA').trim().toUpperCase().replace(/\s+/g, '');
+    return n.split('').join(' ');
+  },
 
   setStatus(state) {
     this.status = state;
-    const labels = { idle:'En veille', inactive:'En veille', listening:'Écoute…', transcribing:'Transcription…', thinking:'Réflexion…', speaking:'ARIA parle…' };
-    document.getElementById('status-text').textContent = labels[state] || 'En veille';
+    const labels = { idle:'Liquid Glass · prêt', inactive:'Liquid Glass · prêt', listening:'Écoute…', transcribing:'Transcription…', thinking:'Réflexion…', speaking:'ARIA parle…' };
+    document.getElementById('status-text').textContent = labels[state] || 'Liquid Glass · prêt';
+
+    const micLabels = { idle:'prêt', inactive:'prêt', listening:'actif', transcribing:'transcrit', thinking:'prêt', speaking:'parle' };
+    const micLbl = document.getElementById('sidebar-mic-label');
+    if (micLbl) micLbl.textContent = micLabels[state] || 'prêt';
+
+    const dockMic = document.getElementById('dock-mic');
+    if (dockMic) dockMic.classList.toggle('active', state === 'listening' || state === 'transcribing');
 
     const micStateMap = {
       idle: 'idle',
@@ -1839,7 +2006,8 @@ const aria = {
   setMicState(state) {
     const inputBtn = document.getElementById('input-mic-btn');
     const headerBtn = document.getElementById('mic-btn');
-    const buttons = [inputBtn, headerBtn].filter(Boolean);
+    const dockBtn = document.getElementById('dock-mic');
+    const buttons = [inputBtn, headerBtn, dockBtn].filter(Boolean);
 
     buttons.forEach(btn => {
       btn.classList.remove('mic-idle', 'mic-listening', 'mic-speaking-detected', 'active', 'listening', 'speaking');
@@ -1849,9 +2017,12 @@ const aria = {
     this._micRmsHistory = [];
     this._speechDetected = false;
 
-    const icons = { idle: '🎤', listening: '🎤', transcribing: '⏳', paused: '⏸️' };
-    const icon = icons[state] || '🎤';
-    buttons.forEach(btn => { btn.textContent = icon; });
+    const icons = { idle: '🎤', listening: '🎙', transcribing: '⏳', paused: '⏸️' };
+    const dockIcons = { idle: '🎙', listening: '🎙', transcribing: '⏳', paused: '⏸️' };
+    buttons.forEach(btn => {
+      const isDock = btn.id === 'dock-mic';
+      btn.textContent = isDock ? (dockIcons[state] || '🎙') : (icons[state] || '🎤');
+    });
 
     if (state === 'listening') {
       buttons.forEach(btn => btn.classList.add('mic-listening'));
@@ -1932,16 +2103,19 @@ const aria = {
   },
 
   setGlassIntensity(value) {
-    const v = Math.max(0, Math.min(100, Number(value) || 0));
-    const blur = 4 + (v / 100) * 36;
-    const alpha = 0.18 - (v / 100) * 0.16;
-    document.documentElement.style.setProperty('--glass-blur', `${blur}px`);
-    document.documentElement.style.setProperty('--glass-alpha', String(alpha));
+    const v = Math.max(0, Math.min(100, Number(value) || 60));
+    const ratio = v / 60;
+    document.documentElement.style.setProperty('--glass-blur', `${Math.round(22 * ratio)}px`);
+    document.documentElement.style.setProperty('--glass-alpha', (0.10 * ratio).toFixed(3));
+    document.documentElement.style.setProperty('--glass-saturate', `${Math.round(180 * ratio)}%`);
+    document.documentElement.style.setProperty('--glass-rim', (0.55 * ratio).toFixed(2));
+    document.documentElement.style.setProperty('--glass-radius', `${Math.round(26 * ratio)}px`);
     this.glassIntensity = v;
   },
 
   _wallpaperHttpUrl(filename) {
-    return `http://127.0.0.1:${this.WALLPAPER_STATIC_PORT}/wallpapers/${encodeURIComponent(filename)}`;
+    const port = this._staticPort || this.WALLPAPER_STATIC_PORT || 8765;
+    return `http://127.0.0.1:${port}/wallpapers/${encodeURIComponent(filename)}`;
   },
 
   _resolveCustomWallpaperUrl(s) {
@@ -1989,27 +2163,30 @@ const aria = {
   },
 
   restoreWallpaper() {
-    const p = this.api('load_settings');
-    if (!p?.then) return;
-    p.then(raw => {
-      try {
-        const s = JSON.parse(raw || '{}');
-        if (!s.wallpaper_type) return;
+    return new Promise(resolve => {
+      const p = this.api('load_settings');
+      if (!p?.then) { resolve(); return; }
+      p.then(raw => {
+        try {
+          const s = JSON.parse(raw || '{}');
+          if (!s.wallpaper_type) { resolve(); return; }
 
-        if (s.wallpaper_type === 'custom') {
-          const url = this._resolveCustomWallpaperUrl(s);
-          if (url) {
-            this.setWallpaper('custom', url, true);
-            this.wallpaperFilename = s.wallpaper_filename
-              || url.split('/').pop()?.split('?')[0]
-              || '';
+          if (s.wallpaper_type === 'custom') {
+            const url = this._resolveCustomWallpaperUrl(s);
+            if (url) {
+              this.setWallpaper('custom', url, true);
+              this.wallpaperFilename = s.wallpaper_filename
+                || url.split('/').pop()?.split('?')[0]
+                || '';
+            }
+          } else {
+            this.setWallpaper(s.wallpaper_type, null, true);
           }
-        } else {
-          this.setWallpaper(s.wallpaper_type, null, true);
+        } catch (e) {
+          console.warn('restoreWallpaper', e);
         }
-      } catch (e) {
-        console.warn('restoreWallpaper', e);
-      }
+        resolve();
+      }).catch(() => resolve());
     });
   },
 
@@ -2091,6 +2268,10 @@ const aria = {
 
       if (result.success) {
         this.showToast('Image importée ✓', 'success');
+        if (result.port) {
+          this._staticPort = result.port;
+          this.WALLPAPER_STATIC_PORT = result.port;
+        }
         this.setWallpaper('custom', result.url);
         this.wallpaperFilename = result.filename || '';
         if (!this.wallpaperFilename && result.url) {
@@ -2349,8 +2530,30 @@ const aria = {
     try {
       let raw = this.api('is_focus_active');
       if (raw?.then) raw = await raw;
-      this.updateFocusIndicator(raw === true || raw === 'true');
+      const active = raw === true || raw === 'true';
+      this.updateFocusIndicator(active);
+      const el = document.getElementById('set-focus');
+      if (el) el.checked = active;
     } catch (e) { /* ignore */ }
+  },
+
+  async toggleFocusMode(enabled) {
+    const p = this.api('set_focus_mode', enabled);
+    if (p?.then) await p;
+    this.updateFocusIndicator(enabled);
+    this.showToast(enabled ? 'Mode focus activé' : 'Mode focus désactivé', 'info');
+  },
+
+  async setDeviceIndex(value) {
+    const p = this.api('set_stt_device_index', value);
+    if (p?.then) await p;
+    this.showToast('Périphérique micro mis à jour', 'success');
+  },
+
+  async setWhisperModel(value) {
+    const p = this.api('set_whisper_model', value);
+    if (p?.then) await p;
+    this.showToast('Modèle Whisper : ' + value, 'success');
   },
 
   async loadConfigFlags() {
@@ -2362,10 +2565,16 @@ const aria = {
       const rt = document.getElementById('set-realtime-stt');
       const db = document.getElementById('set-daily-brief');
       const gm = document.getElementById('set-german-mode');
+      const fc = document.getElementById('set-focus');
+      const di = document.getElementById('set-device-index');
+      const wm = document.getElementById('set-whisper-model');
       if (ww) ww.checked = !!d.wake_word_enabled;
       if (rt) rt.checked = !!d.realtime_transcription;
       if (db) db.checked = d.daily_brief_enabled !== false;
       if (gm) gm.checked = !!d.german_mode;
+      if (fc) fc.checked = !!d.focus_mode;
+      if (di && d.device_index != null) di.value = d.device_index;
+      if (wm && d.whisper_model) wm.value = d.whisper_model;
     } catch (e) { console.warn('loadConfigFlags', e); }
   },
 
@@ -2413,10 +2622,25 @@ const aria = {
     this.refreshClockLine();
   },
 
-  setModel(name) {
+  async _fetchAvailableModels() {
+    const fn = window.pywebview?.api?.get_available_models;
+    if (!fn) {
+      throw new Error('API pywebview indisponible');
+    }
+    const raw = await Promise.resolve(fn());
+    if (typeof raw === 'string') {
+      return JSON.parse(raw || '{}');
+    }
+    return raw || {};
+  },
+
+  setModel(roleOrName, modelName) {
+    if (modelName !== undefined) {
+      return this._applyModelRole(roleOrName, modelName);
+    }
     const el = document.getElementById('model-display');
-    if (el) el.textContent = name ? name : '';
-    this.updateModelPickerLabel(name || 'auto');
+    if (el) el.textContent = roleOrName ? roleOrName : '';
+    this.updateModelPickerLabel(roleOrName || 'auto');
   },
 
   normModelId(id) {
@@ -2425,30 +2649,131 @@ const aria = {
 
   async loadModelPicker() {
     try {
-      let raw = this.api('get_available_models');
-      if (raw?.then) raw = await raw;
-      const data = JSON.parse(raw || '{}');
+      const data = await this._fetchAvailableModels();
       this._modelPickerData = data;
       this.renderModelMenu(data);
       this.updateModelPickerLabel(data.current || 'auto');
     } catch (e) {
       console.warn('loadModelPicker', e);
+      const menu = document.getElementById('model-picker-menu');
+      if (menu) {
+        menu.innerHTML = `<div class="model-option-sub" style="padding:10px 12px;color:var(--text3)">
+          Impossible de charger les modèles — Ollama démarré ?
+        </div>`;
+      }
+    }
+  },
+
+  toggleAccordion(id) {
+    const body = document.getElementById(`acc-${id}`);
+    const chevron = document.getElementById(`chevron-${id}`);
+    if (!body) return;
+
+    const isCollapsed = body.classList.contains('collapsed');
+    body.classList.toggle('collapsed', !isCollapsed);
+    if (chevron) chevron.textContent = isCollapsed ? '▾' : '▸';
+
+    if (id === 'modeles' && isCollapsed) {
+      this.loadModelSettings();
+    }
+  },
+
+  async loadModelSettings() {
+    const container = document.getElementById('model-settings');
+    if (!container) return;
+
+    container.innerHTML = '<div style="color:var(--text3);font-size:12px">Chargement...</div>';
+
+    let data;
+    try {
+      data = await this._fetchAvailableModels();
+    } catch (e) {
+      container.innerHTML = `<div style="color:var(--error);font-size:12px">Erreur: ${this.esc(e.message || e)}</div>`;
+      return;
+    }
+
+    if (!data.ollama_running) {
+      container.innerHTML = `
+        <div style="color:var(--error,#f87171);font-size:12px;padding:10px;
+                    background:rgba(239,68,68,0.08);border-radius:8px">
+          ⚠️ Ollama non disponible<br>
+          <span style="opacity:0.7">Lance Ollama puis redémarre ARIA</span>
+        </div>`;
+      return;
+    }
+
+    if (!data.local_models || data.local_models.length === 0) {
+      container.innerHTML = `
+        <div style="color:var(--text3);font-size:12px;padding:10px">
+          Aucun modèle installé.<br>
+          <code style="font-size:10px">ollama pull llama3.2:1b</code>
+        </div>`;
+      return;
+    }
+
+    const roles = [
+      { key: 'intent', label: '⚡ Classification (1B)', desc: 'Ultra-rapide' },
+      { key: 'fast', label: '💬 Réponses rapides', desc: 'Quotidien' },
+      { key: 'heavy', label: '🧠 Analyse approfondie', desc: 'Maths, aviation' },
+      { key: 'vision', label: '👁️ Vision (images)', desc: 'Photos, docs' },
+    ];
+    const configured = data.configured || {};
+
+    container.innerHTML = roles.map(r => `
+      <div style="margin-bottom:12px">
+        <div style="font-size:12px;color:var(--text2);font-weight:500">${r.label}</div>
+        <div style="font-size:10px;color:var(--text3);margin-bottom:5px">${r.desc}</div>
+        <select
+          id="model-select-${r.key}"
+          style="width:100%;background:var(--surface,#1a1a24);border:1px solid var(--border,rgba(255,255,255,0.08));
+                 border-radius:8px;padding:7px 10px;color:var(--text,#f1f1f3);
+                 font-family:inherit;font-size:12px;cursor:pointer;outline:none"
+          onchange="aria.setModel('${r.key}', this.value)"
+        >
+          ${data.local_models.map(m => `
+            <option value="${this.esc(m)}" ${this.normModelId(m) === this.normModelId(configured[r.key]) ? 'selected' : ''}>
+              ${this.esc(m)}
+            </option>
+          `).join('')}
+        </select>
+      </div>
+    `).join('');
+  },
+
+  async _applyModelRole(role, modelName) {
+    try {
+      const fn = window.pywebview?.api?.set_model;
+      if (!fn) throw new Error('API set_model indisponible');
+      const raw = await Promise.resolve(fn(role, modelName));
+      const result = JSON.parse(raw || '{}');
+      if (result.success) {
+        this.showToast(`${role} → ${modelName}`, 'success');
+        this.loadModelPicker();
+      } else {
+        this.showToast('Erreur: ' + (result.error || '?'), 'error');
+      }
+    } catch (e) {
+      this.showToast('Erreur set_model: ' + (e.message || e), 'error');
     }
   },
 
   updateModelPickerLabel(current) {
     const label = document.getElementById('model-picker-label');
     const btn = document.getElementById('model-picker-btn');
+    const sidebarLbl = document.getElementById('sidebar-model-label');
     if (!label) return;
     const cur = current || 'auto';
     if (cur === 'auto') {
       label.textContent = 'Auto';
       if (btn) btn.title = 'Auto — rapide + réflexion si besoin';
+      if (sidebarLbl) sidebarLbl.textContent = 'auto';
       return;
     }
     const options = this._modelPickerData?.options || [];
     const match = options.find(o => this.normModelId(o.id) === this.normModelId(cur));
-    label.textContent = match?.label || this.normModelId(cur);
+    const short = match?.label || this.normModelId(cur);
+    label.textContent = short;
+    if (sidebarLbl) sidebarLbl.textContent = short.toLowerCase();
     if (btn) btn.title = match?.subtitle || cur;
   },
 
@@ -2456,7 +2781,27 @@ const aria = {
     const menu = document.getElementById('model-picker-menu');
     if (!menu) return;
     const current = data.current || 'auto';
-    const options = data.options || [];
+    let options = data.options || [];
+
+    if ((!options.length || (options.length === 1 && options[0].id === 'auto'))
+        && data.local_models?.length) {
+      options = [
+        { id: 'auto', label: 'Auto', subtitle: 'Routage intelligent' },
+        ...data.local_models.map(m => ({
+          id: m,
+          label: this.normModelId(m),
+          subtitle: 'Installé localement',
+        })),
+      ];
+    }
+
+    if (!options.length) {
+      menu.innerHTML = `<div class="model-option-sub" style="padding:10px 12px;color:var(--text3)">
+        ${data.ollama_running ? 'Aucun modèle installé' : 'Ollama non disponible'}
+      </div>`;
+      return;
+    }
+
     menu.innerHTML = options.map(opt => {
       const active = this.normModelId(opt.id) === this.normModelId(current);
       return `<button type="button" class="model-option${active ? ' active' : ''}" onclick="aria.pickModel(${JSON.stringify(opt.id)})">
@@ -2468,7 +2813,10 @@ const aria = {
 
   toggleModelMenu(event) {
     event?.stopPropagation();
-    document.getElementById('model-picker')?.classList.toggle('open');
+    const picker = document.getElementById('model-picker');
+    const willOpen = !picker?.classList.contains('open');
+    if (willOpen) this.loadModelPicker();
+    picker?.classList.toggle('open');
   },
 
   closeModelMenu() {
@@ -2810,21 +3158,132 @@ const aria = {
       let raw = this.api('get_conversations');
       if (raw?.then) raw = await raw;
       const convs = JSON.parse(raw || '[]');
-      const list = document.getElementById('conv-list');
-      if (!list) return;
-      list.innerHTML = convs.slice(0, 20).map(c => `
-        <div class="conv-item" onclick="aria.openConversation('${this.esc(c.id)}')" title="${this.esc(c.title)}">
-          <div class="conv-title">${this.esc(c.title)}</div>
-          <div class="conv-meta">${this.esc(c.date)} · ${c.count} msgs</div>
+      if (!this.currentConversationId) {
+        let id = this.api('get_current_conversation_id');
+        if (id?.then) id = await id;
+        this.currentConversationId = id;
+      }
+      this.renderConversationList(convs);
+    } catch (e) {
+      console.warn('loadConversations', e);
+    }
+  },
+
+  refreshConversationList() {
+    return this.loadConversations();
+  },
+
+  renderConversationList(conversations) {
+    const list = document.getElementById('conv-list');
+    if (!list) return;
+
+    if (!conversations || conversations.length === 0) {
+      list.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--text3)">Aucune conversation</div>';
+      return;
+    }
+
+    list.innerHTML = conversations.slice(0, 20).map(conv => {
+      const isActive = conv.id === this.currentConversationId;
+      const title = this.esc(conv.title || 'Nouvelle conversation');
+      const dateRaw = conv.updated_at || conv.date || '';
+      const date = dateRaw ? new Date(dateRaw).toLocaleDateString('fr-FR') : '';
+      const count = conv.count != null ? ` · ${conv.count} msgs` : '';
+
+      return `
+        <div
+          class="conversation-item ${isActive ? 'active' : ''}"
+          id="conv-item-${this.esc(conv.id)}"
+          style="position:relative;display:flex;align-items:center;gap:6px;
+                 padding:10px 12px;border-radius:10px;cursor:pointer;
+                 margin-bottom:2px;transition:background 0.15s;
+                 background:${isActive ? 'rgba(108,142,255,0.12)' : 'transparent'}"
+          onmouseenter="this.querySelector('.conv-delete-btn').style.opacity='1'"
+          onmouseleave="this.querySelector('.conv-delete-btn').style.opacity='0'"
+        >
+          <div onclick="aria.openConversation('${this.esc(conv.id)}')"
+               style="flex:1;min-width:0;overflow:hidden">
+            <div style="font-size:13px;color:var(--text);white-space:nowrap;
+                        overflow:hidden;text-overflow:ellipsis">${title}</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:2px">${date}${count}</div>
+          </div>
+          <button
+            type="button"
+            class="conv-delete-btn"
+            data-title="${title}"
+            onclick="event.stopPropagation(); aria.deleteConversation('${this.esc(conv.id)}', this.dataset.title)"
+            style="opacity:0;flex-shrink:0;background:rgba(239,68,68,0.15);
+                   border:none;border-radius:6px;width:24px;height:24px;
+                   color:#f87171;cursor:pointer;font-size:12px;
+                   display:flex;align-items:center;justify-content:center;
+                   transition:opacity 0.15s, background 0.15s;padding:0"
+            title="Supprimer cette conversation"
+          >✕</button>
         </div>
-      `).join('');
-    } catch (e) {}
+      `;
+    }).join('');
+  },
+
+  async deleteConversation(convId, title) {
+    const label = title || 'cette conversation';
+    if (!confirm(`Supprimer "${label}" ?\n\nCette action est irréversible.`)) return;
+
+    try {
+      const fn = window.pywebview?.api?.delete_conversation;
+      if (!fn) throw new Error('API indisponible');
+      const raw = await Promise.resolve(fn(convId));
+      const result = JSON.parse(raw || '{}');
+
+      if (result.success) {
+        document.getElementById(`conv-item-${convId}`)?.remove();
+        this.showToast('Conversation supprimée', 'success');
+
+        if (convId === this.currentConversationId) {
+          const remaining = document.querySelectorAll('.conversation-item');
+          if (remaining.length > 0) {
+            const firstId = remaining[0].id.replace('conv-item-', '');
+            await this.openConversation(firstId);
+          } else {
+            await this.startNewConversation();
+          }
+        } else {
+          await this.refreshConversationList();
+        }
+      } else {
+        this.showToast('Erreur lors de la suppression', 'error');
+      }
+    } catch (e) {
+      this.showToast('Erreur: ' + (e.message || e), 'error');
+    }
+  },
+
+  async deleteAllConversations() {
+    const count = document.querySelectorAll('.conversation-item').length;
+    if (!count) {
+      this.showToast('Aucune conversation à supprimer', 'info');
+      return;
+    }
+    if (!confirm(`Supprimer les ${count} conversation(s) ?\n\nCette action est irréversible.`)) return;
+
+    try {
+      const fn = window.pywebview?.api?.delete_all_conversations;
+      if (!fn) throw new Error('API indisponible');
+      const raw = await Promise.resolve(fn());
+      const result = JSON.parse(raw || '{}');
+      if (result.success) {
+        this.showToast(`${result.count} conversation(s) supprimée(s)`, 'success');
+        await this.startNewConversation();
+        await this.refreshConversationList();
+      }
+    } catch (e) {
+      this.showToast('Erreur: ' + (e.message || e), 'error');
+    }
   },
 
   async openConversation(id) {
     let raw = this.api('load_conversation', id);
     if (raw?.then) raw = await raw;
     const messages = JSON.parse(raw || '[]');
+    this.currentConversationId = id;
     document.querySelectorAll('.bubble-user,.bubble-aria-wrap').forEach(e => e.remove());
     this.updateEmpty();
     messages.forEach(m => {
@@ -3032,8 +3491,10 @@ const aria = {
   activatePreset(key, label, evt) {
     const p = this.api('activate_preset', key);
     if (p?.then) p.then(msg => this.showToast(msg, 'success'));
-    document.querySelectorAll('.preset-row').forEach(r => r.classList.remove('active'));
+    document.querySelectorAll('.preset-row, .navrow').forEach(r => r.classList.remove('active'));
     evt?.currentTarget?.classList.add('active');
+    const pill = document.getElementById('active-preset-pill');
+    if (pill) pill.textContent = label || key;
   },
 
   cycleTheme() {
@@ -3105,12 +3566,17 @@ const aria = {
     };
   },
 
+  setSetting(key, value) {
+    let p = this.api('set_setting', key, value);
+    if (p?.then) p.catch(() => {});
+  },
+
   saveSettings() {
     this.applyBubbleStyles();
     const s = this.collectSettings();
     if (s.assistant_name) {
       document.getElementById('assistant-name').textContent = s.assistant_name;
-      document.getElementById('header-title').textContent = s.assistant_name;
+      document.getElementById('header-title').textContent = this._formatBrandName(s.assistant_name);
     }
     document.body.style.opacity = s.opacity;
     this.reducedMotion = s.reduced_motion;
@@ -3173,7 +3639,7 @@ const aria = {
             this.setWallpaper(d.wallpaper_type, null, true);
           }
         } else {
-          this.setWallpaper('mesh-animated', '', true);
+          this.setWallpaper('mesh', '', true);
         }
         this.loadWallpapers();
         const fields = [
@@ -3202,7 +3668,7 @@ const aria = {
         });
         if (d.assistant_name) {
           document.getElementById('assistant-name').textContent = d.assistant_name;
-          document.getElementById('header-title').textContent = d.assistant_name;
+          document.getElementById('header-title').textContent = this._formatBrandName(d.assistant_name);
         }
         if (d.device_mode) this.setDevice(d.device_mode, true);
         this.applyBubbleStyles();
@@ -3222,7 +3688,7 @@ const aria = {
     this.presetKeys.forEach(k => {
       const p = merged[k];
       const row = document.createElement('div');
-      row.className = 'preset-row';
+      row.className = 'preset-row navrow';
       row.textContent = `${p.icon} ${p.label}`;
       row.onclick = e => this.activatePreset(k, `${p.icon} ${p.label}`, e);
       list.appendChild(row);
@@ -3422,8 +3888,14 @@ const aria = {
         <button class="hbtn" onclick="aria.toggleSettings(false)">✕</button>
       </div>
 
+      <div class="settings-accordion">
+        <div class="settings-accordion-header" onclick="aria.toggleAccordion('apparence')">
+          🎨 Apparence <span id="chevron-apparence">▾</span>
+        </div>
+        <div class="settings-accordion-body" id="acc-apparence">
+
       <div class="settings-section">
-        <div class="settings-title">Apparence</div>
+        <div class="settings-title">Thème &amp; verre</div>
         <div class="theme-grid">
           <div class="theme-swatch active" data-theme="slate" style="background:#FF6B35" onclick="aria.setTheme('slate',this)">Slate</div>
           <div class="theme-swatch" data-theme="warm" style="background:#F59E0B" onclick="aria.setTheme('warm',this)">Warm</div>
@@ -3477,14 +3949,14 @@ const aria = {
         </div>
       </div>
 
-      <div class="settings-section">
-        <div class="settings-title">Modes / Presets</div>
-        <button type="button" class="settings-btn" style="margin-bottom:10px;width:100%" onclick="aria.refreshInstalledApps()">🔄 Rafraîchir la liste</button>
-        <div id="settings-presets"></div>
+        </div>
       </div>
 
-      <div class="settings-section">
-        <div class="settings-title">Voix &amp; Audio</div>
+      <div class="settings-accordion">
+        <div class="settings-accordion-header" onclick="aria.toggleAccordion('voix')">
+          🎙️ Voix <span id="chevron-voix">▸</span>
+        </div>
+        <div class="settings-accordion-body collapsed" id="acc-voix">
         <div class="setting-row">
           <label style="font-weight:500;color:var(--text)">Parole activée</label>
           <input type="checkbox" id="set-tts-enabled" onchange="aria.onTtsToggle(this.checked)">
@@ -3518,6 +3990,90 @@ const aria = {
           <input type="checkbox" id="set-german-mode" onchange="aria.toggleGermanMode(this.checked)">
         </div>
         <button class="settings-btn" onclick="aria.showToast('Test voix bientôt disponible','info')">Tester la voix</button>
+      </div>
+
+        </div>
+      </div>
+
+      <div class="settings-accordion">
+        <div class="settings-accordion-header" onclick="aria.toggleAccordion('modeles')">
+          🤖 Modèles IA <span id="chevron-modeles">▸</span>
+        </div>
+        <div class="settings-accordion-body collapsed" id="acc-modeles">
+          <div id="model-settings">
+            <div style="color:var(--text3);font-size:12px">Chargement...</div>
+          </div>
+          <button class="settings-btn" onclick="aria.loadModelSettings()" style="margin-top:8px">
+            🔄 Rafraîchir
+          </button>
+          <div class="setting-row" style="margin-top:12px">
+            <label>Routage auto</label>
+            <input type="checkbox" id="set-auto-route" checked onchange="aria.saveSettings()">
+          </div>
+          <div class="setting-row">
+            <label>Code (Nexus)</label>
+            <span id="nexus-model-status" style="font-size:11px;color:var(--text3)">En attente de Nexus</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-accordion">
+        <div class="settings-accordion-header" onclick="aria.toggleAccordion('micro')">
+          🎤 Micro <span id="chevron-micro">▸</span>
+        </div>
+        <div class="settings-accordion-body collapsed" id="acc-micro">
+          <div class="setting-row">
+            <label>Device index</label>
+            <input type="number" id="set-device-index" placeholder="auto" min="0" max="200"
+              style="width:70px;background:var(--surface);border:1px solid var(--border);
+                     border-radius:6px;padding:4px 8px;color:var(--text);font-size:12px"
+              onchange="aria.setDeviceIndex(this.value)">
+          </div>
+          <div class="setting-row">
+            <label>Modèle Whisper</label>
+            <select id="set-whisper-model" onchange="aria.setWhisperModel(this.value)"
+              style="background:var(--surface);border:1px solid var(--border);border-radius:6px;
+                     padding:4px 8px;color:var(--text);font-size:12px">
+              <option value="tiny">Tiny (rapide)</option>
+              <option value="base">Base</option>
+              <option value="small">Small (recommandé)</option>
+              <option value="medium">Medium (précis)</option>
+            </select>
+          </div>
+          <div class="setting-row"><label>Seuil silence</label><input type="range" id="set-silence-th" min="100" max="2000" value="500" oninput="aria.saveSettings()"></div>
+          <div class="setting-row"><label>Durée silence</label><input type="range" id="set-silence-dur" min="0.5" max="3" step="0.1" value="2" oninput="aria.saveSettings()"></div>
+          <div class="setting-row"><label>Auto au démarrage</label><input type="checkbox" id="set-auto-mic" onchange="aria.saveSettings()"></div>
+        </div>
+      </div>
+
+      <div class="settings-accordion">
+        <div class="settings-accordion-header" onclick="aria.toggleAccordion('systeme')">
+          ⚙️ Système <span id="chevron-systeme">▸</span>
+        </div>
+        <div class="settings-accordion-body collapsed" id="acc-systeme">
+        <div class="setting-row">
+          <label>Mode focus</label>
+          <input type="checkbox" id="set-focus" onchange="aria.toggleFocusMode(this.checked)">
+        </div>
+        <div class="setting-row">
+          <label>Nexus (local)</label>
+          <span id="nexus-status" style="font-size:11px;color:var(--text3)">Non configuré</span>
+        </div>
+        <button class="settings-btn" onclick="aria.checkNexusStatus()">Vérifier Nexus</button>
+        <div class="setting-row"><label>Toujours visible</label><input type="checkbox" id="set-always-top" onchange="aria.saveSettings()"></div>
+        <div class="setting-row">
+          <label>Quitter Ollama à la fermeture</label>
+          <input type="checkbox" id="set-kill-ollama" checked onchange="aria.setSetting('kill_ollama_on_exit', this.checked)">
+        </div>
+        <button class="settings-btn" onclick="aria.api('open_file','config.yaml')">Ouvrir config.yaml</button>
+        <button class="settings-btn" onclick="aria.api('open_file','assistant-vocal.log')">Voir les logs</button>
+        <button class="settings-btn" onclick="aria.confirmQuit()">Quitter ARIA</button>
+        <div class="setting-row" style="margin-top:8px"><span style="font-size:11px;color:var(--text3)">ARIA v2.0.0</span></div>
+
+      <div class="settings-section">
+        <div class="settings-title">Modes / Presets</div>
+        <button type="button" class="settings-btn" style="margin-bottom:10px;width:100%" onclick="aria.refreshInstalledApps()">🔄 Rafraîchir la liste</button>
+        <div id="settings-presets"></div>
       </div>
 
       <div class="settings-section">
@@ -3631,50 +4187,6 @@ const aria = {
           Minimum 10 exemples requis. L'entraînement prend 2-4h sur RTX 5080.
           Le nouveau modèle <code style="background:var(--card);padding:2px 4px;border-radius:3px">aria-custom</code> sera disponible dans Ollama.
         </div>
-      </div>
-
-      <div class="settings-section">
-        <div class="settings-title">Modèles</div>
-        <div class="setting-row"><label>Rapide</label>
-          <select id="set-model-fast" onchange="aria.saveSettings()">
-            <option value="llama3.1:8b-instruct-q8_0">llama3.1:8b</option>
-            <option value="qwen3:14b">qwen3:14b</option>
-            <option value="qwen2.5-coder:14b">qwen2.5-coder:14b</option>
-          </select>
-        </div>
-        <div class="setting-row"><label>Lourd</label>
-          <select id="set-model-heavy" onchange="aria.saveSettings()">
-            <option value="qwen3:14b">qwen3:14b</option>
-            <option value="llama3.1:8b-instruct-q8_0">llama3.1:8b</option>
-            <option value="qwen2.5-coder:14b">qwen2.5-coder:14b</option>
-          </select>
-        </div>
-        <div class="setting-row">
-          <label>Code (Nexus)</label>
-          <span id="nexus-model-status" style="font-size:11px;color:var(--text3)">En attente de Nexus</span>
-        </div>
-        <div class="setting-row"><label>Routage auto</label><input type="checkbox" id="set-auto-route" checked onchange="aria.saveSettings()"></div>
-      </div>
-
-      <div class="settings-section">
-        <div class="settings-title">Micro</div>
-        <div class="setting-row"><label>Seuil silence</label><input type="range" id="set-silence-th" min="100" max="2000" value="500" oninput="aria.saveSettings()"></div>
-        <div class="setting-row"><label>Durée silence</label><input type="range" id="set-silence-dur" min="0.5" max="3" step="0.1" value="2" oninput="aria.saveSettings()"></div>
-        <div class="setting-row"><label>Auto au démarrage</label><input type="checkbox" id="set-auto-mic" onchange="aria.saveSettings()"></div>
-      </div>
-
-      <div class="settings-section">
-        <div class="settings-title">Système</div>
-        <div class="setting-row">
-          <label>Nexus (local)</label>
-          <span id="nexus-status" style="font-size:11px;color:var(--text3)">Non configuré</span>
-        </div>
-        <button class="settings-btn" onclick="aria.checkNexusStatus()">Vérifier Nexus</button>
-        <div class="setting-row"><label>Toujours visible</label><input type="checkbox" id="set-always-top" onchange="aria.saveSettings()"></div>
-        <button class="settings-btn" onclick="aria.api('open_file','config.yaml')">Ouvrir config.yaml</button>
-        <button class="settings-btn" onclick="aria.api('open_file','assistant-vocal.log')">Voir les logs</button>
-        <button class="settings-btn" onclick="aria.confirmQuit()">Quitter ARIA</button>
-        <div class="setting-row" style="margin-top:8px"><span style="font-size:11px;color:var(--text3)">ARIA v2.0.0</span></div>
       </div>`;
   },
 

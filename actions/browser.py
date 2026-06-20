@@ -628,21 +628,57 @@ def _get_browser_exe() -> str:
 
 
 def _resolve_browser_exe(browser: str | None = None) -> str:
-    """Retourne l'exécutable du navigateur demandé, ou Chrome/Edge par défaut."""
+    """Retourne l'exécutable du navigateur demandé, ou Chrome/Edge par défaut.
+
+    Honore les navigateurs réellement installés (Firefox, Brave, Vivaldi, Opera…)
+    via leurs chemins connus, puis via la config/registre (apps.py), au lieu de
+    retomber silencieusement sur Chrome.
+    """
     if browser:
-        browser_lower = browser.lower()
-        if "edge" in browser_lower:
-            for path in (EDGE_PATH64, EDGE_PATH):
-                if os.path.exists(path):
-                    return path
-        elif "firefox" in browser_lower:
-            firefox = r"C:\Program Files\Mozilla Firefox\firefox.exe"
-            if os.path.exists(firefox):
-                return firefox
-        elif "opera" in browser_lower:
-            opera = os.path.expandvars(r"%LOCALAPPDATA%\Programs\Opera GX\opera.exe")
-            if os.path.exists(opera):
-                return opera
+        bl = browser.lower().strip()
+        known_paths: list[str] = []
+        if "edge" in bl:
+            known_paths = [EDGE_PATH64, EDGE_PATH]
+        elif "firefox" in bl:
+            known_paths = [
+                r"C:\Program Files\Mozilla Firefox\firefox.exe",
+                r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe",
+            ]
+        elif "opera" in bl:
+            known_paths = [
+                os.path.expandvars(r"%LOCALAPPDATA%\Programs\Opera GX\opera.exe"),
+                os.path.expandvars(r"%LOCALAPPDATA%\Programs\Opera\opera.exe"),
+            ]
+        elif "brave" in bl:
+            known_paths = [
+                os.path.expandvars(
+                    r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\Application\brave.exe"
+                ),
+                r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+            ]
+        elif "vivaldi" in bl:
+            known_paths = [
+                os.path.expandvars(r"%LOCALAPPDATA%\Vivaldi\Application\vivaldi.exe"),
+                r"C:\Program Files\Vivaldi\Application\vivaldi.exe",
+            ]
+        elif "chrome" in bl or "google" in bl:
+            known_paths = list(CHROME_PATHS)
+
+        for path in known_paths:
+            if os.path.exists(path):
+                return path
+
+        # Repli : config apps + registre + menu démarrer (résolution générale).
+        if bl not in ("navigateur", "le navigateur"):
+            try:
+                from actions import apps
+
+                resolved = apps._resolve_launch_target(bl)
+                if resolved and resolved.lower().endswith(".exe") and os.path.exists(resolved):
+                    return resolved
+            except Exception:
+                logger.debug("Résolution navigateur via apps échouée", exc_info=True)
+
     return _get_browser_exe()
 
 

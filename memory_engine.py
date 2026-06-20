@@ -266,10 +266,70 @@ class MemoryEngine:
                 "id": c["id"],
                 "title": c.get("title", "Conversation"),
                 "date": c.get("date", "")[:10],
+                "updated_at": c.get("date", ""),
                 "count": len(c.get("messages", [])),
             }
             for c in self.conversations
         ]))
+
+    def delete_conversation(self, conv_id: str) -> bool:
+        """Supprime une conversation par son ID. Retourne True si supprimée."""
+        original_len = len(self.conversations)
+        self.conversations = [c for c in self.conversations if c.get("id") != conv_id]
+        deleted = len(self.conversations) < original_len
+        if not deleted:
+            return False
+
+        conv_file = app_paths.data_dir() / "conversations" / f"{conv_id}.json"
+        if conv_file.exists():
+            try:
+                conv_file.unlink()
+            except OSError:
+                logger.warning("Impossible de supprimer %s", conv_file)
+
+        if self.current_conversation_id == conv_id:
+            if self.conversations:
+                last = self.conversations[-1]
+                self.current_conversation_id = last["id"]
+                self.current_conversation = copy.deepcopy(last)
+                if "messages" not in self.current_conversation:
+                    self.current_conversation["messages"] = []
+            else:
+                self.current_conversation_id = self._new_conversation_id()
+                self.current_conversation = {
+                    "id": self.current_conversation_id,
+                    "title": "Nouvelle conversation",
+                    "date": datetime.now().isoformat(),
+                    "messages": [],
+                }
+
+        save_json(CONVERSATIONS_PATH, self.conversations)
+        logger.info("Conversation supprimée: %s", conv_id)
+        return True
+
+    def delete_all_conversations(self) -> int:
+        """Supprime toutes les conversations. Retourne le nombre supprimées."""
+        count = len(self.conversations)
+        self.conversations = []
+
+        conv_dir = app_paths.data_dir() / "conversations"
+        if conv_dir.exists():
+            for path in conv_dir.glob("*.json"):
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+
+        self.current_conversation_id = self._new_conversation_id()
+        self.current_conversation = {
+            "id": self.current_conversation_id,
+            "title": "Nouvelle conversation",
+            "date": datetime.now().isoformat(),
+            "messages": [],
+        }
+        save_json(CONVERSATIONS_PATH, self.conversations)
+        logger.info("Toutes les conversations supprimées (%d)", count)
+        return count
 
     def load_conversation(self, conv_id: str) -> list:
         for conv in self.conversations:
@@ -681,6 +741,14 @@ def new_conversation() -> str:
 
 def get_conversations_list() -> list:
     return get_engine().get_conversations_list()
+
+
+def delete_conversation(conv_id: str) -> bool:
+    return get_engine().delete_conversation(conv_id)
+
+
+def delete_all_conversations() -> int:
+    return get_engine().delete_all_conversations()
 
 
 def load_conversation(conv_id: str) -> list:

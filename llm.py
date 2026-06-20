@@ -49,11 +49,17 @@ with _CONFIG_PATH.open("r", encoding="utf-8") as f:
     _config = yaml.safe_load(f)
 
 MODELS: dict[str, str] = {
-    'fast':   'llama3.1:8b-instruct-q8_0',
-    'medium': 'llama3.1:8b-instruct-q8_0',
-    'heavy':  'qwen3:14b',
-    'intent': 'llama3.2:1b',
+    "fast": "llama3.1:8b-instruct-q8_0",
+    "medium": "llama3.1:8b-instruct-q8_0",
+    "heavy": "qwen3:14b",
+    "intent": "llama3.2:1b",
+    "vision": "minicpm-v",
 }
+
+_cfg_models = (_config.get("models") or {}) if isinstance(_config, dict) else {}
+for _role, _name in _cfg_models.items():
+    if _role in MODELS and _name:
+        MODELS[_role] = str(_name)
 
 KNOWN_INTENTS = [
     'lancer_app', 'fermer_app', 'volume', 'meteo', 'heure_date', 'minuteur',
@@ -76,23 +82,216 @@ CHAT_MODEL: str = _config.get("chat_model", MODEL_FAST)
 OLLAMA_KEEP_ALIVE: str = str(_config.get("ollama_keep_alive", "30m"))
 # Modèle de RÉFLEXION : activé seulement pour les questions complexes (raisonnement profond).
 REASONING_MODEL: str = _config.get("reasoning_model", MODEL_HEAVY)
+
+
+def _load_ui_state() -> dict:
+    path = app_paths.data_dir() / "ui_state.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _load_forced_model() -> str | None:
+    active = _config.get("active_model")
+    if active and active != "auto":
+        return str(active)
+    active = _load_ui_state().get("active_model")
+    if active and active != "auto":
+        return str(active)
+    return None
+
+
+def _load_auto_routing() -> bool:
+    ui_state = _load_ui_state()
+    if "auto_routing" in ui_state:
+        return bool(ui_state["auto_routing"])
+    return bool(_config.get("auto_routing", True))
+
+
 # Modèle FORCÉ par l'utilisateur via le sélecteur (comme Claude). None = mode « Auto »
 # (micro-routeur + chat rapide + escalade réflexion automatique selon la question).
-_active_model_cfg = _config.get("active_model")
-FORCED_MODEL: str | None = None if (not _active_model_cfg or _active_model_cfg == "auto") else str(_active_model_cfg)
+FORCED_MODEL: str | None = _load_forced_model()
+AUTO_ROUTING: bool = _load_auto_routing()
+
+
+def _atomic_write(path, text: str) -> None:
+    """Écrit via un fichier temporaire puis os.replace (atomique).
+
+    Empêche tout fichier tronqué/partiel si l'écriture est interrompue, et évite
+    qu'un autre process lise un fichier à 0 octet pendant l'écriture.
+    """
+    import os
+    import tempfile
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _patch_config(updates: dict) -> None:
+    path = app_paths.config_path()
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+    except OSError:
+        cfg = None
+    # Garde anti-corruption : ne JAMAIS réécrire config.yaml à partir d'une lecture
+    # vide (fichier momentanément tronqué par une écriture concurrente). Mieux vaut
+    # rater une synchro de réglage que d'écraser toute la config.
+    if not isinstance(cfg, dict) or not cfg:
+        logger.warning("Patch config ignoré : lecture vide/illisible de config.yaml")
+        return
+    cfg.update(updates)
+    _atomic_write(path, yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
+
+
+def _patch_ui_state(updates: dict) -> None:
+    path = app_paths.data_dir() / "ui_state.json"
+    data = _load_ui_state()
+    data.update(updates)
+    _atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def _warmup_model_async(model: str) -> None:
+    try:
+        import ollama_manager
+
+        ollama_manager.warmup_model(model)
+    except Exception as exc:
+        logger.warning("Warmup modèle %s échoué: %s", model, exc)
+
+
+def set_active_model(model_name: str) -> None:
+    """Applique le choix du sélecteur en-tête et persiste (config + ui_state)."""
+    global FORCED_MODEL
+    normalized = (model_name or "auto").strip()
+    FORCED_MODEL = None if normalized == "auto" else normalized
+    _patch_config({"active_model": normalized})
+    _patch_ui_state({"active_model": normalized})
+    logger.info("Modèle actif: %s", normalized)
+    target = FORCED_MODEL or CHAT_MODEL
+    threading.Thread(target=_warmup_model_async, args=(target,), daemon=True).start()
+
+
+def apply_model_settings(
+    *,
+    model_fast: str | None = None,
+    model_heavy: str | None = None,
+    model_code: str | None = None,
+    auto_routing: bool | None = None,
+    persist: bool = True,
+) -> None:
+    """Applique les réglages « Modèles » du panneau settings en live.
+
+    persist=False : applique seulement aux variables en mémoire, SANS réécrire
+    config.yaml / ui_state.json (utilisé à l'import — les valeurs viennent déjà
+    de ui_state, pas besoin de les réécrire, ce qui évitait les écritures
+    concurrentes qui pouvaient tronquer config.yaml)."""
+    global MODEL_FAST, MODEL_HEAVY, MODEL_CODE, CHAT_MODEL, REASONING_MODEL, AUTO_ROUTING
+
+    patches: dict = {}
+    ui_patches: dict = {}
+
+    if model_fast:
+        MODEL_FAST = model_fast
+        CHAT_MODEL = model_fast
+        patches["model_fast"] = model_fast
+        patches["chat_model"] = model_fast
+        ui_patches["model_fast"] = model_fast
+
+    if model_heavy:
+        MODEL_HEAVY = model_heavy
+        REASONING_MODEL = model_heavy
+        patches["model_heavy"] = model_heavy
+        patches["reasoning_model"] = model_heavy
+        ui_patches["model_heavy"] = model_heavy
+
+    if model_code:
+        MODEL_CODE = model_code
+        patches["model_code"] = model_code
+        ui_patches["model_code"] = model_code
+
+    if auto_routing is not None:
+        AUTO_ROUTING = bool(auto_routing)
+        patches["auto_routing"] = AUTO_ROUTING
+        ui_patches["auto_routing"] = AUTO_ROUTING
+
+    if persist and patches:
+        _patch_config(patches)
+    if persist and ui_patches:
+        _patch_ui_state(ui_patches)
+
+    if not FORCED_MODEL and model_fast:
+        threading.Thread(target=_warmup_model_async, args=(CHAT_MODEL,), daemon=True).start()
+
+
+# Au démarrage : synchroniser les réglages « Modèles » sauvegardés dans ui_state.json.
+_startup_ui = _load_ui_state()
+if _startup_ui:
+    apply_model_settings(
+        model_fast=_startup_ui.get("model_fast") or None,
+        model_heavy=_startup_ui.get("model_heavy") or None,
+        model_code=_startup_ui.get("model_code") or None,
+        auto_routing=_startup_ui.get("auto_routing") if "auto_routing" in _startup_ui else None,
+        persist=False,
+    )
 
 HEAVY_KEYWORDS = (
+    "calcule",
+    "démontre",
+    "demontre",
+    "résous",
+    "resous",
+    "intégrale",
+    "integrale",
+    "dérivée",
+    "derivee",
+    "équation",
+    "equation",
+    "probabilité",
+    "probabilite",
     "explique en détail",
     "analyse approfondie",
     "architecture",
-    "démontre",
     "étape par étape",
+    "etape par etape",
     "raisonne",
     "compare en détail",
     "code complet",
     "optimise",
     "refactor",
+    "rédige",
+    "redige",
+    "metar",
+    "taf",
+    "plan de vol",
 )
+
+ACTIONS_1B = frozenset({
+    "lancer_app",
+    "fermer_app",
+    "volume",
+    "heure_date",
+    "minuteur",
+    "preset",
+    "browser_open_site",
+    "browser_youtube_search",
+    "browser_search_in_site",
+    "meteo",
+})
 HEAVY_REQUIRED = frozenset({
     "math_derive",
     "math_integrate",
@@ -167,7 +366,9 @@ ACTION_PREFIXES = (
     "CHAT:",
 )
 
-OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
+OLLAMA_BASE_URL = "http://localhost:11434"
+OLLAMA_CHAT_URL = f"{OLLAMA_BASE_URL}/api/chat"
+OLLAMA_GENERATE_URL = f"{OLLAMA_BASE_URL}/api/generate"
 HISTORY_PATH = app_paths.data_dir() / "history.json"
 
 INTENTS = [
@@ -290,8 +491,6 @@ LLM_REQUIRED = frozenset({
     "traduction", "cursor_generate_code", "blague",
 })
 
-OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate"
-
 _history: list[dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
 _last_clear_time: float = 0.0
 
@@ -301,18 +500,36 @@ _BROWSER_LAUNCH_SKIP = re.compile(
     re.I,
 )
 
-BROWSER_NAMES = r"(?:microsoft\s+edge|google\s+chrome|opera\s+gx|chrome|edge|firefox|opera|navigateur|le navigateur)"
+BROWSER_NAMES = r"(?:microsoft\s+edge|google\s+chrome|opera\s+gx|chrome|edge|firefox|opera|brave|vivaldi|navigateur|le navigateur)"
+# Verbes d'ouverture, avec variantes « -moi »/« moi » accolées ou séparées.
+_OPEN_VERB = r"(?:ouvre-moi|ouvre moi|ouvre|lance-moi|lance moi|lance|d[ée]marre|mets|va sur|navigue vers)"
 SITE_OPEN_PATTERN = re.compile(
-    rf"(?:ouvre|lance|va sur|ouvre-moi|mets)\s+(.+?)\s+(?:sur|dans)\s+({BROWSER_NAMES})\b",
+    rf"{_OPEN_VERB}\s+(.+?)\s+(?:sur|dans|avec)\s+({BROWSER_NAMES})\b",
     re.IGNORECASE,
 )
 _BROWSER_APP_NAMES = frozenset({
     "chrome", "google chrome", "edge", "microsoft edge",
-    "firefox", "opera", "opera gx", "le navigateur", "navigateur",
+    "firefox", "opera", "opera gx", "brave", "vivaldi",
+    "le navigateur", "navigateur",
 })
 _SEARCH_BROWSER_NAMES = frozenset({
-    "chrome", "edge", "firefox", "opera", "le navigateur", "navigateur",
+    "chrome", "edge", "firefox", "opera", "brave", "vivaldi",
+    "le navigateur", "navigateur",
 })
+
+
+def _clean_site(site: str) -> str:
+    """Retire les amorces « le site / la page » d'un nom de site capturé.
+
+    On ne touche PAS aux articles seuls (« le monde » reste « le monde »,
+    sinon on casserait l'alias lemonde.fr)."""
+    cleaned = re.sub(
+        r"^(?:le |la |l'|mon )?(?:site|page)(?: web)?\s+",
+        "",
+        site.strip(),
+        flags=re.IGNORECASE,
+    ).strip()
+    return cleaned or site.strip()
 # Fichier de code/config — même liste d'extensions que cursor_open_file
 _CODE_FILE_RE = re.compile(
     r"([\w./\\-]+\.(?:py|ts|tsx|js|jsx|json|ya?ml|md))\b",
@@ -328,10 +545,10 @@ def _fast_intent(text: str) -> tuple[str, dict] | None:
     """Détecte l'intent + params via regex — latence 0ms."""
     text_lower = text.lower().strip()
 
-    # PRIORITY 1: « ouvre [site] sur/dans [navigateur] » → site, pas le navigateur
+    # PRIORITY 1: « ouvre [site] sur/dans/avec [navigateur] » → site, pas le navigateur
     m = SITE_OPEN_PATTERN.search(text_lower)
     if m:
-        site, browser_name = m.group(1).strip(), m.group(2).strip()
+        site, browser_name = _clean_site(m.group(1)), m.group(2).strip()
         return "browser_open_site", {"site": site, "browser": browser_name}
 
     # PRIORITY 2: « cherche [query] sur [site] »
@@ -360,8 +577,21 @@ def _fast_intent(text: str) -> tuple[str, dict] | None:
             file_m = _CODE_FILE_RE.search(text_lower)
             return ("nexus_open", {"path": file_m.group(1)}) if file_m else ("nexus_open", {})
 
+    # PRIORITY 2.8: modes / presets (« mode étude », « active le mode gaming »,
+    # « désactive le mode »…). Indispensable pour le mobile qui ne s'appuie que
+    # sur le fast-path regex depuis l'optimisation vitesse.
+    if re.search(r"\b(?:mode|preset)\b", text_lower):
+        if any(
+            w in text_lower
+            for w in ("désactive", "desactive", "quitte le mode", "sors du mode", "arrête le mode", "arrete le mode")
+        ):
+            return "preset", {}
+        preset_name = presets.match_in_text(text)
+        if preset_name:
+            return "preset", {"preset": preset_name}
+
     # PRIORITY 3: « ouvre [cible] » sans navigateur explicite
-    m = re.search(r"(?:ouvre|va sur|navigue vers)\s+(.+)", text_lower)
+    m = re.search(r"(?:ouvre-moi|ouvre moi|ouvre|va sur|navigue vers)\s+(.+)", text_lower)
     if m:
         target = m.group(1).strip()
         if _is_browser_app_name(target):
@@ -380,7 +610,12 @@ def _fast_intent(text: str) -> tuple[str, dict] | None:
             if "projet" in target:
                 return "cursor_open_project", {"name": text}
             return "cursor_open", {}
-        return "browser_open_site", {"site": target}
+        # « ouvre <app installée> » → lancer l'app (Spotify, Discord, OBS…),
+        # y compris « ouvre discord et spotify ». Sinon → site web.
+        # resolve_known est RAPIDE (pas de scan disque) pour rester en fast-path.
+        if apps.resolve_known(target):
+            return "lancer_app", {"app": target}
+        return "browser_open_site", {"site": _clean_site(target)}
 
     for pattern, intent in FAST_BROWSER_REGEX:
         if re.search(pattern, text_lower):
@@ -449,19 +684,216 @@ def _get_conversation_mode() -> str:
         return "ecrit"
 
 
-def _select_model(text: str, intent: str = "") -> str:
+def resolve_model(text: str = "", intent: str = "") -> str:
+    """Point unique de sélection — respecte le sélecteur en-tête en priorité."""
     if FORCED_MODEL:
         return FORCED_MODEL
+    if not AUTO_ROUTING:
+        return MODEL_FAST if _get_conversation_mode() == "vocal" else CHAT_MODEL
+    return _select_model(text, intent)
+
+
+def _select_model(text: str, intent: str = "") -> str:
+    """Sélection automatique — actions simples → 1B, vocal → fast uniquement, heavy si mots-clés."""
+    if intent in ACTIONS_1B:
+        return MODELS["intent"]
 
     conv_mode = _get_conversation_mode()
     if conv_mode == "vocal":
-        if intent in HEAVY_REQUIRED:
-            return MODEL_HEAVY
-        return MODEL_FAST
+        return MODELS["fast"]
 
-    if any(kw in text.lower() for kw in HEAVY_KEYWORDS):
-        return MODEL_HEAVY
-    return MODEL_FAST
+    text_lower = text.lower()
+    if any(kw in text_lower for kw in HEAVY_KEYWORDS):
+        return MODELS["heavy"]
+    if intent in HEAVY_REQUIRED:
+        return MODELS["heavy"]
+    return MODELS["fast"]
+
+
+def _ollama_available() -> bool:
+    try:
+        response = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=3)
+        return response.status_code == 200
+    except requests.RequestException:
+        return False
+
+
+def _ensure_ollama() -> None:
+    if _ollama_available():
+        return
+    logger.warning("Ollama non disponible — tentative de démarrage")
+    import ollama_manager
+
+    if not ollama_manager.start_ollama():
+        raise RuntimeError("Impossible de démarrer Ollama")
+
+
+def _resolve_model_with_fallback(model: str) -> str:
+    import ollama_manager
+
+    local = ollama_manager.list_local_models()
+    if not local:
+        return model
+    return _match_local_model(model, local)
+
+
+def _match_local_model(model: str, local_models: list[str]) -> str:
+    """Correspondance exacte, partielle (préfixe), puis premier modèle local."""
+    if not local_models:
+        return model
+
+    for name in local_models:
+        if name == model:
+            return name
+
+    base = model.split(":")[0] if model else ""
+    if base:
+        for name in local_models:
+            if base in name:
+                return name
+
+    fallback = local_models[0]
+    if fallback != model:
+        logger.warning("Modèle '%s' absent — fallback sur '%s'", model, fallback)
+    return fallback
+
+
+def set_model_role(role: str, model_name: str) -> None:
+    """Change le modèle pour un rôle (intent/fast/heavy/vision) — config + live."""
+    global MODEL_FAST, MODEL_HEAVY, CHAT_MODEL, REASONING_MODEL, INTENT_MODEL, VISION_MODEL
+
+    if role not in MODELS:
+        raise ValueError(f"Rôle inconnu: {role}")
+
+    MODELS[role] = model_name
+    patches: dict = {"models": dict(_config.get("models") or {})}
+    patches["models"][role] = model_name
+
+    if role == "fast":
+        MODEL_FAST = model_name
+        CHAT_MODEL = model_name
+        patches["model_fast"] = model_name
+        patches["chat_model"] = model_name
+    elif role == "heavy":
+        MODEL_HEAVY = model_name
+        REASONING_MODEL = model_name
+        patches["model_heavy"] = model_name
+        patches["reasoning_model"] = model_name
+    elif role == "intent":
+        INTENT_MODEL = model_name
+        patches["intent_model"] = model_name
+    elif role == "vision":
+        VISION_MODEL = model_name
+        patches["vision_model"] = model_name
+
+    _patch_config(patches)
+    logger.info("Modèle %s → %s", role, model_name)
+    threading.Thread(target=_warmup_model_async, args=(model_name,), daemon=True).start()
+
+
+def generate(
+    prompt: str,
+    model: str | None = None,
+    system: str | None = None,
+    stream: bool = True,
+    max_tokens: int = 400,
+    temperature: float = 0.7,
+    on_token=None,
+) -> str:
+    """Appel principal à Ollama /api/generate avec streaming optionnel."""
+    _ensure_ollama()
+
+    import ollama_manager
+
+    if model is None:
+        model = MODELS["fast"]
+
+    local_models = ollama_manager.list_local_models()
+    if not local_models:
+        return "Erreur : aucun modèle installé dans Ollama. Lance 'ollama pull llama3.2:1b'."
+
+    chosen = _match_local_model(model, local_models)
+    logger.info("Modèle utilisé: %s", chosen)
+
+    payload: dict = {
+        "model": chosen,
+        "prompt": prompt,
+        "stream": stream,
+        "keep_alive": OLLAMA_KEEP_ALIVE,
+        "options": {
+            "temperature": temperature,
+            "num_predict": max_tokens,
+        },
+    }
+    if system:
+        payload["system"] = system
+
+    logger.warning(
+        "═══ Ollama POST %s → model=%s stream=%s tokens=%d ═══",
+        OLLAMA_GENERATE_URL,
+        chosen,
+        stream,
+        max_tokens,
+    )
+    logger.debug("Prompt: %s", prompt[:200])
+
+    try:
+        if stream and on_token:
+            parts: list[str] = []
+            with requests.post(
+                OLLAMA_GENERATE_URL,
+                json=payload,
+                stream=True,
+                timeout=120,
+            ) as resp:
+                resp.raise_for_status()
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    token = data.get("response", "")
+                    if token:
+                        parts.append(token)
+                        on_token(token)
+                    if data.get("done"):
+                        break
+            result = "".join(parts)
+        else:
+            resp = requests.post(
+                OLLAMA_GENERATE_URL,
+                json={**payload, "stream": False},
+                timeout=120,
+            )
+            resp.raise_for_status()
+            result = resp.json().get("response", "").strip()
+
+        logger.warning("═══ Ollama response: %d chars (model=%s) ═══", len(result), chosen)
+        return result
+
+    except requests.exceptions.HTTPError as exc:
+        response = exc.response
+        if response is not None and response.status_code == 500:
+            error_body = response.text
+            logger.error("Ollama 500: %s", error_body)
+            try:
+                err_msg = response.json().get("error", str(exc))
+            except Exception:
+                err_msg = error_body or str(exc)
+            return f"Erreur Ollama: {err_msg}"
+        logger.error("Erreur Ollama HTTP: %s", exc, exc_info=True)
+        return f"Erreur : {exc}"
+    except requests.exceptions.ConnectionError:
+        logger.error("Connexion Ollama refusée")
+        return "Erreur : impossible de contacter Ollama. Vérifie qu'il tourne."
+    except requests.exceptions.Timeout:
+        logger.error("Timeout Ollama (model=%s)", chosen)
+        return "Erreur : Ollama a mis trop de temps à répondre."
+    except Exception as exc:
+        logger.error("Erreur Ollama: %s", exc, exc_info=True)
+        return f"Erreur : {exc}"
 
 
 def _get_options(intent: str, conv_mode: str) -> dict:
@@ -527,13 +959,20 @@ def _ollama_request(
     intent: str = "",
     conv_mode: str | None = None,
 ) -> requests.Response | None:
+    try:
+        _ensure_ollama()
+    except RuntimeError:
+        logger.error("Ollama indisponible pour la requête chat")
+        return None
+
     if conv_mode is None:
         conv_mode = _get_conversation_mode()
     options = _get_options(intent, conv_mode)
     if num_predict is not None:
         options["num_predict"] = num_predict
+    chosen = _resolve_model_with_fallback(model or MODEL)
     payload = {
-        "model": model or MODEL,
+        "model": chosen,
         "messages": messages,
         "stream": stream,
         "keep_alive": OLLAMA_KEEP_ALIVE,
@@ -549,38 +988,49 @@ def _ollama_request(
             )
             response.raise_for_status()
             return response
-        except requests.RequestException:
-            logger.warning("Ollama request failed (attempt %d/%d)", attempt + 1, retries)
+        except requests.exceptions.HTTPError as exc:
+            resp = exc.response
+            if resp is not None and resp.status_code == 500:
+                try:
+                    err_msg = resp.json().get("error", resp.text)
+                except Exception:
+                    err_msg = resp.text or str(exc)
+                logger.error("Ollama chat 500 (model=%s): %s", chosen, err_msg)
+                return None
+            logger.warning("Ollama HTTP error (attempt %d/%d): %s", attempt + 1, retries, exc)
+            time.sleep(1)
+        except requests.RequestException as exc:
+            logger.warning("Ollama request failed (attempt %d/%d): %s", attempt + 1, retries, exc)
             time.sleep(1)
     return None
 
 
 def _detect_intent(text: str) -> dict:
     """Détection d'intent ultra-rapide via llama3.2:1b (~50-100ms)."""
+    try:
+        _ensure_ollama()
+    except RuntimeError:
+        return {"intent": "question_libre", "params": {}, "confidence": 0.0}
+
+    model = _resolve_model_with_fallback(MODELS["intent"])
     prompt = f"""Classifie cette commande en UN mot parmi cette liste :
 {'|'.join(KNOWN_INTENTS)}
 Commande : "{text}"
 Réponds uniquement avec la catégorie, rien d'autre :"""
 
     try:
-        response = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": MODELS['intent'],
-                "prompt": prompt,
-                "stream": False,
-                "options": {"num_predict": 10, "temperature": 0.1},
-            },
-            timeout=10,
-        )
-        raw = response.json().get("response", "").strip().lower()
+        raw = generate(prompt, model=model, stream=False, max_tokens=10, temperature=0.1)
+        if raw.startswith("Erreur"):
+            raise RuntimeError(raw)
+        raw = raw.strip().lower()
         for intent in KNOWN_INTENTS:
             if intent in raw:
+                logger.info("Intent détecté: %s (modèle=%s)", intent, model)
                 return {"intent": intent, "params": {}, "confidence": 0.85}
-        return {"intent": "question_libre", "params": {}, "confidence": 0.5}
-    except Exception as e:
-        logger.error("Erreur détection intent: %s", e)
-        return {"intent": "question_libre", "params": {}, "confidence": 0.3}
+    except Exception as exc:
+        logger.error("Erreur intent detection: %s", exc)
+
+    return {"intent": "question_libre", "params": {}, "confidence": 0.5}
 
 
 def _extract_in_site_search(text: str) -> tuple[str, str] | None:
@@ -1225,22 +1675,117 @@ def _build_format_prompt(intent: str, api_data: str, original_text: str) -> str:
 
 
 def _llm_format(prompt: str) -> str:
-    try:
-        response = requests.post(
-            OLLAMA_GENERATE_URL,
-            json={
-                "model": MODEL_FAST,
-                "prompt": prompt,
-                "stream": False,
-                "options": {"num_predict": 200, "temperature": 0.3},
-            },
-            timeout=30,
-        )
-        response.raise_for_status()
-        return response.json().get("response", "").strip() or prompt
-    except Exception as exc:
-        logger.error("LLM format error: %s", exc)
+    result = generate(prompt, model=MODEL_FAST, stream=False, max_tokens=200, temperature=0.3)
+    if result.startswith("Erreur"):
+        logger.error("LLM format error: %s", result)
         return prompt
+    return result.strip() or prompt
+
+
+def _build_chat_prompt_from_history() -> tuple[str, str | None]:
+    """Construit prompt + system pour /api/generate à partir de _history."""
+    system_content: str | None = None
+    turns: list[str] = []
+    for msg in _history:
+        role = msg.get("role")
+        content = str(msg.get("content", "")).strip()
+        if not content:
+            continue
+        if role == "system":
+            system_content = content
+        elif role == "user":
+            turns.append(f"Utilisateur: {content}")
+        elif role == "assistant":
+            turns.append(f"ARIA: {content}")
+    prompt = "\n".join(turns)
+    if prompt and not prompt.rstrip().endswith("ARIA:"):
+        prompt = f"{prompt}\nARIA:"
+    elif not prompt:
+        prompt = "ARIA:"
+    return prompt, system_content
+
+
+def _conversation_via_generate(
+    model: str,
+    max_tokens: int,
+    stream_to_ui: bool,
+    temperature: float = 0.7,
+) -> tuple[str, bool]:
+    """Conversation libre via generate() (/api/generate) avec streaming UI optionnel."""
+    prompt, system = _build_chat_prompt_from_history()
+    conv_mode = _get_conversation_mode()
+    if conv_mode == "vocal" and system:
+        system = system + "\nMode vocal: réponds en 1-3 phrases max, pas de markdown ni de listes."
+
+    spoke_streaming = False
+    sentence_buffer = ""
+
+    if stream_to_ui:
+        ui.set_status("thinking")
+
+    if stream_to_ui:
+        tts_queue: list[str | None] = []
+
+        def _speak_worker() -> None:
+            nonlocal spoke_streaming
+            while True:
+                if tts_queue:
+                    sentence = tts_queue.pop(0)
+                    if sentence is None:
+                        break
+                    if len(sentence.strip()) > 2 and _should_speak_tts():
+                        ui.set_status("speaking")
+                        tts.speak(sentence, force=True, notify_finished=False)
+                        spoke_streaming = True
+                else:
+                    time.sleep(0.02)
+
+        tts_thread: threading.Thread | None = None
+        if _should_speak_tts():
+            tts_thread = threading.Thread(target=_speak_worker, daemon=True, name="LLM-TTS")
+            tts_thread.start()
+
+        def on_token(token: str) -> None:
+            nonlocal sentence_buffer
+            ui.append_assistant_text(token)
+            sentence_buffer += token
+            if SENTENCE_END_RE.search(sentence_buffer.rstrip()):
+                sentence = sentence_buffer.strip()
+                if sentence and tts_thread is not None:
+                    tts_queue.append(sentence)
+                sentence_buffer = ""
+
+        result = generate(
+            prompt,
+            model=model,
+            system=system,
+            stream=True,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            on_token=on_token,
+        )
+
+        remainder = sentence_buffer.strip()
+        if remainder and tts_thread is not None:
+            tts_queue.append(remainder)
+        if tts_thread is not None:
+            tts_queue.append(None)
+            tts_thread.join(timeout=30)
+
+        ui.finalize_assistant_message()
+    else:
+        result = generate(
+            prompt,
+            model=model,
+            system=system,
+            stream=False,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+
+    if result.startswith("Erreur"):
+        return "", False
+    return result.strip(), spoke_streaming
 
 
 def _execute_action(intent: str, params: dict, text: str) -> str | None:
@@ -1347,15 +1892,17 @@ def _execute_action(intent: str, params: dict, text: str) -> str | None:
             return timer.parse_and_set(text)
 
         if intent == "preset":
-            if "désactive" in text.lower() or "desactive" in text.lower():
+            t = text.lower()
+            if any(w in t for w in ("désactive", "desactive", "quitte le mode", "sors du mode", "arrête le mode", "arrete le mode")):
                 return presets.deactivate()
-            preset = params.get("preset") or params.get("name", "")
+            preset = presets.match_in_text(text)
             if not preset:
-                for p in ("vol", "etude", "gaming", "detente", "nuit", "étude", "détente"):
-                    if p in text.lower():
-                        preset = p
-                        break
-            return presets.activate(preset) if preset else "Quel mode ? (vol/etude/gaming/detente/nuit)"
+                raw = params.get("preset") or params.get("name", "")
+                if raw and presets._normalize_key(raw) in presets.get_merged_presets():
+                    preset = presets._normalize_key(raw)
+            if preset:
+                return presets.activate(preset)
+            return "Quel mode ? (" + "/".join(presets.list_presets()) + ")"
 
         if intent == "clipboard_copy":
             return clipboard.copy_text(text)
@@ -1669,12 +2216,13 @@ def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
         text_to_translate = re.sub(r"traduis.*?[,:]\s*", "", original_text, flags=re.I)
         return translator.translate(text_to_translate or original_text, target)
     if intent == "preset":
-        if "désactive" in original_text.lower() or "desactive" in original_text.lower():
+        t = original_text.lower()
+        if any(w in t for w in ("désactive", "desactive", "quitte le mode", "sors du mode", "arrête le mode", "arrete le mode")):
             return presets.deactivate()
-        for name in presets.list_presets():
-            if name in original_text.lower():
-                return presets.activate(name)
-        return "Quel mode veux-tu activer ? Étude, vol, gaming, détente ou nuit."
+        preset = presets.match_in_text(original_text)
+        if preset:
+            return presets.activate(preset)
+        return "Quel mode veux-tu activer ? (" + "/".join(presets.list_presets()) + ")"
     if intent == "clipboard_paste":
         text = clipboard.get_text()
         if not text.strip():
@@ -1945,68 +2493,44 @@ def _conversation(text: str, stream_to_ui: bool = True, intent: str = "question_
     _trim_history()
 
     conv_mode = _get_conversation_mode()
-    chat_model = FORCED_MODEL or _select_model(text, intent)
+    chat_model = resolve_model(text, intent)
 
     logger.debug("═══ PROMPT OLLAMA ═══")
     logger.debug("%s", text[:500])
     logger.debug("════════════════════")
 
     # Escalade « réflexion » : trop lent en mode vocal — réservé au mode écrit.
-    if FORCED_MODEL is None and conv_mode != "vocal" and _needs_reasoning(text):
+    if FORCED_MODEL is None and AUTO_ROUTING and conv_mode != "vocal" and _needs_reasoning(text):
         logger.info("Réflexion activée -> %s", REASONING_MODEL)
         if stream_to_ui:
             ui.set_status("thinking")
-        resp = _ollama_request(
-            _history,
-            stream=False,
-            model=REASONING_MODEL,
-            num_predict=2000,
-            intent=intent,
-            conv_mode=conv_mode,
-        )
-        if resp is None:
-            _history.pop()
-            _present_action_result("Ollama n'est pas disponible.")
-            return "", False
-        answer = resp.json().get("message", {}).get("content", "")
-        answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.S).strip()
+        answer, _ = _conversation_via_generate(REASONING_MODEL, max_tokens=2000, stream_to_ui=False)
         if not answer:
             _history.pop()
-            ui.set_status("idle")
+            _present_action_result("Ollama n'est pas disponible.")
             return "", False
         if stream_to_ui:
             ui.append_assistant_text(answer)
             ui.finalize_assistant_message()
         _history.append({"role": "assistant", "content": answer})
         _trim_history()
-        logger.info("═══ LLM RÉPONSE ═══")
-        logger.info("%s", answer[:300])
-        logger.info("═══════════════════")
+        logger.warning("═══ LLM RÉPONSE (reasoning): %s ═══", answer[:200])
         return answer, False
 
-    response = _ollama_request(
-        _history,
-        stream=True,
-        model=chat_model,
-        intent=intent,
-        conv_mode=conv_mode,
+    max_tokens = 150 if conv_mode == "vocal" else 500
+    full_response, spoke_streaming = _conversation_via_generate(
+        chat_model,
+        max_tokens=max_tokens,
+        stream_to_ui=stream_to_ui,
     )
-    if response is None:
-        _history.pop()
-        msg = "Ollama n'est pas disponible."
-        _present_action_result(msg)
-        return "", False
-
-    full_response, spoke_streaming = _stream_and_speak(response, stream_to_ui=stream_to_ui)
 
     if not full_response.strip():
         _history.pop()
-        ui.set_status("idle")
+        if stream_to_ui:
+            ui.set_status("idle")
         return "", False
 
-    logger.info("═══ LLM RÉPONSE ═══")
-    logger.info("%s", full_response[:300])
-    logger.info("═══════════════════")
+    logger.warning("═══ LLM RÉPONSE: %s ═══", full_response[:200])
 
     _history.append({"role": "assistant", "content": full_response})
     _trim_history()
@@ -2167,41 +2691,27 @@ def ask_with_actions(text: str) -> str:
             logger.warning("═══ LLM→UI: '%s' ═══", str(result)[:200])
             return result
 
+    model = resolve_model(text, intent="question_libre")
     conv_mode = _get_conversation_mode()
-    model = MODELS["fast"] if conv_mode == "vocal" else _select_model(text)
 
     history_text = _build_history_text()
     full_prompt = f"{ACTIONS_SYSTEM_PROMPT}\n\n{history_text}\nUtilisateur: {text}\nARIA:"
 
-    logger.debug("═══ PROMPT ═══\n%s\n══════════════", full_prompt[:600])
-    logger.debug("═══ PROMPT OLLAMA ═══")
-    logger.debug("%s", full_prompt[:500])
-    logger.debug("════════════════════")
+    logger.warning("═══ ask_with_actions → generate() model=%s ═══", model)
 
-    try:
-        resp = requests.post(
-            OLLAMA_GENERATE_URL,
-            json={
-                "model": model,
-                "prompt": full_prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.2,
-                    "num_predict": 150 if conv_mode == "vocal" else 400,
-                },
-            },
-            timeout=30,
-        )
-        resp.raise_for_status()
-        raw_response = resp.json().get("response", "").strip()
-    except Exception as exc:
-        logger.error("Erreur LLM: %s", exc)
+    raw_response = generate(
+        full_prompt,
+        model=model,
+        stream=False,
+        max_tokens=150 if conv_mode == "vocal" else 400,
+        temperature=0.2,
+    )
+
+    if raw_response.startswith("Erreur"):
+        logger.error("Erreur LLM: %s", raw_response)
         return "Désolé, je n'ai pas pu traiter ta demande."
 
-    logger.info("═══ LLM RAW ═══\n%s\n═══════════════", raw_response[:300])
-    logger.info("═══ LLM RÉPONSE ═══")
-    logger.info("%s", raw_response[:300])
-    logger.info("═══════════════════")
+    logger.warning("═══ ask_with_actions réponse: %s ═══", raw_response[:200])
 
     action_type, action_value = _parse_action_response(raw_response)
     return _execute_parsed_action(action_type, action_value, text)
@@ -2274,6 +2784,7 @@ def ask(text: str, *, show_user: bool = True) -> None:
 
     try:
         if _get_conversation_mode() == "vocal":
+            logger.warning("═══ ask() → ask_with_actions() (vocal) ═══")
             response = ask_with_actions(text)
             if response:
                 _speak_response(response)
@@ -2288,6 +2799,7 @@ def ask(text: str, *, show_user: bool = True) -> None:
                 memory_engine.get_engine().save_current_conversation()
                 _process_memory_learning(text, response)
         else:
+            logger.warning("═══ ask() → _route_with_intelligence() (écrit) ═══")
             response = _route_with_intelligence(intent, params, text, stream_to_ui=True)
             if response:
                 _history.append({"role": "user", "content": text.strip()})

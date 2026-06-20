@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ARIA — Liquid Glass Playground (iOS 26)</title>
+<style>
+  /* ============================================================
+     VARIABLES — c'est CE bloc qui sera porté dans index.html (desktop)
+     et dans le thème mobile. Tous les réglages pilotent ces variables.
+     ============================================================ */
+  :root{
+    --glass-blur: 22px;        /* flou backdrop */
+    --glass-saturate: 180%;    /* saturation du fond (vivacité iOS) */
+    --glass-alpha: 0.10;       /* opacité de la teinte du verre */
+    --glass-tint: 255,255,255; /* couleur du verre (RGB) */
+    --glass-radius: 26px;      /* rayon des coins */
+    --glass-rim: 0.55;         /* intensité du reflet de bord (spéculaire) */
+    --accent: #7B6CF6;         /* couleur d'accent */
+    --accent-2: #00D4FF;       /* couleur de glow secondaire */
+    --text: #F4F6FF;
+    --text-dim: rgba(244,246,255,0.62);
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+    color:var(--text); overflow:hidden; position:relative;
+  }
+
+  /* ---- Fond d'écran (derrière le verre — c'est lui qui révèle l'effet) ---- */
+  #wp{position:fixed;inset:0;z-index:-1;background-size:cover;background-position:center;transition:background .5s}
+  .wp-mesh{
+    background:
+      radial-gradient(at 18% 22%, #5b2bd6 0px, transparent 45%),
+      radial-gradient(at 82% 18%, #00d4ff 0px, transparent 42%),
+      radial-gradient(at 75% 82%, #ff3d8b 0px, transparent 45%),
+      radial-gradient(at 22% 78%, #1c2bff 0px, transparent 45%),
+      #0a0a18;
+  }
+  .wp-aurora{
+    background:
+      radial-gradient(at 30% 30%, #00ffa3 0px, transparent 40%),
+      radial-gradient(at 70% 35%, #00a3ff 0px, transparent 45%),
+      radial-gradient(at 50% 80%, #7b2bff 0px, transparent 50%),
+      #04060f;
+  }
+  .wp-sunset{
+    background:
+      radial-gradient(at 25% 80%, #ff7a18 0px, transparent 45%),
+      radial-gradient(at 80% 70%, #ff2d7e 0px, transparent 45%),
+      radial-gradient(at 60% 15%, #5b2bd6 0px, transparent 50%),
+      #160820;
+  }
+  .wp-dark{ background:#0b0b12; }
+  .wp-photo{
+    background:linear-gradient(135deg,#1f2937,#0f172a 40%,#312e81 75%,#0f172a);
+  }
+
+  /* ============================================================
+     LE MATÉRIAU "LIQUID GLASS" — fidèle iOS 26
+     ============================================================ */
+  .glass{
+    position:relative;
+    background:rgba(var(--glass-tint), var(--glass-alpha));
+    backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-saturate)) brightness(1.08);
+    -webkit-backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-saturate)) brightness(1.08);
+    border:1px solid rgba(255,255,255, calc(var(--glass-rim) * 0.34));
+    border-radius:var(--glass-radius);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255,255,255, calc(var(--glass-rim) * 0.9)),   /* arête lumineuse haute */
+      inset 0 -1px 1px 0 rgba(0,0,0,0.18),                                /* contact bas */
+      inset 0 0 22px 0 rgba(255,255,255, calc(var(--glass-rim) * 0.07)),  /* halo interne */
+      0 10px 34px rgba(0,0,0,0.30);                                       /* profondeur */
+    overflow:hidden;
+  }
+  /* reflet spéculaire (la "lumière" qui glisse sur le verre) */
+  .glass::before{
+    content:"";position:absolute;inset:0;pointer-events:none;border-radius:inherit;
+    background:linear-gradient(135deg,
+      rgba(255,255,255, calc(var(--glass-rim) * 0.22)) 0%,
+      rgba(255,255,255,0) 42%,
+      rgba(255,255,255,0) 60%,
+      rgba(255,255,255, calc(var(--glass-rim) * 0.10)) 100%);
+    mix-blend-mode:screen;
+  }
+
+  /* texte toujours net : sous-couche jamais directement sur le flou */
+  .ontop{position:relative;z-index:1}
+
+  /* ---- Mise en page démo ---- */
+  .stage{height:100%;display:flex;flex-direction:column;padding:22px;gap:16px}
+  .topbar{display:flex;align-items:center;gap:14px;padding:14px 18px}
+  .logo{width:34px;height:34px;border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, var(--accent-2), var(--accent));
+    box-shadow:0 0 18px var(--accent-2)}
+  .brand{font-weight:600;letter-spacing:4px;font-size:15px}
+  .sub{font-size:11px;color:var(--text-dim);margin-top:1px}
+  .spacer{flex:1}
+  .pill{padding:7px 13px;border-radius:14px;font-size:12px}
+
+  .body{flex:1;display:flex;gap:16px;min-height:0}
+  .chat{flex:1;display:flex;flex-direction:column;gap:12px;padding:18px;overflow:auto}
+  .bubble{max-width:74%;padding:11px 15px;border-radius:18px;font-size:14px;line-height:1.45}
+  .b-aria{align-self:flex-start}
+  .b-user{align-self:flex-end;background:rgba(var(--glass-tint),calc(var(--glass-alpha) + 0.06));
+    border:1px solid rgba(255,255,255,calc(var(--glass-rim)*0.28))}
+  .b-user .ontop{color:var(--text)}
+  .accent-bubble{align-self:flex-end;
+    background:linear-gradient(135deg,var(--accent),var(--accent-2));
+    color:#fff;border:none;box-shadow:0 6px 22px rgba(0,0,0,.25)}
+
+  .panel{width:236px;padding:16px;display:flex;flex-direction:column;gap:10px}
+  .panel h3{font-size:12px;letter-spacing:2px;color:var(--text-dim);font-weight:600;margin-bottom:4px}
+  .navrow{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:13px;font-size:13px}
+  .navrow.active{background:rgba(var(--glass-tint),calc(var(--glass-alpha)+0.08));
+    border:1px solid rgba(255,255,255,calc(var(--glass-rim)*0.3))}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}
+
+  .dock{display:flex;gap:12px;justify-content:center;padding:12px}
+  .gbtn{width:46px;height:46px;border-radius:16px;display:flex;align-items:center;justify-content:center;
+    font-size:18px;cursor:pointer;transition:transform .15s}
+  .gbtn:hover{transform:translateY(-3px) scale(1.05)}
+
+  /* ---- Panneau de contrôles (en bas, fixe) ---- */
+  #controls{position:fixed;left:0;right:0;bottom:0;z-index:10;
+    padding:14px 18px;display:flex;flex-wrap:wrap;gap:14px 22px;align-items:center;
+    background:rgba(10,10,18,0.55);backdrop-filter:blur(30px) saturate(160%);
+    -webkit-backdrop-filter:blur(30px) saturate(160%);
+    border-top:1px solid rgba(255,255,255,0.12)}
+  .ctl{display:flex;flex-direction:column;gap:4px;min-width:120px}
+  .ctl label{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim)}
+  .ctl .val{font-size:11px;color:var(--accent-2);font-variant-numeric:tabular-nums}
+  input[type=range]{width:140px;accent-color:var(--accent)}
+  input[type=color]{width:46px;height:26px;border:none;background:none;cursor:pointer}
+  .presets{display:flex;gap:8px;flex-wrap:wrap}
+  .preset-btn{padding:7px 12px;border-radius:12px;font-size:12px;cursor:pointer;color:var(--text);
+    background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.16)}
+  .preset-btn:hover{background:rgba(255,255,255,0.14)}
+  .wpsel{display:flex;gap:6px}
+  .wpchip{width:26px;height:26px;border-radius:8px;cursor:pointer;border:2px solid transparent}
+  .wpchip.active{border-color:#fff}
+  #copy{padding:8px 14px;border-radius:12px;cursor:pointer;font-size:12px;font-weight:600;color:#fff;
+    background:linear-gradient(135deg,var(--accent),var(--accent-2));border:none}
+  .hint{position:fixed;top:14px;right:16px;z-index:10;font-size:11px;color:rgba(255,255,255,.5)}
+</style>
+</head>
+<body>
+  <div id="wp" class="wp-mesh"></div>
+  <div class="hint">Règle les curseurs → « Copier le thème » → renvoie-le-moi pour que je l'applique</div>
+
+  <div class="stage">
+    <div class="topbar glass">
+      <div class="logo ontop"></div>
+      <div class="ontop">
+        <div class="brand">A R I A</div>
+        <div class="sub">Liquid Glass · iOS 26</div>
+      </div>
+      <div class="spacer"></div>
+      <div class="pill glass ontop">Mode étude</div>
+    </div>
+
+    <div class="body">
+      <div class="panel glass">
+        <div class="ontop" style="display:flex;flex-direction:column;gap:8px">
+          <h3>NAVIGATION</h3>
+          <div class="navrow active"><span class="dot"></span> Conversation</div>
+          <div class="navrow">Mémoire</div>
+          <div class="navrow">Modes</div>
+          <div class="navrow">Apparence</div>
+          <h3 style="margin-top:8px">SYSTÈME</h3>
+          <div class="navrow">Modèle · auto</div>
+          <div class="navrow">Micro · prêt</div>
+        </div>
+      </div>
+
+      <div class="chat glass">
+        <div class="ontop" style="display:flex;flex-direction:column;gap:12px">
+          <div class="bubble b-aria glass"><span class="ontop">Bonjour Mathis. J'ai ouvert Spotify et Discord, volume à 30.</span></div>
+          <div class="bubble accent-bubble">Mets-moi en mode vol</div>
+          <div class="bubble b-aria glass"><span class="ontop">Mode vol activé. MSFS 2024 en cours de lancement ✈</span></div>
+          <div class="bubble b-user"><span class="ontop">Ouvre youtube dans chrome</span></div>
+          <div class="bubble b-aria glass"><span class="ontop">C'est parti — YouTube ouvert dans Chrome.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dock glass">
+      <div class="gbtn glass ontop">◎</div>
+      <div class="gbtn glass ontop">🎙</div>
+      <div class="gbtn glass ontop">⚙</div>
+      <div class="gbtn glass ontop">✈</div>
+    </div>
+  </div>
+
+  <div id="controls">
+    <div class="ctl"><label>Flou <span class="val" id="v-blur"></span></label><input type="range" id="blur" min="0" max="50" step="1"></div>
+    <div class="ctl"><label>Transparence <span class="val" id="v-alpha"></span></label><input type="range" id="alpha" min="0" max="40" step="1"></div>
+    <div class="ctl"><label>Saturation <span class="val" id="v-sat"></span></label><input type="range" id="sat" min="100" max="260" step="5"></div>
+    <div class="ctl"><label>Reflet de bord <span class="val" id="v-rim"></span></label><input type="range" id="rim" min="0" max="100" step="1"></div>
+    <div class="ctl"><label>Rayon coins <span class="val" id="v-rad"></span></label><input type="range" id="rad" min="0" max="40" step="1"></div>
+    <div class="ctl"><label>Teinte du verre</label><input type="color" id="tint" value="#ffffff"></div>
+    <div class="ctl"><label>Accent</label><input type="color" id="accent" value="#7b6cf6"></div>
+    <div class="ctl"><label>Glow</label><input type="color" id="accent2" value="#00d4ff"></div>
+    <div class="ctl"><label>Fond d'écran</label>
+      <div class="wpsel" id="wpsel">
+        <div class="wpchip active" data-wp="wp-mesh" style="background:linear-gradient(135deg,#5b2bd6,#ff3d8b)"></div>
+        <div class="wpchip" data-wp="wp-aurora" style="background:linear-gradient(135deg,#00ffa3,#7b2bff)"></div>
+        <div class="wpchip" data-wp="wp-sunset" style="background:linear-gradient(135deg,#ff7a18,#ff2d7e)"></div>
+        <div class="wpchip" data-wp="wp-photo" style="background:linear-gradient(135deg,#312e81,#0f172a)"></div>
+        <div class="wpchip" data-wp="wp-dark" style="background:#0b0b12"></div>
+      </div>
+    </div>
+    <div class="ctl" style="min-width:260px"><label>Presets de style</label>
+      <div class="presets">
+        <button class="preset-btn" data-preset="clear">Clear</button>
+        <button class="preset-btn" data-preset="frosted">Frosted</button>
+        <button class="preset-btn" data-preset="tinted">Tinted dark</button>
+        <button class="preset-btn" data-preset="vibrant">Vibrant</button>
+      </div>
+    </div>
+    <button id="copy">Copier le thème</button>
+  </div>
+
+<script>
+  const root = document.documentElement;
+  const $ = (id) => document.getElementById(id);
+  const hexToRgb = (h) => { const n = parseInt(h.slice(1),16); return [(n>>16)&255,(n>>8)&255,n&255]; };
+
+  const state = { blur:22, alpha:10, sat:180, rim:55, rad:26, tint:'#ffffff', accent:'#7b6cf6', accent2:'#00d4ff' };
+
+  function apply(){
+    root.style.setProperty('--glass-blur', state.blur + 'px');
+    root.style.setProperty('--glass-alpha', (state.alpha/100).toFixed(3));
+    root.style.setProperty('--glass-saturate', state.sat + '%');
+    root.style.setProperty('--glass-rim', (state.rim/100).toFixed(2));
+    root.style.setProperty('--glass-radius', state.rad + 'px');
+    root.style.setProperty('--glass-tint', hexToRgb(state.tint).join(','));
+    root.style.setProperty('--accent', state.accent);
+    root.style.setProperty('--accent-2', state.accent2);
+    $('v-blur').textContent = state.blur + 'px';
+    $('v-alpha').textContent = state.alpha + '%';
+    $('v-sat').textContent = state.sat + '%';
+    $('v-rim').textContent = state.rim + '%';
+    $('v-rad').textContent = state.rad + 'px';
+  }
+  function syncInputs(){
+    $('blur').value=state.blur; $('alpha').value=state.alpha; $('sat').value=state.sat;
+    $('rim').value=state.rim; $('rad').value=state.rad;
+    $('tint').value=state.tint; $('accent').value=state.accent; $('accent2').value=state.accent2;
+  }
+  const bind = (id,key,num)=>$(id).addEventListener('input',e=>{state[key]=num?+e.target.value:e.target.value;apply();});
+  bind('blur','blur',1); bind('alpha','alpha',1); bind('sat','sat',1); bind('rim','rim',1); bind('rad','rad',1);
+  bind('tint','tint',0); bind('accent','accent',0); bind('accent2','accent2',0);
+
+  document.querySelectorAll('.wpchip').forEach(c=>c.addEventListener('click',()=>{
+    document.querySelectorAll('.wpchip').forEach(x=>x.classList.remove('active'));
+    c.classList.add('active'); $('wp').className = c.dataset.wp;
+  }));
+
+  const PRESETS = {
+    clear:   {blur:14,alpha:6, sat:200,rim:65,rad:28,tint:'#ffffff',accent:'#7b6cf6',accent2:'#00d4ff'},
+    frosted: {blur:34,alpha:16,sat:150,rim:40,rad:24,tint:'#eaf0ff',accent:'#8e97f8',accent2:'#a0b4ff'},
+    tinted:  {blur:26,alpha:14,sat:170,rim:50,rad:26,tint:'#1a1830',accent:'#9b6cff',accent2:'#00d4ff'},
+    vibrant: {blur:20,alpha:9, sat:240,rim:80,rad:30,tint:'#ffffff',accent:'#ff3d8b',accent2:'#00ffa3'},
+  };
+  document.querySelectorAll('.preset-btn').forEach(b=>b.addEventListener('click',()=>{
+    Object.assign(state, PRESETS[b.dataset.preset]); apply(); syncInputs();
+  }));
+
+  $('copy').addEventListener('click',()=>{
+    const css = `:root{
+  --glass-blur: ${state.blur}px;
+  --glass-saturate: ${state.sat}%;
+  --glass-alpha: ${(state.alpha/100).toFixed(3)};
+  --glass-tint: ${hexToRgb(state.tint).join(',')};
+  --glass-radius: ${state.rad}px;
+  --glass-rim: ${(state.rim/100).toFixed(2)};
+  --accent: ${state.accent};
+  --accent-2: ${state.accent2};
+  --wallpaper: ${$('wp').className};
+}`;
+    navigator.clipboard.writeText(css).then(()=>{
+      const b=$('copy'); const t=b.textContent; b.textContent='Copié ✓'; setTimeout(()=>b.textContent=t,1400);
+    });
+  });
+
+  apply(); syncInputs();
+</script>
+</body>
+</html>
