@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 _window: webview.Window | None = None
 _api: AriaAPI | None = None
+_pending_finalize_model: str = ""
 _instance: UI | None = None
 _initial_status = "idle"
 _show_on_ready = False
@@ -863,12 +864,11 @@ class AriaAPI:
             import ollama_manager
 
             running = ollama_manager.is_running()
-            if not running:
-                try:
-                    running = ollama_manager.start_ollama()
-                except Exception:
-                    running = False
             local = ollama_manager.list_local_models() if running else []
+            if not local:
+                # Nouvelle tentative sans bloquer le démarrage (évite freeze UI 15s)
+                local = ollama_manager.list_local_models()
+                running = running or ollama_manager.is_running() or bool(local)
         except Exception as exc:
             logger.error("get_available_models error: %s", exc)
             running = False
@@ -1125,8 +1125,24 @@ class UI:
         escaped = json.dumps(token)
         self._js(f"if(window.aria) aria.appendToken({escaped})")
 
-    def finalize_assistant_message(self) -> None:
-        self._js("if(window.aria) aria.finalizeMessage()")
+    def finalize_assistant_message(self, model_name: str = "") -> None:
+        self._js(
+            f"if(window.aria) aria.finalizeMessage({json.dumps(model_name or '')})"
+        )
+
+    def show_thinking(self, model_name: str = "", action: str = "Réflexion...") -> None:
+        self._js(
+            f"if(window.aria) aria.showThinkingBubble("
+            f"{json.dumps(model_name or '')}, {json.dumps(action or 'Réflexion...')})"
+        )
+
+    def update_thinking_action(self, action: str) -> None:
+        self._js(
+            f"if(window.aria) aria.updateThinkingAction({json.dumps(action or '')})"
+        )
+
+    def hide_thinking(self) -> None:
+        self._js("if(window.aria) aria.hideThinkingBubble()")
 
     def set_status(self, state: str) -> None:
         escaped = json.dumps(state)
@@ -1143,6 +1159,11 @@ class UI:
         self._js(
             f"if(window.aria) aria.showToast({json.dumps(message)}, "
             f"{json.dumps(toast_type)}, {int(duration)})"
+        )
+
+    def show_gdoc_link(self, title: str, url: str) -> None:
+        self._js(
+            f"if(window.aria) aria.showGdocLink({json.dumps(title)}, {json.dumps(url)})"
         )
 
     def show_error(self, text: str) -> None:
@@ -1220,9 +1241,32 @@ def append_assistant_text(token: str) -> None:
         _instance.append_assistant_text(token)
 
 
-def finalize_assistant_message() -> None:
+def finalize_assistant_message(model_name: str | None = None) -> None:
+    global _pending_finalize_model
+    label = model_name if model_name is not None else _pending_finalize_model
     if _instance:
-        _instance.finalize_assistant_message()
+        _instance.finalize_assistant_message(label)
+    _pending_finalize_model = ""
+
+
+def set_response_model(model_name: str = "") -> None:
+    global _pending_finalize_model
+    _pending_finalize_model = model_name or ""
+
+
+def show_thinking(model_name: str = "", action: str = "Réflexion...") -> None:
+    if _instance:
+        _instance.show_thinking(model_name, action)
+
+
+def update_thinking_action(action: str) -> None:
+    if _instance:
+        _instance.update_thinking_action(action)
+
+
+def hide_thinking() -> None:
+    if _instance:
+        _instance.hide_thinking()
 
 
 def set_status(state: str) -> None:
@@ -1250,6 +1294,11 @@ def show_notification(text: str, duration: int = 3) -> None:
 def show_toast(message: str, duration: int = 3000, toast_type: str = "info") -> None:
     if _instance:
         _instance.show_toast(message, duration, toast_type)
+
+
+def show_gdoc_link(title: str, url: str) -> None:
+    if _instance:
+        _instance.show_gdoc_link(title, url)
 
 
 def show_error(text: str) -> None:

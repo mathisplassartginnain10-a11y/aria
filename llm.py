@@ -66,6 +66,9 @@ KNOWN_INTENTS = [
     'search_web', 'search_news', 'aviation_metar', 'aviation_taf',
     'math_calculate', 'question_libre', 'browser_open_site',
     'browser_search_in_site', 'preset',
+    'recherche_web', 'recherche_actualites', 'recherche_wikipedia',
+    'recherche_youtube', 'recherche_multi', 'gdoc_create', 'gdoc_write_search',
+    'gdoc_open', 'gdoc_status',
 ]
 
 MODEL: str = _config.get("model", MODELS["heavy"])
@@ -426,6 +429,70 @@ FAST_BROWSER_REGEX: list[tuple[str, str]] = [
     (r"va sur ", "browser_open_site"),
 ]
 
+# Spec v20 — recherche multi-sources + Google Docs
+RECHERCHE_PATTERNS: list[tuple[str, str]] = [
+    (
+        r"(?:cherche|recherche|trouve|dis-moi|donne-moi)\s+.+\s+sur\s+"
+        r"(?:le web|internet|google)\b",
+        "recherche_web",
+    ),
+    (
+        r"(?:cherche|recherche|trouve)\s+.+\s+(?:et\s+)?(?:note|mets|écris|ecris).*(?:dans|sur)\s+"
+        r"(?:le\s*)?(?:google\s*)?doc",
+        "gdoc_write_search",
+    ),
+    (
+        r"(?:cherche|recherche)\s+les?\s+(?:dernières?|dernieres?|récentes?|recentes?)\s+"
+        r"(?:actualités|actualites|news|infos)",
+        "recherche_actualites",
+    ),
+    (
+        r"(?:cherche|recherche|trouve)\s+(?:des?\s+)?infos?\s+sur\s+.+",
+        "recherche_web",
+    ),
+    (
+        r"(?:cherche|recherche|trouve)\s+.+\s+sur\s+"
+        r"(?:plusieurs sources|le web et wikipedia|partout)",
+        "recherche_multi",
+    ),
+    (
+        r"(?:cherche|trouve|recherche)\s+.+\s+sur\s+youtube\b",
+        "recherche_youtube",
+    ),
+    (
+        r"(?:qu(?:'|e)\s*est.ce que|c'est quoi|qui est|quelle est)\s+.+",
+        "recherche_wikipedia",
+    ),
+    (r"(?:crée|créer|cree|ouvre|génère|genere)\s+(?:un|le)\s+(?:google\s*)?doc", "gdoc_create"),
+    (
+        r"(?:écris|ecris|mets|note|ajoute)\s+.+\s+(?:dans|sur)\s+"
+        r"(?:le\s*)?(?:google\s*)?doc",
+        "gdoc_write_search",
+    ),
+    (r"(?:ouvre|affiche|montre)\s+(?:le\s*)?(?:google\s*)?doc\b", "gdoc_open"),
+    (r"(?:quel est\s+le\s+)?(?:doc|document)\s+(?:actif|ouvert|en cours)", "gdoc_status"),
+]
+
+V20_RESEARCH_INTENTS = frozenset({
+    "recherche_web",
+    "recherche_actualites",
+    "recherche_wikipedia",
+    "recherche_youtube",
+    "recherche_multi",
+    "gdoc_create",
+    "gdoc_write_search",
+    "gdoc_open",
+    "gdoc_status",
+})
+
+V20_STREAMING_INTENTS = frozenset({
+    "recherche_web",
+    "recherche_actualites",
+    "recherche_wikipedia",
+    "recherche_youtube",
+    "recherche_multi",
+})
+
 INTENT_CATEGORY_MAP: dict[str, str] = {
     "lancer_app": "lancer_app",
     "fermer_app": "fermer_app",
@@ -550,6 +617,11 @@ def _fast_intent(text: str) -> tuple[str, dict] | None:
     if m:
         site, browser_name = _clean_site(m.group(1)), m.group(2).strip()
         return "browser_open_site", {"site": site, "browser": browser_name}
+
+    # PRIORITY 1.5: Recherche web multi-sources + Google Docs (spec v20)
+    for pattern, intent in RECHERCHE_PATTERNS:
+        if re.search(pattern, text_lower, re.IGNORECASE):
+            return intent, {}
 
     # PRIORITY 2: « cherche [query] sur [site] »
     m = re.search(r"(?:cherche|recherche|trouve)\s+(.+?)\s+sur\s+(.+)", text_lower)
@@ -1382,6 +1454,303 @@ def _extract_search_query(text: str) -> str:
     return web_search.extract_query(text)
 
 
+def _extract_research_query(text: str) -> str:
+    """Extrait la requête de recherche depuis le texte utilisateur (spec v20)."""
+    patterns_to_remove = [
+        r"^(?:cherche|recherche|trouve|donne-moi|dis-moi)\s+(?:moi\s+)?(?:des?\s+infos?\s+sur\s+)?",
+        r"^(?:qu(?:'|e)\s*est.ce que|c'est quoi|qui est|quelle est)\s+",
+        r"\s+sur\s+(?:le web|internet|google|wikipedia|plusieurs sources|partout)$",
+        r"\s+(?:dans|sur)\s+(?:le\s*)?(?:google\s*)?doc$",
+        r"\s+(?:et\s+)?(?:note|mets|écris|ecris).*(?:dans|sur)\s+(?:le\s*)?(?:google\s*)?doc$",
+        r"\s+sur\s+youtube$",
+    ]
+    query = text.strip()
+    for pattern in patterns_to_remove:
+        query = re.sub(pattern, "", query, flags=re.IGNORECASE).strip()
+    return query or text.strip()
+
+
+def _wants_doc_output(text: str) -> bool:
+    """Route automatique vers Google Doc si la phrase le demande."""
+    return bool(
+        re.search(
+            r"(?:dans|sur)\s+(?:le\s*)?(?:google\s*)?doc|"
+            r"note(?:r|-)?(?:les|\s)|écris.*doc|ecris.*doc|"
+            r"mets.*doc|ajoute.*doc",
+            text,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _do_web_research(
+    text: str,
+    sources: list[str] | None = None,
+    output: str = "chat",
+    *,
+    stream_to_ui: bool = True,
+) -> str:
+    """Recherche web multi-sources — synthèse chat ou écriture Google Doc."""
+    from actions.web_research import (
+        format_results_for_doc,
+        format_results_for_llm,
+        multi_search,
+    )
+
+    query = _extract_research_query(text)
+    if not query:
+        return "Je n'ai pas compris ta requête de recherche."
+
+    if output == "chat" and _wants_doc_output(text):
+        output = "doc"
+
+    logger.info("Recherche: '%s' sur %s → %s", query, sources, output)
+
+    ui.set_status("thinking")
+    ui.show_toast(f"Recherche en cours : {query}...", toast_type="info")
+    ui.update_thinking_action("Recherche sur le web...")
+    ui.set_response_model(_short_model_label(MODELS["heavy"]))
+
+    results = multi_search(query, sources=sources or ["web", "wikipedia"])
+
+    if not results:
+        ui.set_status("idle")
+        return f"Aucun résultat trouvé pour '{query}'."
+
+    if output == "doc":
+        from actions import gdocs
+
+        active_doc = gdocs.get_active_doc()
+        if not active_doc:
+            ui.set_status("idle")
+            return (
+                "Aucun Google Doc actif. Dis-moi d'abord 'crée un Google Doc [titre]' "
+                "ou 'ouvre le doc [titre]'."
+            )
+        doc_content = format_results_for_doc(results, query)
+        try:
+            gdocs.write_section_to_doc(
+                active_doc["id"],
+                title=f"Recherche : {query}",
+                content=doc_content,
+                heading_level=2,
+            )
+            ui.set_status("idle")
+            try:
+                ui.show_gdoc_link(active_doc["title"], active_doc["url"])
+            except Exception:
+                pass
+            return (
+                f"Résultats de la recherche '{query}' ajoutés dans le doc "
+                f"'{active_doc['title']}'. {active_doc['url']}"
+            )
+        except Exception as exc:
+            ui.set_status("idle")
+            return f"Erreur écriture dans le doc : {exc}"
+
+    llm_input = format_results_for_llm(results, query)
+    synthesis_prompt = (
+        f"Tu es ARIA, un assistant français. Voici des résultats de recherche "
+        f"sur '{query}'. Synthétise-les en un compte-rendu clair et utile en français, "
+        f"en 3-5 paragraphes. Si des URLs YouTube sont présentes, mentionne-les. "
+        f"Sois factuel et précis.\n\n"
+        f"{llm_input}"
+    )
+
+    if stream_to_ui:
+        def on_token(token: str) -> None:
+            ui.append_assistant_text(token)
+
+        synthesis = generate(
+            synthesis_prompt,
+            model=MODELS["heavy"],
+            stream=True,
+            max_tokens=600,
+            temperature=0.3,
+            on_token=on_token,
+        )
+        ui.finalize_assistant_message()
+        ui.set_status("idle")
+    else:
+        synthesis = generate(
+            synthesis_prompt,
+            model=MODELS["heavy"],
+            stream=False,
+            max_tokens=600,
+            temperature=0.3,
+        )
+        ui.set_status("idle")
+
+    return synthesis
+
+
+def _create_gdoc(text: str) -> str:
+    """Crée un nouveau Google Doc et le définit comme actif."""
+    from actions import gdocs
+
+    if not gdocs.is_configured():
+        return (
+            "Google n'est pas configuré. Lance 'python setup_google.py' "
+            "pour connecter ton compte Google."
+        )
+
+    title_match = re.search(
+        r"(?:crée|créer|cree|ouvre|génère|genere)\s+(?:un|le)\s+(?:google\s*)?doc\s+"
+        r"(?:intitulé\s+|nommé\s+|nomme\s+|appelé\s+|appele\s+)?[\"']?(.+?)[\"']?$",
+        text,
+        re.IGNORECASE,
+    )
+    if title_match:
+        title = title_match.group(1).strip().strip("\"'")
+    else:
+        title = f"Recherche ARIA — {datetime.now().strftime('%d/%m/%Y')}"
+
+    try:
+        doc_info = gdocs.create_doc(
+            title=title,
+            initial_content=(
+                f"Document créé par ARIA le "
+                f"{datetime.now().strftime('%d/%m/%Y à %H:%M')}\n\n"
+            ),
+        )
+        gdocs.set_active_doc(doc_info["id"], doc_info["title"], doc_info["url"])
+        gdocs.open_doc_in_browser(doc_info["id"])
+        try:
+            ui.show_gdoc_link(doc_info["title"], doc_info["url"])
+        except Exception:
+            pass
+        return (
+            f"Google Doc '{title}' créé et ouvert dans Chrome. "
+            f"Je peux maintenant y écrire tes recherches. "
+            f"Dis-moi 'note les résultats dans le doc' après une recherche."
+        )
+    except Exception as exc:
+        return f"Erreur création doc : {exc}"
+
+
+def _write_search_to_gdoc(text: str, *, stream_to_ui: bool = True) -> str:
+    """Détecte une recherche dans le texte et l'écrit dans le doc actif."""
+    search_match = re.search(
+        r"(?:écris|ecris|mets|note|ajoute)\s+(?:les?\s+)?(?:résultats?\s+(?:de\s+)?)?"
+        r"(?:la\s+)?(?:recherche\s+(?:sur\s+)?)?[\"']?(.+?)[\"']?\s+"
+        r"(?:dans|sur)\s+(?:le\s*)?(?:google\s*)?doc",
+        text,
+        re.IGNORECASE,
+    )
+    if search_match:
+        query = search_match.group(1).strip()
+    else:
+        stripped = re.sub(
+            r"(?:dans|sur)\s+(?:le\s*)?(?:google\s*)?doc",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
+        query = _extract_research_query(stripped)
+
+    if not query:
+        return "Précise ce que tu veux rechercher et écrire dans le doc."
+
+    return _do_web_research(
+        query,
+        sources=["web", "wikipedia", "news"],
+        output="doc",
+        stream_to_ui=stream_to_ui,
+    )
+
+
+def _open_gdoc() -> str:
+    """Ouvre le doc actif dans Chrome."""
+    from actions import gdocs
+
+    active = gdocs.get_active_doc()
+    if not active:
+        return "Aucun Google Doc actif. Crée-en un d'abord : 'crée un doc [titre]'."
+
+    gdocs.open_doc_in_browser(active["id"])
+    return f"Doc '{active['title']}' ouvert dans Chrome."
+
+
+def _gdoc_status() -> str:
+    """Retourne le statut du doc actif."""
+    from actions import gdocs
+
+    active = gdocs.get_active_doc()
+    if not active:
+        return (
+            "Aucun Google Doc actif pour cette session. "
+            "Dis-moi 'crée un doc [titre]' pour en créer un."
+        )
+    return (
+        f"Doc actif : '{active['title']}'\n"
+        f"URL : {active['url']}\n"
+        f"Toutes tes prochaines recherches avec 'note dans le doc' y seront ajoutées."
+    )
+
+
+def _handle_v20_intent(
+    intent: str,
+    params: dict,
+    text: str,
+    *,
+    stream_to_ui: bool = True,
+) -> str:
+    """Dispatch spec v20 — recherche multi-sources et Google Docs."""
+    del params  # réservé pour extensions futures
+
+    if intent == "recherche_web":
+        output = "doc" if _wants_doc_output(text) else "chat"
+        sources = ["web", "wikipedia"] if output == "chat" else ["web", "wikipedia", "news"]
+        return _do_web_research(text, sources=sources, output=output, stream_to_ui=stream_to_ui)
+
+    if intent == "recherche_actualites":
+        output = "doc" if _wants_doc_output(text) else "chat"
+        return _do_web_research(
+            text, sources=["news"], output=output, stream_to_ui=stream_to_ui
+        )
+
+    if intent == "recherche_wikipedia":
+        query = re.sub(
+            r"(?:qu(?:'|e)\s*est.ce que|c'est quoi|qui est|quelle est)\s+",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        ).strip()
+        output = "doc" if _wants_doc_output(text) else "chat"
+        return _do_web_research(
+            query, sources=["wikipedia"], output=output, stream_to_ui=stream_to_ui
+        )
+
+    if intent == "recherche_youtube":
+        output = "doc" if _wants_doc_output(text) else "chat"
+        return _do_web_research(
+            text, sources=["youtube", "web"], output=output, stream_to_ui=stream_to_ui
+        )
+
+    if intent == "recherche_multi":
+        output = "doc" if _wants_doc_output(text) else "chat"
+        return _do_web_research(
+            text,
+            sources=["web", "news", "wikipedia"],
+            output=output,
+            stream_to_ui=stream_to_ui,
+        )
+
+    if intent == "gdoc_create":
+        return _create_gdoc(text)
+
+    if intent == "gdoc_write_search":
+        return _write_search_to_gdoc(text, stream_to_ui=stream_to_ui)
+
+    if intent == "gdoc_open":
+        return _open_gdoc()
+
+    if intent == "gdoc_status":
+        return _gdoc_status()
+
+    return ""
+
+
 def _execute_ddg_search(intent: str, params: dict, original_text: str) -> str:
     query = _extract_search_query(params.get("query", original_text))
     if intent == "search_geopolitics" and (not query or query == original_text.strip()):
@@ -1442,6 +1811,7 @@ def _speak_already_displayed(text: str) -> None:
 
 def _present_action_result(result: str) -> None:
     """Affiche le résultat d'une action dans le chat puis le lit via TTS."""
+    ui.hide_thinking()
     if not result or not result.strip():
         ui.set_status("idle")
         return
@@ -1723,6 +2093,8 @@ def _conversation_via_generate(
     if stream_to_ui:
         ui.set_status("thinking")
 
+    ui.set_response_model(_short_model_label(model))
+
     if stream_to_ui:
         tts_queue: list[str | None] = []
 
@@ -1931,6 +2303,9 @@ def _execute_action(intent: str, params: dict, text: str) -> str | None:
                 payload = nexus_m.group(1).strip()
             return nexus.send_prompt(payload or query)
 
+        if intent in V20_RESEARCH_INTENTS:
+            return _handle_v20_intent(intent, params, text, stream_to_ui=False)
+
     except Exception as exc:
         logger.error("Action error for %s: %s", intent, exc)
         return f"Erreur: {exc}"
@@ -1945,6 +2320,18 @@ def _route_with_intelligence(
     *,
     stream_to_ui: bool = True,
 ) -> str:
+    if intent in V20_RESEARCH_INTENTS:
+        result = _handle_v20_intent(intent, params, text, stream_to_ui=stream_to_ui)
+        if not result:
+            return ""
+        if stream_to_ui:
+            if intent in V20_STREAMING_INTENTS:
+                _finish_streamed_response(result, already_spoken=False)
+            else:
+                _present_action_result(result)
+        logger.warning("═══ LLM→UI: '%s' ═══", str(result)[:200])
+        return result
+
     if intent in PURE_ACTIONS or intent in API_ONLY:
         result = _execute_action(intent, params, text)
         if not result:
@@ -1988,6 +2375,8 @@ def _route_with_intelligence(
 
 
 def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
+    if intent in V20_RESEARCH_INTENTS:
+        return _handle_v20_intent(intent, params, original_text, stream_to_ui=False)
     if intent == "lancer_app":
         app_param = params.get("app", original_text)
         clean = _extract_app_name(app_param)
@@ -2504,6 +2893,8 @@ def _conversation(text: str, stream_to_ui: bool = True, intent: str = "question_
         logger.info("Réflexion activée -> %s", REASONING_MODEL)
         if stream_to_ui:
             ui.set_status("thinking")
+            ui.update_thinking_action("Génération de la réponse...")
+        ui.set_response_model(_short_model_label(REASONING_MODEL))
         answer, _ = _conversation_via_generate(REASONING_MODEL, max_tokens=2000, stream_to_ui=False)
         if not answer:
             _history.pop()
@@ -2518,6 +2909,7 @@ def _conversation(text: str, stream_to_ui: bool = True, intent: str = "question_
         return answer, False
 
     max_tokens = 150 if conv_mode == "vocal" else 500
+    ui.set_response_model(_short_model_label(chat_model))
     full_response, spoke_streaming = _conversation_via_generate(
         chat_model,
         max_tokens=max_tokens,
@@ -2717,6 +3109,31 @@ def ask_with_actions(text: str) -> str:
     return _execute_parsed_action(action_type, action_value, text)
 
 
+def _short_model_label(model: str) -> str:
+    if not model or model == "auto":
+        return "auto"
+    return model.split(":")[0]
+
+
+def _display_model_name(text: str, intent: str = "") -> str:
+    try:
+        return _short_model_label(resolve_model(text, intent))
+    except Exception:
+        return "auto"
+
+
+def _thinking_action_for_intent(intent: str) -> str:
+    if intent in PURE_ACTIONS:
+        return f"Exécution : {intent}..."
+    if intent in API_THEN_LLM:
+        return "Récupération des données..."
+    if intent in V20_RESEARCH_INTENTS:
+        return "Recherche sur le web..."
+    if intent == "question_libre":
+        return "Génération de la réponse..."
+    return f"Traitement : {intent}..."
+
+
 def generate_daily_brief() -> str:
     import brief
 
@@ -2749,12 +3166,18 @@ def ask(text: str, *, show_user: bool = True) -> None:
         logger.info("Custom command matched: %s -> %s", text, custom)
         if show_user:
             ui.show_user_text(text)
+        ui.show_thinking(
+            model_name=_display_model_name(custom),
+            action="Analyse de la demande...",
+        )
         ui.set_status("thinking")
         sounds.play("thinking")
         # L'action personnalisée (ex: « dodo » -> « éteins le pc ») doit être routée
         # comme un vrai prompt (intent + exécution), pas envoyée telle quelle au chat.
         c_intent, c_params, _ = _resolve_intent_for_routing(custom)
         logger.info("Custom command routing intent: %s", c_intent)
+        ui.update_thinking_action(_thinking_action_for_intent(c_intent))
+        ui.set_response_model(_display_model_name(custom, c_intent))
         try:
             response = _route_with_intelligence(c_intent, c_params, custom, stream_to_ui=True)
             if response:
@@ -2765,17 +3188,27 @@ def ask(text: str, *, show_user: bool = True) -> None:
         except Exception as exc:
             logger.error("Custom command error: %s", exc)
             sounds.play("error")
+            ui.hide_thinking()
             _speak_response(f"Désolé, une erreur s'est produite: {exc}")
+        ui.hide_thinking()
         ui.set_status("idle")
         return
 
     if show_user:
         ui.show_user_text(text)
+
+    ui.show_thinking(
+        model_name=_display_model_name(text),
+        action="Analyse de la demande...",
+    )
     ui.set_status("thinking")
     sounds.play("thinking")
 
     intent, params, _confidence = _resolve_intent_for_routing(text)
     logger.info("Routing intent: %s", intent)
+
+    ui.update_thinking_action(_thinking_action_for_intent(intent))
+    ui.set_response_model(_display_model_name(text, intent))
 
     _refresh_system_prompt()
     memory_engine.record_message("user", text, intent=intent, model=MODEL)
@@ -2815,11 +3248,13 @@ def ask(text: str, *, show_user: bool = True) -> None:
     except Exception as exc:
         logger.error("Routing error: %s", exc)
         sounds.play("error")
+        ui.hide_thinking()
         error_msg = f"Désolé, une erreur s'est produite: {exc}"
         ui.append_assistant_text(error_msg)
         ui.finalize_assistant_message()
         _speak_response(error_msg)
 
+    ui.hide_thinking()
     ui.set_status("idle")
 
 

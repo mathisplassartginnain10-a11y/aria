@@ -15,9 +15,9 @@ sympy
 Pillow
 pywin32
 winshell
-google-auth
-google-auth-oauthlib
-google-api-python-client
+google-auth>=2.0
+google-auth-oauthlib>=1.0
+google-api-python-client>=2.0
 ephem
 ddgs
 numpy

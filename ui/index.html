@@ -136,6 +136,12 @@
         0 10px 34px rgba(0,0,0,0.30);
       overflow: hidden;
     }
+    /* Header : laisser le menu modèles dépasser (sinon invisible) */
+    #header.glass,
+    #header .header-left,
+    .model-picker {
+      overflow: visible;
+    }
     .glass::before {
       content: "";
       position: absolute;
@@ -598,20 +604,18 @@
 
     .model-picker-menu {
       display: none;
-      position: absolute;
-      top: calc(100% + 6px);
-      left: 0;
+      position: fixed;
       min-width: 280px;
       max-width: min(360px, 90vw);
-      max-height: 320px;
+      max-height: min(420px, 60vh);
       overflow-y: auto;
-      background: rgba(var(--glass-tint), calc(var(--glass-alpha) + 0.12));
+      background: rgba(18, 18, 28, 0.96);
       backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-saturate));
       -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-saturate));
       border: 1px solid rgba(255,255,255, calc(var(--glass-rim) * 0.34));
       border-radius: calc(var(--glass-radius) - 4px);
-      box-shadow: 0 10px 34px rgba(0,0,0,0.35);
-      z-index: 1000;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.45);
+      z-index: 20000;
       padding: 8px;
     }
 
@@ -653,6 +657,171 @@
     .model-option.active .model-option-sub {
       color: var(--accent-2);
       opacity: 0.85;
+    }
+
+    /* Cartes de résultats de recherche (spec v20) */
+    .search-results-card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px;
+      padding: 14px 16px;
+      margin-top: 10px;
+      font-size: 13px;
+    }
+
+    .search-source-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .badge-web { background: rgba(108,142,255,0.15); color: #6C8EFF; }
+    .badge-wikipedia { background: rgba(74,222,128,0.15); color: #4ADE80; }
+    .badge-youtube { background: rgba(239,68,68,0.15); color: #F87171; }
+    .badge-news { background: rgba(245,158,11,0.15); color: #F59E0B; }
+
+    .search-result-item {
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .search-result-item:last-child { border-bottom: none; }
+
+    .search-result-title {
+      font-size: 13px;
+      color: var(--text);
+      font-weight: 500;
+      margin-bottom: 3px;
+    }
+
+    .search-result-snippet {
+      font-size: 11px;
+      color: var(--text3);
+      line-height: 1.5;
+    }
+
+    .search-result-url {
+      font-size: 10px;
+      color: var(--accent);
+      margin-top: 3px;
+      cursor: pointer;
+      text-decoration: none;
+    }
+
+    .gdoc-link-card {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      background: rgba(74,222,128,0.08);
+      border: 1px solid rgba(74,222,128,0.2);
+      border-radius: 12px;
+      margin-top: 8px;
+      cursor: pointer;
+      text-decoration: none;
+    }
+
+    .gdoc-link-card:hover { background: rgba(74,222,128,0.14); }
+    .gdoc-link-icon { font-size: 20px; }
+    .gdoc-link-text { font-size: 13px; color: var(--text); }
+    .gdoc-link-sub { font-size: 11px; color: var(--text3); margin-top: 2px; }
+
+    /* Bulle de réflexion (thinking) */
+    .thinking-wrap {
+      align-self: flex-start;
+      opacity: 0.95;
+    }
+
+    .thinking-content {
+      background: rgba(255,255,255,0.04);
+      border-radius: 4px 18px 18px 18px;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-width: 280px;
+    }
+
+    .model-label {
+      font-size: 10px;
+      color: var(--text3);
+      letter-spacing: 0.3px;
+      opacity: 0.7;
+    }
+
+    .action-log {
+      font-size: 11px;
+      color: var(--accent);
+      opacity: 0.8;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: opacity 0.2s;
+    }
+
+    .action-log::before {
+      content: '⟳';
+      display: inline-block;
+      animation: spin 1.2s linear infinite;
+    }
+
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
+
+    .action-flash { opacity: 1 !important; }
+
+    .thinking-dots {
+      display: flex;
+      gap: 5px;
+      align-items: center;
+      height: 16px;
+    }
+
+    .thinking-dots span {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: rgba(108,142,255,0.5);
+      animation: thinkDot 1.4s ease-in-out infinite;
+    }
+
+    .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes thinkDot {
+      0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+      30%            { transform: translateY(-6px); opacity: 1; }
+    }
+
+    .bubble-wrap-outer {
+      display: flex;
+      flex-direction: column;
+      align-self: flex-start;
+      max-width: 74%;
+    }
+
+    .bubble-wrap-outer.center { align-self: center; }
+
+    .model-badge {
+      font-size: 10px;
+      color: var(--text3);
+      margin-left: 34px;
+      margin-bottom: 3px;
+      opacity: 0.6;
+      letter-spacing: 0.2px;
+    }
+
+    .bubble-wrap-outer.no-avatar .model-badge {
+      margin-left: 4px;
     }
 
     .hbtn {
@@ -1599,6 +1768,7 @@ const aria = {
   },
   streamingCursor: null,
   currentWrap: null,
+  currentOuter: null,
   currentContent: null,
   presetKeys: ['vol','etude','gaming','detente','nuit'],
   defaultPresets: {
@@ -1868,13 +2038,21 @@ const aria = {
     }
     document.addEventListener('click', e => {
       const picker = document.getElementById('model-picker');
-      if (picker?.classList.contains('open') && !picker.contains(e.target)) {
+      const menu = document.getElementById('model-picker-menu');
+      const inPicker = picker?.contains(e.target) || menu?.contains(e.target);
+      if (picker?.classList.contains('open') && !inPicker) {
         picker.classList.remove('open');
+        this._restoreModelMenuHome();
       }
       const presetsSheet = document.getElementById('mobile-presets-sheet');
       if (presetsSheet?.classList.contains('open') && !presetsSheet.contains(e.target) &&
           !e.target.closest('.mobile-nav-btn')) {
         this.closeMobilePresets();
+      }
+    });
+    window.addEventListener('resize', () => {
+      if (document.getElementById('model-picker')?.classList.contains('open')) {
+        this.positionModelMenu();
       }
     });
 
@@ -2333,7 +2511,10 @@ const aria = {
   },
 
   appendToken(token) {
+    this.hideThinkingBubble();
     if (!this.currentWrap) {
+      const outer = document.createElement('div');
+      outer.className = 'bubble-wrap-outer' + (this.ariaAlign === 'center' ? ' center' : '') + (this.showAvatars ? '' : ' no-avatar');
       const wrap = document.createElement('div');
       wrap.className = 'bubble-aria-wrap' + (this.ariaAlign === 'center' ? ' center' : '') + (this.showAvatars ? '' : ' no-avatar');
       wrap.innerHTML = `
@@ -2342,7 +2523,9 @@ const aria = {
           <div class="bubble-content"></div>
           <button type="button" class="copy-btn" onclick="aria.copyBubble(this)">Copier</button>
         </div>`;
-      document.getElementById('chat-messages').appendChild(wrap);
+      outer.appendChild(wrap);
+      document.getElementById('chat-messages').appendChild(outer);
+      this.currentOuter = outer;
       this.currentWrap = wrap;
       this.currentContent = wrap.querySelector('.bubble-content');
       this.streamingCursor = document.createElement('span');
@@ -2354,11 +2537,68 @@ const aria = {
     this.scrollChat();
   },
 
-  finalizeMessage() {
+  finalizeMessage(modelName = '') {
     this.streamingCursor?.remove();
+    if (modelName && this.currentWrap && this.currentOuter) {
+      const badge = document.createElement('div');
+      badge.className = 'model-badge';
+      badge.textContent = `via ${modelName}`;
+      this.currentOuter.insertBefore(badge, this.currentOuter.firstChild);
+    } else if (modelName && this.currentWrap && !this.currentOuter) {
+      const outer = document.createElement('div');
+      outer.className = 'bubble-wrap-outer' + (this.ariaAlign === 'center' ? ' center' : '') + (this.showAvatars ? '' : ' no-avatar');
+      const badge = document.createElement('div');
+      badge.className = 'model-badge';
+      badge.textContent = `via ${modelName}`;
+      const parent = this.currentWrap.parentNode;
+      parent.insertBefore(outer, this.currentWrap);
+      outer.appendChild(badge);
+      outer.appendChild(this.currentWrap);
+      this.currentOuter = outer;
+    }
     this.streamingCursor = null;
     this.currentWrap = null;
     this.currentContent = null;
+    this.currentOuter = null;
+  },
+
+  finalizeAssistantMessage(modelName = '') {
+    this.finalizeMessage(modelName);
+  },
+
+  showThinkingBubble(modelName = '', action = '') {
+    this.hideThinkingBubble();
+
+    const messages = document.getElementById('chat-messages');
+    if (!messages) return;
+
+    const div = document.createElement('div');
+    div.id = 'thinking-bubble';
+    div.className = 'bubble-aria-wrap thinking-wrap' + (this.ariaAlign === 'center' ? ' center' : '') + (this.showAvatars ? '' : ' no-avatar');
+    div.innerHTML = `
+      <div class="bubble-avatar">${this.logoAvatarHtml()}</div>
+      <div class="thinking-content">
+        ${modelName ? `<div class="model-label">via ${this.esc(modelName)}</div>` : ''}
+        <div class="action-log" id="thinking-action">${this.esc(action || 'Réflexion...')}</div>
+        <div class="thinking-dots">
+          <span></span><span></span><span></span>
+        </div>
+      </div>`;
+    messages.appendChild(div);
+    document.getElementById('empty-state')?.classList.add('hidden');
+    this.scrollChat();
+  },
+
+  updateThinkingAction(action) {
+    const el = document.getElementById('thinking-action');
+    if (!el) return;
+    el.textContent = action || 'Réflexion...';
+    el.classList.add('action-flash');
+    setTimeout(() => el.classList.remove('action-flash'), 400);
+  },
+
+  hideThinkingBubble() {
+    document.getElementById('thinking-bubble')?.remove();
   },
 
   copyBubble(btn) {
@@ -2383,6 +2623,36 @@ const aria = {
   },
 
   showError(text) { this.showToast(text, 'error', 5000); },
+
+  showGdocLink(title, url) {
+    const chat = document.getElementById('chat-messages');
+    if (!chat) return;
+    document.getElementById('empty-state')?.classList.add('hidden');
+    const card = document.createElement('a');
+    card.className = 'gdoc-link-card ontop';
+    card.href = url;
+    card.target = '_blank';
+    card.rel = 'noopener noreferrer';
+    card.innerHTML = `
+      <span class="gdoc-link-icon">📄</span>
+      <div>
+        <div class="gdoc-link-text">${this.esc(title || 'Google Doc')}</div>
+        <div class="gdoc-link-sub">${this.esc(url || '')}</div>
+      </div>`;
+    chat.appendChild(card);
+    chat.scrollTop = chat.scrollHeight;
+  },
+
+  showSearchResultsCard(sourcesHtml) {
+    const chat = document.getElementById('chat-messages');
+    if (!chat || !sourcesHtml) return;
+    document.getElementById('empty-state')?.classList.add('hidden');
+    const wrap = document.createElement('div');
+    wrap.className = 'search-results-card ontop';
+    wrap.innerHTML = sourcesHtml;
+    chat.appendChild(wrap);
+    chat.scrollTop = chat.scrollHeight;
+  },
 
   showPartialTranscription(text) {
     const input = document.getElementById('text-input');
@@ -2648,19 +2918,55 @@ const aria = {
   },
 
   async loadModelPicker() {
+    const menu = document.getElementById('model-picker-menu');
+    if (menu && document.getElementById('model-picker')?.classList.contains('open')) {
+      menu.innerHTML = `<div class="model-option-sub" style="padding:10px 12px;color:var(--text3)">Chargement…</div>`;
+    }
     try {
       const data = await this._fetchAvailableModels();
       this._modelPickerData = data;
       this.renderModelMenu(data);
       this.updateModelPickerLabel(data.current || 'auto');
+      if (document.getElementById('model-picker')?.classList.contains('open')) {
+        this.positionModelMenu();
+      }
     } catch (e) {
       console.warn('loadModelPicker', e);
-      const menu = document.getElementById('model-picker-menu');
       if (menu) {
         menu.innerHTML = `<div class="model-option-sub" style="padding:10px 12px;color:var(--text3)">
           Impossible de charger les modèles — Ollama démarré ?
         </div>`;
       }
+    }
+  },
+
+  positionModelMenu() {
+    const btn = document.getElementById('model-picker-btn');
+    const menu = document.getElementById('model-picker-menu');
+    const picker = document.getElementById('model-picker');
+    if (!btn || !menu || !picker?.classList.contains('open')) return;
+
+    if (menu.parentElement !== document.body) {
+      menu._modelPickerHome = picker;
+      document.body.appendChild(menu);
+    }
+
+    const r = btn.getBoundingClientRect();
+    const menuW = Math.max(280, r.width);
+    let left = r.left;
+    if (left + menuW > window.innerWidth - 12) {
+      left = Math.max(12, window.innerWidth - menuW - 12);
+    }
+    menu.style.top = `${Math.round(r.bottom + 6)}px`;
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.minWidth = `${Math.round(menuW)}px`;
+  },
+
+  _restoreModelMenuHome() {
+    const menu = document.getElementById('model-picker-menu');
+    const home = menu?._modelPickerHome || document.getElementById('model-picker');
+    if (menu && home && menu.parentElement === document.body) {
+      home.appendChild(menu);
     }
   },
 
@@ -2795,9 +3101,17 @@ const aria = {
       ];
     }
 
+    if (!data.ollama_running && !data.local_models?.length) {
+      menu.innerHTML = `<div class="model-option-sub" style="padding:10px 12px;color:var(--error,#f87171)">
+        ⚠️ Ollama non disponible<br>
+        <span style="font-size:11px;opacity:0.8">Lance Ollama puis rouvre ce menu</span>
+      </div>`;
+      return;
+    }
+
     if (!options.length) {
       menu.innerHTML = `<div class="model-option-sub" style="padding:10px 12px;color:var(--text3)">
-        ${data.ollama_running ? 'Aucun modèle installé' : 'Ollama non disponible'}
+        Aucun modèle installé — <code style="font-size:10px">ollama pull llama3.2:1b</code>
       </div>`;
       return;
     }
@@ -2811,16 +3125,25 @@ const aria = {
     }).join('');
   },
 
-  toggleModelMenu(event) {
+  async toggleModelMenu(event) {
     event?.stopPropagation();
     const picker = document.getElementById('model-picker');
-    const willOpen = !picker?.classList.contains('open');
-    if (willOpen) this.loadModelPicker();
-    picker?.classList.toggle('open');
+    if (!picker) return;
+    const willOpen = !picker.classList.contains('open');
+    if (willOpen) {
+      picker.classList.add('open');
+      this.positionModelMenu();
+      await this.loadModelPicker();
+      this.positionModelMenu();
+    } else {
+      picker.classList.remove('open');
+      this._restoreModelMenuHome();
+    }
   },
 
   closeModelMenu() {
     document.getElementById('model-picker')?.classList.remove('open');
+    this._restoreModelMenuHome();
   },
 
   async pickModel(modelId) {
@@ -2900,7 +3223,26 @@ const aria = {
     if (overlay) overlay.style.display = 'none';
   },
 
-  addAriaBubble(text) {
+  addAriaBubble(text, scroll = true, modelName = '') {
+    if (modelName) {
+      this.hideThinkingBubble();
+      const messages = document.getElementById('chat-messages');
+      const outer = document.createElement('div');
+      outer.className = 'bubble-wrap-outer' + (this.ariaAlign === 'center' ? ' center' : '') + (this.showAvatars ? '' : ' no-avatar');
+      outer.innerHTML = `
+        <div class="model-badge">via ${this.esc(modelName)}</div>
+        <div class="bubble-aria-wrap${this.ariaAlign === 'center' ? ' center' : ''}${this.showAvatars ? '' : ' no-avatar'}">
+          <div class="bubble-avatar">${this.logoAvatarHtml()}</div>
+          <div class="bubble-body">
+            <div class="bubble-content">${this.esc(text)}</div>
+            <button type="button" class="copy-btn" onclick="aria.copyBubble(this)">Copier</button>
+          </div>
+        </div>`;
+      messages.appendChild(outer);
+      this.updateEmpty();
+      if (scroll) this.scrollChat();
+      return;
+    }
     this.appendToken(text);
     this.finalizeMessage();
   },
