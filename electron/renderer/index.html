@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';
+             img-src 'self' data: blob: http://127.0.0.1:*;
+             connect-src ws://127.0.0.1:*;">
+  <title>ARIA</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- Barre de titre custom (sans frame natif) -->
+<div id="title-bar">
+  <div id="title-bar-drag"></div>
+  <div id="window-controls">
+    <button type="button" id="win-minimize" title="Réduire">─</button>
+    <button type="button" id="win-maximize" title="Agrandir">□</button>
+    <button type="button" id="win-close" class="close-btn" title="Fermer">✕</button>
+  </div>
+</div>
+
+<!-- Fond d'écran -->
+<div id="wallpaper-layer">
+  <div id="wallpaper-image"></div>
+  <div id="wallpaper-overlay"></div>
+</div>
+
+<!-- Indicateur focus mode -->
+<div id="focus-indicator">🎯 Mode focus</div>
+
+<!-- Layout principal -->
+<div id="app-layout">
+
+  <!-- Sidebar -->
+  <aside id="sidebar">
+    <!-- Logo + statut -->
+    <div id="sidebar-header">
+      <div id="aria-logo" class="logo-idle">
+        <svg viewBox="0 0 64 64" width="44" height="44">
+          <defs>
+            <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#6C8EFF"/>
+              <stop offset="100%" stop-color="#A78BFA"/>
+            </linearGradient>
+            <linearGradient id="scanGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="rgba(108,142,255,0)"/>
+              <stop offset="50%" stop-color="rgba(108,142,255,0.9)"/>
+              <stop offset="100%" stop-color="rgba(108,142,255,0)"/>
+            </linearGradient>
+          </defs>
+          <g class="logo-ticks">
+            <line x1="32" y1="2" x2="32" y2="6" class="tick" style="--i:0"/>
+            <line x1="32" y1="58" x2="32" y2="62" class="tick" style="--i:1"/>
+            <line x1="2" y1="32" x2="6" y2="32" class="tick" style="--i:2"/>
+            <line x1="58" y1="32" x2="62" y2="32" class="tick" style="--i:3"/>
+            <line x1="11" y1="11" x2="14" y2="14" class="tick" style="--i:4"/>
+            <line x1="53" y1="11" x2="50" y2="14" class="tick" style="--i:5"/>
+            <line x1="11" y1="53" x2="14" y2="50" class="tick" style="--i:6"/>
+            <line x1="53" y1="53" x2="50" y2="50" class="tick" style="--i:7"/>
+          </g>
+          <circle class="logo-scan" cx="32" cy="32" r="29" fill="none" stroke="url(#scanGrad)" stroke-width="2" stroke-dasharray="15 200" stroke-linecap="round"/>
+          <circle class="logo-arc logo-arc-1" cx="32" cy="32" r="29" fill="none" stroke="url(#logoGrad)" stroke-width="1.5" stroke-dasharray="100 82" stroke-linecap="round"/>
+          <circle class="logo-arc logo-arc-2" cx="32" cy="32" r="23" fill="none" stroke="rgba(108,142,255,0.5)" stroke-width="1.5" stroke-dasharray="70 75" stroke-linecap="round"/>
+          <circle class="logo-arc logo-arc-3" cx="32" cy="32" r="17" fill="none" stroke="rgba(167,139,250,0.4)" stroke-width="1" stroke-dasharray="50 56" stroke-linecap="round"/>
+          <circle class="logo-core" cx="32" cy="32" r="9" fill="url(#logoGrad)"/>
+          <path class="logo-mark" d="M32 26 L37 38 L34 38 L32.5 34 L31.5 34 L30 38 L27 38 Z" fill="rgba(12,12,15,0.9)"/>
+        </svg>
+      </div>
+      <div>
+        <div id="assistant-name">ARIA</div>
+        <div id="status-text">En veille</div>
+      </div>
+    </div>
+
+    <!-- Nouvelle conversation -->
+    <button id="new-conv-btn" onclick="app.newConversation()">
+      + Nouvelle conversation
+    </button>
+
+    <!-- Liste des conversations -->
+    <div id="conversations-list"></div>
+
+    <!-- Bouton tout supprimer -->
+    <button id="delete-all-btn" onclick="app.deleteAllConversations()">
+      🗑️ Tout supprimer
+    </button>
+  </aside>
+
+  <!-- Zone principale -->
+  <main id="main-area">
+
+    <!-- Header -->
+    <header id="header">
+      <div id="header-left">
+        <span id="conv-title">Nouvelle conversation</span>
+      </div>
+      <div id="header-right">
+        <button id="export-btn" onclick="app.exportConversation()" title="Exporter PDF">📄</button>
+        <button id="settings-btn" onclick="app.toggleSettings()" title="Paramètres">⚙️</button>
+      </div>
+    </header>
+
+    <!-- Zone de messages -->
+    <div id="messages-container">
+      <div id="messages"></div>
+    </div>
+
+    <!-- Zone de saisie -->
+    <div id="input-area">
+      <div id="input-zone">
+        <!-- Bouton micro -->
+        <div id="mic-orb-container">
+          <div class="mic-ring" id="mic-ring-1"></div>
+          <div class="mic-ring" id="mic-ring-2"></div>
+          <div class="mic-ring" id="mic-ring-3"></div>
+          <button id="mic-btn" onclick="app.toggleMic()" class="mic-idle" title="Micro (activer/désactiver)">
+            🎤
+          </button>
+        </div>
+
+        <!-- Champ texte -->
+        <textarea
+          id="text-input"
+          placeholder="Message..."
+          rows="1"
+          onkeydown="app.handleInputKeydown(event)"
+          oninput="app.adjustTextarea(this)"
+        ></textarea>
+
+        <!-- Bouton fichier -->
+        <label id="file-btn" title="Joindre des fichiers">
+          📎
+          <input
+            type="file"
+            id="file-input"
+            multiple
+            accept="image/*,video/*,.pdf,.txt,.py,.js,.html,.css,.json,.yaml,.md,.csv"
+            style="display:none"
+            onchange="app.handleFiles(this.files)"
+          >
+        </label>
+
+        <!-- Bouton envoyer -->
+        <button id="send-btn" onclick="app.sendMessage()" title="Envoyer">➤</button>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Panneau paramètres -->
+  <aside id="settings-panel" class="hidden">
+    <div id="settings-header">
+      <span>Paramètres</span>
+      <button type="button" id="settings-close-btn">✕</button>
+    </div>
+
+    <div id="settings-content">
+
+      <!-- Apparence -->
+      <div class="settings-accordion open" id="acc-apparence">
+        <div class="acc-header" onclick="app.toggleAccordion('apparence')">
+          🎨 Apparence <span class="acc-chevron">▾</span>
+        </div>
+        <div class="acc-body">
+          <div class="setting-row">
+            <label>Thème</label>
+            <div class="theme-pills">
+              <button onclick="app.setTheme('slate')" class="theme-pill active" data-theme="slate">Slate</button>
+              <button onclick="app.setTheme('warm')" class="theme-pill" data-theme="warm">Warm</button>
+              <button onclick="app.setTheme('forest')" class="theme-pill" data-theme="forest">Forest</button>
+              <button onclick="app.setTheme('rose')" class="theme-pill" data-theme="rose">Rose</button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <label>Transparence</label>
+            <input type="range" id="set-glass" min="0" max="100" value="60"
+              oninput="app.setGlassIntensity(this.value)">
+          </div>
+          <!-- Wallpapers -->
+          <div class="setting-label">Fond d'écran</div>
+          <div class="wallpaper-presets">
+            <div class="wp-thumb wp-aurora" onclick="app.setWallpaper('aurora')" title="Aurora"></div>
+            <div class="wp-thumb wp-sunset" onclick="app.setWallpaper('sunset')" title="Sunset"></div>
+            <div class="wp-thumb wp-midnight" onclick="app.setWallpaper('midnight')" title="Midnight"></div>
+            <div class="wp-thumb wp-forest" onclick="app.setWallpaper('forest')" title="Forest"></div>
+            <div class="wp-thumb wp-mesh" onclick="app.setWallpaper('mesh')" title="Mesh"></div>
+            <div class="wp-thumb wp-mono" onclick="app.setWallpaper('mono')" title="Mono"></div>
+          </div>
+          <div id="wallpaper-custom-grid"></div>
+          <label class="settings-btn-outline">
+            📷 Importer une image
+            <input type="file" accept="image/*" style="display:none"
+              onchange="app.uploadWallpaper(this.files[0]);this.value=''">
+          </label>
+        </div>
+      </div>
+
+      <!-- Voix -->
+      <div class="settings-accordion" id="acc-voix">
+        <div class="acc-header" onclick="app.toggleAccordion('voix')">
+          🎙️ Voix <span class="acc-chevron">▸</span>
+        </div>
+        <div class="acc-body hidden">
+          <div class="setting-row">
+            <label>TTS activé</label>
+            <input type="checkbox" id="set-tts" onchange="app.saveSetting('tts_enabled', this.checked)">
+          </div>
+          <div class="setting-row">
+            <label>Vitesse</label>
+            <input type="range" id="set-tts-rate" min="-50" max="50" value="0"
+              oninput="app.saveSetting('tts_rate', parseInt(this.value))">
+          </div>
+        </div>
+      </div>
+
+      <!-- Modèles IA -->
+      <div class="settings-accordion" id="acc-modeles">
+        <div class="acc-header" onclick="app.toggleAccordion('modeles')">
+          🤖 Modèles IA <span class="acc-chevron">▸</span>
+        </div>
+        <div class="acc-body hidden">
+          <div id="model-settings">
+            <div class="loading-text">Cliquer pour charger...</div>
+          </div>
+          <button class="settings-btn-outline" onclick="app.loadModelSettings()" style="margin-top:8px">
+            🔄 Rafraîchir
+          </button>
+        </div>
+      </div>
+
+      <!-- Micro -->
+      <div class="settings-accordion" id="acc-micro">
+        <div class="acc-header" onclick="app.toggleAccordion('micro')">
+          🎤 Micro <span class="acc-chevron">▸</span>
+        </div>
+        <div class="acc-body hidden">
+          <div class="setting-row">
+            <label>Device index</label>
+            <input type="number" id="set-device-index" placeholder="auto"
+              onchange="app.saveSetting('stt.device_index', parseInt(this.value) || null)">
+          </div>
+          <div class="setting-row">
+            <label>Modèle Whisper</label>
+            <select id="set-whisper-model" onchange="app.saveSetting('stt.model', this.value)">
+              <option value="tiny">Tiny (rapide)</option>
+              <option value="base">Base</option>
+              <option value="small" selected>Small ★</option>
+              <option value="medium">Medium (précis)</option>
+            </select>
+          </div>
+          <button class="settings-btn-outline" onclick="app.runMicDiagnostic()">
+            🔍 Diagnostiquer le micro
+          </button>
+        </div>
+      </div>
+
+      <!-- Système -->
+      <div class="settings-accordion" id="acc-systeme">
+        <div class="acc-header" onclick="app.toggleAccordion('systeme')">
+          ⚙️ Système <span class="acc-chevron">▸</span>
+        </div>
+        <div class="acc-body hidden">
+          <div class="setting-row">
+            <label>Brief quotidien</label>
+            <input type="checkbox" id="set-daily-brief"
+              onchange="app.saveSetting('daily_brief_enabled', this.checked)">
+          </div>
+          <div class="setting-row">
+            <label>Tuer Ollama à la fermeture</label>
+            <input type="checkbox" id="set-kill-ollama" checked
+              onchange="app.saveSetting('kill_ollama_on_exit', this.checked)">
+          </div>
+          <div class="nexus-status">
+            <span>Nexus (code)</span>
+            <span id="nexus-badge">Non configuré</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </aside>
+
+</div>
+
+<!-- Modal sélection mode -->
+<div id="mode-select-overlay" class="modal-overlay hidden">
+  <div id="mode-select-card">
+    <div id="mode-select-logo"><!-- Logo SVG mini --></div>
+    <div id="mode-select-title">Comment veux-tu échanger ?</div>
+    <div id="mode-select-buttons">
+      <button type="button" data-mode="ecrit" class="mode-select-btn">
+        <span>💬</span>
+        <span>Écrit</span>
+      </button>
+      <button type="button" data-mode="vocal" class="mode-select-btn">
+        <span>🎙️</span>
+        <span>Vocal</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

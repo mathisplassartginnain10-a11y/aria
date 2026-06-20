@@ -26,7 +26,7 @@ def load_checklist(name: str) -> dict:
 def _sync_ui() -> None:
     progress = get_progress()
     try:
-        import ui
+        import ui_bridge as ui
 
         if progress:
             ui.update_checklist_ui(progress["section"], progress["item"], progress["total"])

@@ -57,5 +57,8 @@ crash.log
 
 # Expo / React Native
 aria-mobile/node_modules/
+
+# Electron
+electron/node_modules/
 aria-mobile/.expo/
 aria-mobile/dist/

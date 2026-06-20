@@ -540,7 +540,7 @@ def open_site(site_name: str, browser: str | None = None) -> str:
     return open_url(url, browser=browser)
 
 
-def search_within_site(site: str, query: str) -> str:
+def search_within_site(site: str, query: str, browser: str | None = None) -> str:
     """Recherche à l'intérieur d'un site spécifique."""
     q = quote(query)
     site_lower = site.lower().strip()
@@ -596,11 +596,11 @@ def search_within_site(site: str, query: str) -> str:
 
     for key, url in site_search_patterns.items():
         if key in site_lower or site_lower in key:
-            return open_url(url)
+            return open_url(url, browser=browser)
 
     site_domain = resolve_site_url(site_lower).replace("https://", "").replace("http://", "").strip("/")
     google_url = f"https://www.google.com/search?q=site:{site_domain}+{quote_plus(query)}"
-    return open_url(google_url)
+    return open_url(google_url, browser=browser)
 
 
 def search_current_page(query: str) -> str:

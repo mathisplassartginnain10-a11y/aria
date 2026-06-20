@@ -24,7 +24,7 @@ from flask import Flask, Response, jsonify, request, stream_with_context
 import app_paths
 import llm
 import memory_engine
-import ollama_manager
+import llamacpp_manager
 import stt
 from actions import apps, presets, system
 
@@ -166,7 +166,7 @@ def ping():
         "local_ip": info["ip"],
         "port": info["port"],
         "qr_payload": info["qr_payload"],
-        "ollama_running": ollama_manager.is_running(),
+        "ollama_running": llamacpp_manager.is_running(),
         "whisper_ready": stt.is_ready(),
     })
 
@@ -253,23 +253,9 @@ def ask_fast():
             logger.exception("ask_fast: action regex échouée")
 
     try:
-        response = req.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": _chat_model(),
-                "prompt": text,
-                "stream": False,
-                "keep_alive": llm.OLLAMA_KEEP_ALIVE,
-                "options": {
-                    "num_predict": 150,
-                    "temperature": 0.7,
-                    "top_p": 0.9,
-                },
-            },
-            timeout=30,
-        )
-        response.raise_for_status()
-        result = response.json().get("response", "")
+        result = llm.generate(text, model=_chat_model(), stream=False, max_tokens=150, temperature=0.7)
+        if result.startswith("Erreur"):
+            return jsonify({"error": result}), 500
         set_cached(text, result)
         return jsonify({"response": result, "source": "llm"})
     except Exception as exc:
@@ -278,23 +264,17 @@ def ask_fast():
 
 @app.route("/warmup", methods=["POST"])
 def warmup():
-    """Pré-charge le modèle mobile dans Ollama."""
+    """Pré-charge le modèle mobile dans llama.cpp."""
     if not check_auth(request):
         return jsonify({"error": "Non autorisé"}), 401
 
     def _warm():
         try:
-            req.post(
-                "http://localhost:11434/api/generate",
-                json={
-                    "model": _chat_model(),
-                    "prompt": "",
-                    "keep_alive": llm.OLLAMA_KEEP_ALIVE,
-                },
-                timeout=30,
-            )
+            model = _chat_model()
+            matched = llm._resolve_model_with_fallback(model)
+            llamacpp_manager.start_model_server(matched)
         except Exception as exc:
-            logger.warning("Warmup Ollama échoué: %s", exc)
+            logger.warning("Warmup llama.cpp échoué: %s", exc)
 
     threading.Thread(target=_warm, daemon=True).start()
     return jsonify({"status": "warming up"})
@@ -380,7 +360,7 @@ def ask_stream():
         response = llm._ollama_request(llm._history, stream=True, model=_chat_model())
         if response is None:
             llm._history.pop()
-            yield f"data: {json.dumps({'error': 'Ollama indisponible'})}\n\n"
+            yield f"data: {json.dumps({'error': 'llama.cpp indisponible'})}\n\n"
             return
 
         full = ""
@@ -451,7 +431,7 @@ def status():
     import psutil
 
     return jsonify({
-        "ollama_running": ollama_manager.is_running(),
+        "ollama_running": llamacpp_manager.is_running(),
         "cpu_percent": psutil.cpu_percent(),
         "ram_percent": psutil.virtual_memory().percent,
         "pc_name": socket.gethostname(),
@@ -489,8 +469,9 @@ def list_presets():
     items = [
         {
             "key": key,
-            "label": data.get("label", key),
-            "icon": data.get("icon", "⚡"),
+            "label": data.get("name") or data.get("label", key),
+            "name": data.get("name") or data.get("label", key),
+            "icon": data.get("icon", "⚙️"),
             "active": presets.get_active_preset() == key,
         }
         for key, data in merged.items()
@@ -568,12 +549,13 @@ def start_mobile_server(
 
     cfg = config or _load_config()
     _apply_mobile_config(cfg)
-    ollama_manager.configure(cfg.get("ollama_path", ""))
+    llamacpp_manager.configure(cfg)
 
-    if ensure_ollama and not ollama_manager.is_running():
-        logger.info("Démarrage Ollama pour le serveur mobile...")
-        ollama_manager.start()
-        ollama_manager.wait_until_ready(timeout=30)
+    if ensure_ollama and not llamacpp_manager.is_running():
+        logger.info("Démarrage llama.cpp pour le serveur mobile...")
+        available = llamacpp_manager.list_available_models()
+        if available:
+            llamacpp_manager.start_model_server(available[0])
 
     port = MOBILE_PORT
 

@@ -1,0 +1,54 @@
+{
+  "name": "aria-assistant",
+  "version": "1.0.0",
+  "description": "ARIA — Assistant Personnel IA Local",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "ARIA_DEV=1 electron .",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "pack": "electron-builder --dir"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.0"
+  },
+  "build": {
+    "appId": "com.aria.assistant",
+    "productName": "ARIA",
+    "directories": {
+      "output": "../dist"
+    },
+    "win": {
+      "target": ["nsis", "portable"],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerLanguages": ["French"],
+      "language": "1036"
+    },
+    "extraResources": [
+      {
+        "from": "../python",
+        "to": "python",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/.venv/**",
+          "!**/node_modules/**"
+        ]
+      },
+      {
+        "from": "../data",
+        "to": "data",
+        "filter": ["checklists/**", "*.yaml"]
+      }
+    ]
+  }
+}

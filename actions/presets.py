@@ -129,6 +129,14 @@ def _as_app_list(value) -> list[str]:
     return []
 
 
+def get_preset_display(key: str) -> tuple[str, str]:
+    """Retourne (icon, name) d'un preset depuis la config fusionnée."""
+    preset = get_merged_presets().get(_normalize_key(key), {})
+    icon = preset.get("icon", "⚙️")
+    name = preset.get("name") or preset.get("label", key.capitalize())
+    return icon, name
+
+
 def get_merged_presets() -> dict[str, dict]:
     """Fusionne défauts + config.yaml + customs UI. Tous tes modes, une seule source."""
     config = _load_config_presets()
@@ -145,8 +153,10 @@ def get_merged_presets() -> dict[str, dict]:
             item.update(config[key])
         if isinstance(custom.get(key), dict):
             item.update(custom[key])
-        item.setdefault("label", PRESETS.get(key, {}).get("label", key.capitalize()))
-        item.setdefault("icon", PRESETS.get(key, {}).get("icon", "⚡"))
+        display_name = item.get("name") or item.get("label") or PRESETS.get(key, {}).get("label", key.capitalize())
+        item["name"] = display_name
+        item["label"] = display_name
+        item.setdefault("icon", PRESETS.get(key, {}).get("icon", "⚙️"))
         merged[key] = item
     return merged
 
@@ -159,7 +169,12 @@ def match_in_text(text: str) -> str | None:
     """Retrouve un mode mentionné dans une phrase (gère les accents, plus long d'abord)."""
     t = text.lower()
     candidates: dict[str, str] = {k: k for k in get_merged_presets()}
-    candidates.update(_ALIASES)  # alias accentués (« étude », « détente »…)
+    candidates.update(_ALIASES)
+    for k, preset in get_merged_presets().items():
+        for field in ("name", "label"):
+            val = str(preset.get(field) or "").strip().lower()
+            if len(val) >= 3:
+                candidates[val] = k
     for token in sorted(candidates, key=len, reverse=True):
         if len(token) >= 3 and re.search(rf"\b{re.escape(token)}\b", t):
             return _normalize_key(candidates[token])
@@ -189,6 +204,7 @@ def create_preset(name: str, config: dict) -> str:
 
 def activate(key: str) -> str:
     name = _normalize_key(key)
+    icon, display_name = get_preset_display(name)
     merged = get_merged_presets()
     preset = merged.get(name)
     if not preset:
@@ -235,7 +251,7 @@ def activate(key: str) -> str:
 
     _patch_ui_state({"active_preset": name, "active_preset_opened": opened_ok})
 
-    message = preset.get("message", f"Mode {name} activé.")
+    message = preset.get("message") or f"Mode {icon} {display_name} activé."
     details: list[str] = []
     if opened_ok:
         details.append("ouvert : " + ", ".join(opened_ok))

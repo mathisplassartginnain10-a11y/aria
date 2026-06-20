@@ -48,7 +48,7 @@ def set_focus_mode(enabled: bool, duration_minutes: int | None = None) -> None:
     _save_config(cfg)
     logger.info("Mode focus: %s", "activé" if enabled else "désactivé")
     try:
-        import ui
+        import ui_bridge as ui
 
         ui.update_focus_indicator(enabled)
     except Exception:

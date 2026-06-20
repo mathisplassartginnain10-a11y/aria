@@ -17,7 +17,7 @@ import memory
 import memory_engine
 import sounds
 import tts
-import ui
+import ui_bridge as ui
 import app_paths
 from actions import (
     apps,
@@ -47,6 +47,13 @@ logger = logging.getLogger(__name__)
 _CONFIG_PATH = app_paths.config_path()
 with _CONFIG_PATH.open("r", encoding="utf-8") as f:
     _config = yaml.safe_load(f)
+
+try:
+    import llamacpp_manager
+
+    llamacpp_manager.configure(_config if isinstance(_config, dict) else {})
+except Exception:
+    pass
 
 MODELS: dict[str, str] = {
     "fast": "llama3.1:8b-instruct-q8_0",
@@ -168,11 +175,49 @@ def _patch_ui_state(updates: dict) -> None:
     _atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2))
 
 
+def _match_local_model(model: str, local_models: list[str]) -> str:
+    """Correspondance exacte, partielle (préfixe), puis premier modèle local."""
+    if not local_models:
+        return model
+
+    for name in local_models:
+        if name == model:
+            return name
+
+    base = model.split(":")[0] if model else ""
+    if base:
+        for name in local_models:
+            if base in name:
+                return name
+
+    fallback = local_models[0]
+    if fallback != model:
+        logger.warning("Modèle '%s' absent — fallback sur '%s'", model, fallback)
+    return fallback
+
+
+def _resolve_model_with_fallback(model: str) -> str:
+    try:
+        from actions.cloud_llm import is_cloud_model
+
+        if is_cloud_model(model):
+            return model
+    except Exception:
+        pass
+    import llamacpp_manager
+
+    local = llamacpp_manager.list_available_models()
+    if not local:
+        return model
+    return _match_local_model(model, local)
+
+
 def _warmup_model_async(model: str) -> None:
     try:
-        import ollama_manager
+        import llamacpp_manager
 
-        ollama_manager.warmup_model(model)
+        matched = _resolve_model_with_fallback(model)
+        llamacpp_manager.start_model_server(matched)
     except Exception as exc:
         logger.warning("Warmup modèle %s échoué: %s", model, exc)
 
@@ -328,7 +373,7 @@ BASE_SYSTEM_PROMPT: str = """Tu es ARIA, l'assistant personnel de Mathi, lycéen
 Tu le connais intimement : ses projets (ARIA l'assistant vocal, IMPERO, PPL DR400 à LFRS),
 son style de communication direct et ses fautes de frappe caractéristiques.
 Tu réponds toujours en tutoiement, directement, sans préambule.
-Tu maîtrises : Python, pywebview, Ollama, aviation PPL, maths Première, gaming PC.
+Tu maîtrises : Python, pywebview, llama.cpp, aviation PPL, maths Première, gaming PC.
 Jamais de "Bien sûr !", "Absolument !" ou politesse excessive."""
 SYSTEM_PROMPT = BASE_SYSTEM_PROMPT
 
@@ -369,9 +414,9 @@ ACTION_PREFIXES = (
     "CHAT:",
 )
 
+# Legacy — conservé pour compat mobile / logs
 OLLAMA_BASE_URL = "http://localhost:11434"
-OLLAMA_CHAT_URL = f"{OLLAMA_BASE_URL}/api/chat"
-OLLAMA_GENERATE_URL = f"{OLLAMA_BASE_URL}/api/generate"
+OLLAMA_KEEP_ALIVE_LEGACY = OLLAMA_KEEP_ALIVE
 HISTORY_PATH = app_paths.data_dir() / "history.json"
 
 INTENTS = [
@@ -424,7 +469,12 @@ FAST_REGEX: dict[str, str] = {
 FAST_BROWSER_REGEX: list[tuple[str, str]] = [
     (r"(?:ouvre|va sur|navigue vers)\s+(?:le site\s+)?(?:https?://|www\.)\S+", "browser_open_url"),
     (r"(?:ouvre|va sur)\s+(?:youtube|google|github|reddit|wikipedia|netflix|tiktok)\b", "browser_open_site"),
-    (r"cherche .+ sur (?:youtube|google|github|reddit|amazon|wikipedia)", "browser_search_in_site"),
+    (
+        r"cherche .+ (?:sur|dans) .+ (?:sur|dans) "
+        r"(?:chrome|edge|firefox|opera|brave|vivaldi|navigateur)",
+        "browser_search_in_site",
+    ),
+    (r"cherche .+ (?:sur|dans) (?:youtube|google|github|reddit|amazon|wikipedia)", "browser_search_in_site"),
     (r"recherche .+ dans (?:le navigateur|chrome|edge)", "search_web"),
     (r"va sur ", "browser_open_site"),
 ]
@@ -618,18 +668,37 @@ def _fast_intent(text: str) -> tuple[str, dict] | None:
         site, browser_name = _clean_site(m.group(1)), m.group(2).strip()
         return "browser_open_site", {"site": site, "browser": browser_name}
 
+    # PRIORITY 1.55: « cherche [query] dans/sur [site] dans/sur [navigateur] »
+    m = re.search(
+        rf"(?:cherche|recherche|trouve)\s+(.+?)\s+(?:sur|dans)\s+(.+?)\s+(?:sur|dans)\s+({BROWSER_NAMES})\b",
+        text_lower,
+    )
+    if m:
+        return "browser_search_in_site", {
+            "query": m.group(1).strip(),
+            "site": m.group(2).strip(),
+            "browser": m.group(3).strip(),
+        }
+
     # PRIORITY 1.5: Recherche web multi-sources + Google Docs (spec v20)
     for pattern, intent in RECHERCHE_PATTERNS:
         if re.search(pattern, text_lower, re.IGNORECASE):
             return intent, {}
 
-    # PRIORITY 2: « cherche [query] sur [site] »
-    m = re.search(r"(?:cherche|recherche|trouve)\s+(.+?)\s+sur\s+(.+)", text_lower)
+    # PRIORITY 2: « cherche [query] sur/dans [site] »
+    m = re.search(r"(?:cherche|recherche|trouve)\s+(.+?)\s+(?:sur|dans)\s+(.+)", text_lower)
     if m:
         query, site = m.group(1).strip(), m.group(2).strip()
+        bm = re.search(rf"^(.+?)\s+(?:sur|dans)\s+({BROWSER_NAMES})$", site)
+        browser_name = None
+        if bm:
+            site, browser_name = bm.group(1).strip(), bm.group(2).strip()
         if site in _SEARCH_BROWSER_NAMES:
             return "search_web", {"query": query}
-        return "browser_search_in_site", {"site": site, "query": query}
+        params: dict = {"site": site, "query": query}
+        if browser_name:
+            params["browser"] = browser_name
+        return "browser_search_in_site", params
 
     # PRIORITY 2.5: « ferme l'onglet » → onglet navigateur, pas une app nommée "onglet"
     if re.search(r"\bferme\b.*\b(onglet|tab)\b", text_lower):
@@ -693,6 +762,13 @@ def _fast_intent(text: str) -> tuple[str, dict] | None:
         if re.search(pattern, text_lower):
             return intent, {}
 
+    # PRIORITY 2.85: lance/démarre [app] — ex. « lance google chrome » (avant skip navigateur)
+    m = re.search(r"(?:lance|ouvre|démarre|demarre|start)\s+(.+)", text_lower)
+    if m:
+        app_name = m.group(1).strip()
+        if not re.search(r"\s+(?:sur|dans)\s+(?:chrome|edge|firefox)", app_name):
+            return "lancer_app", {"app": app_name}
+
     if _BROWSER_LAUNCH_SKIP.search(text_lower) and re.search(
         r"\b(lance|ouvre|démarre|demarre|start|mets)\b", text_lower
     ):
@@ -745,7 +821,12 @@ def _build_dynamic_system_prompt() -> str:
             "\n\nTu es en mode vocal. Réponds en 1-3 phrases maximum, de façon "
             "naturelle et conversationnelle. Pas de listes, pas de markdown, pas de tirets."
         )
-    return dynamic_system
+    try:
+        from actions import agents as _agents
+
+        return _agents.build_system_prompt(_agents.get_active_agent(), dynamic_system)
+    except Exception:
+        return dynamic_system
 
 
 def _get_conversation_mode() -> str:
@@ -760,6 +841,14 @@ def resolve_model(text: str = "", intent: str = "") -> str:
     """Point unique de sélection — respecte le sélecteur en-tête en priorité."""
     if FORCED_MODEL:
         return FORCED_MODEL
+    try:
+        from actions import agents as _agents
+
+        active = _agents.get_active_agent()
+        if active.get("id") != "default" and active.get("model"):
+            return active["model"]
+    except Exception:
+        pass
     if not AUTO_ROUTING:
         return MODEL_FAST if _get_conversation_mode() == "vocal" else CHAT_MODEL
     return _select_model(text, intent)
@@ -782,52 +871,84 @@ def _select_model(text: str, intent: str = "") -> str:
     return MODELS["fast"]
 
 
-def _ollama_available() -> bool:
+def _llamacpp_available() -> bool:
     try:
-        response = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=3)
-        return response.status_code == 200
-    except requests.RequestException:
+        import llamacpp_manager
+
+        return bool(llamacpp_manager.list_available_models())
+    except Exception:
         return False
 
 
-def _ensure_ollama() -> None:
-    if _ollama_available():
-        return
-    logger.warning("Ollama non disponible — tentative de démarrage")
-    import ollama_manager
+def _ensure_llamacpp(model: str) -> str:
+    """Démarre le serveur llama.cpp pour le modèle et retourne le nom résolu."""
+    import llamacpp_manager
 
-    if not ollama_manager.start_ollama():
-        raise RuntimeError("Impossible de démarrer Ollama")
-
-
-def _resolve_model_with_fallback(model: str) -> str:
-    import ollama_manager
-
-    local = ollama_manager.list_local_models()
-    if not local:
-        return model
-    return _match_local_model(model, local)
+    matched = _resolve_model_with_fallback(model)
+    available = llamacpp_manager.list_available_models()
+    if not available:
+        raise RuntimeError("Aucun modèle llama.cpp disponible")
+    if not llamacpp_manager.start_model_server(matched):
+        raise RuntimeError(f"Impossible de démarrer le serveur pour '{matched}'")
+    return matched
 
 
-def _match_local_model(model: str, local_models: list[str]) -> str:
-    """Correspondance exacte, partielle (préfixe), puis premier modèle local."""
-    if not local_models:
-        return model
+def _get_llamacpp_server_url(model: str) -> tuple[str, str]:
+    """Retourne (url, nom_modèle_résolu)."""
+    import llamacpp_manager
 
-    for name in local_models:
-        if name == model:
-            return name
+    matched = _ensure_llamacpp(model)
+    url = llamacpp_manager.get_server_url(matched)
+    if not url:
+        raise RuntimeError(f"Serveur llama.cpp indisponible pour '{matched}'")
+    return url, matched
 
-    base = model.split(":")[0] if model else ""
-    if base:
-        for name in local_models:
-            if base in name:
-                return name
 
-    fallback = local_models[0]
-    if fallback != model:
-        logger.warning("Modèle '%s' absent — fallback sur '%s'", model, fallback)
-    return fallback
+def _openai_messages_from_ollama(messages: list) -> list:
+    """Convertit le format messages Ollama (images) vers OpenAI chat."""
+    out: list = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        images = msg.get("images") or []
+        if images:
+            parts: list = []
+            if content:
+                parts.append({"type": "text", "text": str(content)})
+            for img in images:
+                b64 = img if isinstance(img, str) else ""
+                if b64 and not b64.startswith("data:"):
+                    b64 = f"data:image/jpeg;base64,{b64}"
+                parts.append({"type": "image_url", "image_url": {"url": b64}})
+            out.append({"role": role, "content": parts})
+        else:
+            out.append({"role": role, "content": content})
+    return out
+
+
+def _parse_stream_chunk(line: bytes | str) -> tuple[str, bool]:
+    """Extrait (token, done) depuis une ligne SSE OpenAI ou NDJSON Ollama."""
+    line_str = line.decode("utf-8") if isinstance(line, bytes) else line
+    if not line_str:
+        return "", False
+    if line_str.startswith("data: "):
+        data_str = line_str[6:].strip()
+        if data_str == "[DONE]":
+            return "", True
+        try:
+            data = json.loads(data_str)
+            token = data["choices"][0]["delta"].get("content", "") or ""
+            finish = data["choices"][0].get("finish_reason")
+            return token, finish is not None
+        except (json.JSONDecodeError, KeyError, IndexError):
+            return "", False
+    try:
+        chunk = json.loads(line_str)
+    except json.JSONDecodeError:
+        return "", False
+    token = chunk.get("message", {}).get("content", "") or chunk.get("response", "") or ""
+    done = bool(chunk.get("done"))
+    return token, done
 
 
 def set_model_role(role: str, model_name: str) -> None:
@@ -872,38 +993,89 @@ def generate(
     temperature: float = 0.7,
     on_token=None,
 ) -> str:
-    """Appel principal à Ollama /api/generate avec streaming optionnel."""
-    _ensure_ollama()
-
-    import ollama_manager
-
+    """Génère une réponse via llama.cpp local, fallback Ollama, ou API cloud."""
     if model is None:
         model = MODELS["fast"]
 
-    local_models = ollama_manager.list_local_models()
-    if not local_models:
-        return "Erreur : aucun modèle installé dans Ollama. Lance 'ollama pull llama3.2:1b'."
+    try:
+        from actions.cloud_llm import generate as cloud_generate, is_cloud_model
 
-    chosen = _match_local_model(model, local_models)
-    logger.info("Modèle utilisé: %s", chosen)
+        if is_cloud_model(model):
+            return cloud_generate(
+                prompt,
+                model,
+                system=system,
+                stream=stream,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                on_token=on_token,
+            )
+    except ImportError:
+        pass
 
-    payload: dict = {
-        "model": chosen,
-        "prompt": prompt,
-        "stream": stream,
-        "keep_alive": OLLAMA_KEEP_ALIVE,
-        "options": {
-            "temperature": temperature,
-            "num_predict": max_tokens,
-        },
-    }
+    try:
+        import llamacpp_manager
+    except ImportError:
+        return "Erreur : llamacpp_manager indisponible."
+
+    matched = model
+    server_url: str | None = None
+    local_models = llamacpp_manager.list_available_models()
+
+    if local_models:
+        matched = _match_local_model(model, local_models)
+        server_url = llamacpp_manager.get_server_url(matched)
+        if not server_url and Path(llamacpp_manager.LLAMA_SERVER_EXE).exists():
+            info = llamacpp_manager.start_model_server(matched)
+            server_url = info.get("url") if info else None
+
+    if server_url:
+        return _generate_llamacpp(
+            prompt, matched, system, stream, max_tokens, temperature, on_token, server_url
+        )
+
+    if llamacpp_manager.is_ollama_available():
+        logger.info("llama-server absent — fallback Ollama pour '%s'", model)
+        return _generate_ollama(
+            prompt, model, system, stream, max_tokens, temperature, on_token
+        )
+
+    return (
+        "Erreur : ni llama-server ni Ollama ne sont disponibles. "
+        "Télécharge llama-server depuis https://github.com/ggerganov/llama.cpp/releases "
+        "ou lance Ollama (ollama serve)."
+    )
+
+
+def _generate_llamacpp(
+    prompt: str,
+    matched: str,
+    system: str | None,
+    stream: bool,
+    max_tokens: int,
+    temperature: float,
+    on_token,
+    server_url: str,
+) -> str:
+    """Génération via llama-server (API OpenAI /v1/chat/completions)."""
+    messages: list[dict] = []
     if system:
-        payload["system"] = system
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
 
+    payload = {
+        "model": matched,
+        "messages": messages,
+        "stream": stream,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+
+    endpoint = f"{server_url}/v1/chat/completions"
     logger.warning(
-        "═══ Ollama POST %s → model=%s stream=%s tokens=%d ═══",
-        OLLAMA_GENERATE_URL,
-        chosen,
+        "═══ llama.cpp POST %s → model=%s stream=%s tokens=%d ═══",
+        endpoint,
+        matched,
         stream,
         max_tokens,
     )
@@ -912,11 +1084,104 @@ def generate(
     try:
         if stream and on_token:
             parts: list[str] = []
-            with requests.post(
-                OLLAMA_GENERATE_URL,
-                json=payload,
-                stream=True,
+            with requests.post(endpoint, json=payload, stream=True, timeout=120) as resp:
+                resp.raise_for_status()
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    token, done = _parse_stream_chunk(line)
+                    if token:
+                        parts.append(token)
+                        on_token(token)
+                    if done:
+                        break
+            result = "".join(parts)
+        else:
+            resp = requests.post(
+                endpoint,
+                json={**payload, "stream": False},
                 timeout=120,
+            )
+            resp.raise_for_status()
+            result = resp.json()["choices"][0]["message"]["content"].strip()
+
+        logger.warning("═══ llama.cpp response: %d chars (model=%s) ═══", len(result), matched)
+        return result
+
+    except requests.exceptions.HTTPError as exc:
+        response = exc.response
+        if response is not None:
+            try:
+                err_msg = response.json().get("error", response.text)
+                if isinstance(err_msg, dict):
+                    err_msg = err_msg.get("message", str(err_msg))
+            except Exception:
+                err_msg = response.text or str(exc)
+            logger.error("Erreur HTTP llama.cpp: %s", err_msg)
+            return f"Erreur llama.cpp: {err_msg}"
+        return f"Erreur : {exc}"
+    except requests.exceptions.ConnectionError:
+        logger.error("Connexion llama.cpp refusée (port %s)", server_url)
+        return "Erreur : le serveur llama.cpp ne répond plus."
+    except requests.exceptions.Timeout:
+        logger.error("Timeout llama.cpp (model=%s)", matched)
+        return "Erreur : llama.cpp a mis trop de temps à répondre."
+    except Exception as exc:
+        logger.error("Erreur llama.cpp: %s", exc, exc_info=True)
+        return f"Erreur: {exc}"
+
+
+def _generate_ollama(
+    prompt: str,
+    model: str,
+    system: str | None,
+    stream: bool,
+    max_tokens: int,
+    temperature: float,
+    on_token,
+) -> str:
+    """Fallback Ollama via /api/generate."""
+    import llamacpp_manager
+
+    ollama_url = llamacpp_manager.OLLAMA_URL
+
+    try:
+        tags_resp = requests.get(f"{ollama_url}/api/tags", timeout=3)
+        tags_resp.raise_for_status()
+        ollama_models = [m["name"] for m in tags_resp.json().get("models", [])]
+    except Exception as exc:
+        logger.error("Ollama indisponible: %s", exc)
+        return (
+            "Erreur : ni llama-server ni Ollama ne sont disponibles. "
+            "Télécharge llama-server depuis https://github.com/ggerganov/llama.cpp/releases"
+        )
+
+    matched = next((m for m in ollama_models if model.split(":")[0] in m), None)
+    if not matched and ollama_models:
+        matched = ollama_models[0]
+        logger.info("Modèle Ollama '%s' absent — fallback sur '%s'", model, matched)
+    if not matched:
+        return "Erreur : aucun modèle Ollama disponible."
+
+    full_prompt = f"{system}\n\n{prompt}" if system else prompt
+    payload = {
+        "model": matched,
+        "prompt": full_prompt,
+        "stream": stream,
+        "options": {
+            "temperature": temperature,
+            "num_predict": max_tokens,
+            "num_ctx": 4096,
+        },
+    }
+
+    logger.info("Ollama fallback POST /api/generate → model=%s", matched)
+
+    try:
+        if stream and on_token:
+            parts: list[str] = []
+            with requests.post(
+                f"{ollama_url}/api/generate", json=payload, stream=True, timeout=120
             ) as resp:
                 resp.raise_for_status()
                 for line in resp.iter_lines():
@@ -924,48 +1189,26 @@ def generate(
                         continue
                     try:
                         data = json.loads(line)
+                        token = data.get("response", "")
+                        if token:
+                            parts.append(token)
+                            on_token(token)
+                        if data.get("done"):
+                            break
                     except json.JSONDecodeError:
                         continue
-                    token = data.get("response", "")
-                    if token:
-                        parts.append(token)
-                        on_token(token)
-                    if data.get("done"):
-                        break
-            result = "".join(parts)
-        else:
-            resp = requests.post(
-                OLLAMA_GENERATE_URL,
-                json={**payload, "stream": False},
-                timeout=120,
-            )
-            resp.raise_for_status()
-            result = resp.json().get("response", "").strip()
+            return "".join(parts)
 
-        logger.warning("═══ Ollama response: %d chars (model=%s) ═══", len(result), chosen)
-        return result
-
-    except requests.exceptions.HTTPError as exc:
-        response = exc.response
-        if response is not None and response.status_code == 500:
-            error_body = response.text
-            logger.error("Ollama 500: %s", error_body)
-            try:
-                err_msg = response.json().get("error", str(exc))
-            except Exception:
-                err_msg = error_body or str(exc)
-            return f"Erreur Ollama: {err_msg}"
-        logger.error("Erreur Ollama HTTP: %s", exc, exc_info=True)
-        return f"Erreur : {exc}"
-    except requests.exceptions.ConnectionError:
-        logger.error("Connexion Ollama refusée")
-        return "Erreur : impossible de contacter Ollama. Vérifie qu'il tourne."
-    except requests.exceptions.Timeout:
-        logger.error("Timeout Ollama (model=%s)", chosen)
-        return "Erreur : Ollama a mis trop de temps à répondre."
+        resp = requests.post(
+            f"{ollama_url}/api/generate",
+            json={**payload, "stream": False},
+            timeout=120,
+        )
+        resp.raise_for_status()
+        return resp.json().get("response", "").strip()
     except Exception as exc:
-        logger.error("Erreur Ollama: %s", exc, exc_info=True)
-        return f"Erreur : {exc}"
+        logger.error("Erreur Ollama fallback: %s", exc)
+        return f"Erreur: {exc}"
 
 
 def _get_options(intent: str, conv_mode: str) -> dict:
@@ -1022,7 +1265,7 @@ def _save_history() -> None:
         logger.exception("Failed to save history")
 
 
-def _ollama_request(
+def _llamacpp_chat_request(
     messages: list,
     stream: bool = False,
     retries: int = 3,
@@ -1031,10 +1274,46 @@ def _ollama_request(
     intent: str = "",
     conv_mode: str | None = None,
 ) -> requests.Response | None:
+    chosen = model or MODEL
     try:
-        _ensure_ollama()
+        from actions.cloud_llm import chat_completion, is_cloud_model
+
+        if is_cloud_model(chosen):
+            if conv_mode is None:
+                conv_mode = _get_conversation_mode()
+            options = _get_options(intent, conv_mode)
+            max_tok = num_predict if num_predict is not None else options.get("num_predict", 400)
+            temp = options.get("temperature", 0.7)
+            text = chat_completion(
+                messages,
+                chosen,
+                stream=False,
+                max_tokens=max_tok,
+                temperature=temp,
+            )
+
+            class _FakeResp:
+                status_code = 200
+
+                def json(self):
+                    return {"choices": [{"message": {"content": text}}]}
+
+            return _FakeResp()
+    except Exception as exc:
+        logger.error("Cloud chat request failed: %s", exc)
+        return None
+
+    try:
+        chosen = _ensure_llamacpp(model or MODEL)
     except RuntimeError:
-        logger.error("Ollama indisponible pour la requête chat")
+        logger.error("llama.cpp indisponible pour la requête chat")
+        return None
+
+    import llamacpp_manager
+
+    server_url = llamacpp_manager.get_server_url(chosen)
+    if not server_url:
+        logger.error("URL serveur introuvable pour %s", chosen)
         return None
 
     if conv_mode is None:
@@ -1042,18 +1321,20 @@ def _ollama_request(
     options = _get_options(intent, conv_mode)
     if num_predict is not None:
         options["num_predict"] = num_predict
-    chosen = _resolve_model_with_fallback(model or MODEL)
+
     payload = {
         "model": chosen,
-        "messages": messages,
+        "messages": _openai_messages_from_ollama(messages),
         "stream": stream,
-        "keep_alive": OLLAMA_KEEP_ALIVE,
-        "options": options,
+        "max_tokens": options.get("num_predict", 400),
+        "temperature": options.get("temperature", 0.7),
     }
+    endpoint = f"{server_url}/v1/chat/completions"
+
     for attempt in range(retries):
         try:
             response = requests.post(
-                OLLAMA_CHAT_URL,
+                endpoint,
                 json=payload,
                 stream=stream,
                 timeout=120,
@@ -1067,21 +1348,25 @@ def _ollama_request(
                     err_msg = resp.json().get("error", resp.text)
                 except Exception:
                     err_msg = resp.text or str(exc)
-                logger.error("Ollama chat 500 (model=%s): %s", chosen, err_msg)
+                logger.error("llama.cpp chat 500 (model=%s): %s", chosen, err_msg)
                 return None
-            logger.warning("Ollama HTTP error (attempt %d/%d): %s", attempt + 1, retries, exc)
+            logger.warning("llama.cpp HTTP error (attempt %d/%d): %s", attempt + 1, retries, exc)
             time.sleep(1)
         except requests.RequestException as exc:
-            logger.warning("Ollama request failed (attempt %d/%d): %s", attempt + 1, retries, exc)
+            logger.warning("llama.cpp request failed (attempt %d/%d): %s", attempt + 1, retries, exc)
             time.sleep(1)
     return None
 
 
+# Alias legacy
+_ollama_request = _llamacpp_chat_request
+
+
 def _detect_intent(text: str) -> dict:
     """Détection d'intent ultra-rapide via llama3.2:1b (~50-100ms)."""
-    try:
-        _ensure_ollama()
-    except RuntimeError:
+    import llamacpp_manager
+
+    if not _llamacpp_available() and not llamacpp_manager.is_ollama_available():
         return {"intent": "question_libre", "params": {}, "confidence": 0.0}
 
     model = _resolve_model_with_fallback(MODELS["intent"])
@@ -1105,19 +1390,40 @@ Réponds uniquement avec la catégorie, rien d'autre :"""
     return {"intent": "question_libre", "params": {}, "confidence": 0.5}
 
 
-def _extract_in_site_search(text: str) -> tuple[str, str] | None:
-    """Extrait (query, site) depuis « cherche X sur Y »."""
-    match = re.search(
-        r"(?:cherche|trouve|recherche)\s+(.+?)\s+(?:sur|dans)\s+(.+?)(?:\.|$)",
-        text.strip(),
-        re.I,
+def _parse_in_site_search(text: str) -> tuple[str, str, str | None] | None:
+    """Extrait (query, site, browser?) depuis « cherche X sur/dans Y [sur/dans navigateur] »."""
+    text_lower = text.strip().lower()
+    m = re.search(
+        rf"(?:cherche|recherche|trouve)\s+(.+?)\s+(?:sur|dans)\s+(.+?)\s+(?:sur|dans)\s+({BROWSER_NAMES})\b",
+        text_lower,
     )
-    if not match:
+    if m:
+        query, site, browser = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
+        if re.search(r"internet|google\b|la page|cette page|page ouverte|mon drive|google drive", site, re.I):
+            return None
+        return query, site, browser
+    m = re.search(
+        r"(?:cherche|recherche|trouve)\s+(.+?)\s+(?:sur|dans)\s+(.+?)(?:\.|$)",
+        text_lower,
+    )
+    if not m:
         return None
-    query, site = match.group(1).strip(), match.group(2).strip()
+    query, site = m.group(1).strip(), m.group(2).strip()
+    browser = None
+    bm = re.search(rf"^(.+?)\s+(?:sur|dans)\s+({BROWSER_NAMES})$", site)
+    if bm:
+        site, browser = bm.group(1).strip(), bm.group(2).strip()
     if re.search(r"internet|google\b|la page|cette page|page ouverte|mon drive|google drive", site, re.I):
         return None
-    return query, site
+    return query, site, browser
+
+
+def _extract_in_site_search(text: str) -> tuple[str, str] | None:
+    """Extrait (query, site) depuis « cherche X sur Y »."""
+    parsed = _parse_in_site_search(text)
+    if parsed:
+        return parsed[0], parsed[1]
+    return None
 
 
 def _extract_page_search_query(text: str) -> str | None:
@@ -1170,28 +1476,15 @@ Available operations:
 Execute the appropriate operation and return the result in French."""
 
     try:
-        response = requests.post(
-            OLLAMA_CHAT_URL,
-            json={
-                "model": MODEL_HEAVY,
-                "messages": [{"role": "user", "content": mcp_prompt}],
-                "stream": False,
-                "tools": [{
-                    "type": "function",
-                    "function": {
-                        "name": "google_drive",
-                        "description": "Interact with Google Drive",
-                        "parameters": {},
-                    },
-                }],
-            },
-            timeout=30,
+        result = generate(
+            mcp_prompt,
+            model=MODEL_HEAVY,
+            stream=False,
+            max_tokens=300,
+            temperature=0.3,
         )
-        response.raise_for_status()
-        result = response.json()
-        content = result.get("message", {}).get("content", "")
-        if content.strip():
-            return content
+        if result and not result.startswith("Erreur"):
+            return result
         return "Opération Drive effectuée"
     except Exception:
         logger.exception("Drive MCP routing failed, using browser fallback")
@@ -2229,11 +2522,13 @@ def _execute_action(intent: str, params: dict, text: str) -> str | None:
         if intent == "browser_search_in_site":
             site = params.get("site")
             query = params.get("query")
+            browser_param = params.get("browser")
             if site and query:
-                return browser.search_within_site(site, query)
-            parsed = _extract_in_site_search(text)
+                return browser.search_within_site(site, query, browser=browser_param)
+            parsed = _parse_in_site_search(text)
             if parsed:
-                return browser.search_within_site(parsed[1], parsed[0])
+                q, s, b = parsed
+                return browser.search_within_site(s, q, browser=b or browser_param)
             return browser.search_google(text)
 
         if intent == "browser_youtube_control":
@@ -2568,14 +2863,15 @@ def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
     if intent == "browser_screenshot":
         return browser.take_screenshot()
     if intent == "browser_search_in_site":
-        parsed = _extract_in_site_search(original_text)
+        browser_param = params.get("browser")
+        parsed = _parse_in_site_search(original_text)
         if parsed:
-            query, site = parsed
-            return browser.search_within_site(site, query)
+            query, site, b = parsed
+            return browser.search_within_site(site, query, browser=b or browser_param)
         query = params.get("query", original_text)
         site = params.get("site", "")
         if site and query:
-            return browser.search_within_site(site, query)
+            return browser.search_within_site(site, query, browser=browser_param)
         return browser.search_google(original_text)
     if intent == "browser_search_page":
         query = _extract_page_search_query(original_text) or params.get("query", original_text)
@@ -2834,12 +3130,7 @@ def _stream_and_speak(response: requests.Response, stream_to_ui: bool = True) ->
         for line in response.iter_lines():
             if not line or _stop_stream.is_set():
                 break
-            try:
-                chunk = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-
-            content = chunk.get("message", {}).get("content", "")
+            content, done = _parse_stream_chunk(line)
             if content:
                 full_response += content
                 sentence_buffer += content
@@ -2852,7 +3143,7 @@ def _stream_and_speak(response: requests.Response, stream_to_ui: bool = True) ->
                         tts_queue.append(sentence)
                     sentence_buffer = ""
 
-            if chunk.get("done"):
+            if done:
                 break
 
         remainder = sentence_buffer.strip()
@@ -2898,7 +3189,7 @@ def _conversation(text: str, stream_to_ui: bool = True, intent: str = "question_
         answer, _ = _conversation_via_generate(REASONING_MODEL, max_tokens=2000, stream_to_ui=False)
         if not answer:
             _history.pop()
-            _present_action_result("Ollama n'est pas disponible.")
+            _present_action_result("llama.cpp n'est pas disponible.")
             return "", False
         if stream_to_ui:
             ui.append_assistant_text(answer)
@@ -2929,21 +3220,35 @@ def _conversation(text: str, stream_to_ui: bool = True, intent: str = "question_
     return full_response, spoke_streaming
 
 
+def _llamacpp_vision_request(
+    messages: list,
+    stream: bool = False,
+    timeout: int = 90,
+) -> requests.Response:
+    """Requête vision via le serveur llama.cpp du modèle vision."""
+    matched = _resolve_model_with_fallback(VISION_MODEL)
+    server_url, matched = _get_llamacpp_server_url(matched)
+    payload = {
+        "model": matched,
+        "messages": _openai_messages_from_ollama(messages),
+        "stream": stream,
+        "max_tokens": 600,
+        "temperature": 0.3,
+    }
+    endpoint = f"{server_url}/v1/chat/completions"
+    response = requests.post(endpoint, json=payload, stream=stream, timeout=timeout)
+    response.raise_for_status()
+    return response
+
+
 def _describe_image_b64(image_b64: str, prompt: str) -> str:
-    """Description vision via Ollama (sans streaming UI)."""
+    """Description vision via llama.cpp (sans streaming UI)."""
     try:
-        response = requests.post(
-            OLLAMA_CHAT_URL,
-            json={
-                "model": VISION_MODEL,
-                "messages": [{"role": "user", "content": prompt, "images": [image_b64]}],
-                "stream": False,
-            },
-            timeout=90,
+        response = _llamacpp_vision_request(
+            [{"role": "user", "content": prompt, "images": [image_b64]}],
+            stream=False,
         )
-        response.raise_for_status()
-        data = response.json()
-        return data.get("message", {}).get("content", "").strip()
+        return response.json()["choices"][0]["message"]["content"].strip()
     except requests.RequestException as exc:
         logger.error("Vision error: %s", exc)
         return f"Erreur analyse image: {exc}"
@@ -3112,6 +3417,13 @@ def ask_with_actions(text: str) -> str:
 def _short_model_label(model: str) -> str:
     if not model or model == "auto":
         return "auto"
+    try:
+        from actions.cloud_llm import display_label, is_cloud_model
+
+        if is_cloud_model(model):
+            return display_label(model)
+    except Exception:
+        pass
     return model.split(":")[0]
 
 
@@ -3358,26 +3670,16 @@ def ask_with_image(question: str, image_path: str) -> None:
         with open(image_path, "rb") as f:
             img_b64 = base64.b64encode(f.read()).decode()
 
-        response = requests.post(
-            OLLAMA_CHAT_URL,
-            json={
-                "model": VISION_MODEL,
-                "messages": [{
-                    "role": "user",
-                    "content": question,
-                    "images": [img_b64],
-                }],
-                "stream": True,
-            },
+        response = _llamacpp_vision_request(
+            [{"role": "user", "content": question, "images": [img_b64]}],
             stream=True,
             timeout=60,
         )
-        response.raise_for_status()
     except requests.RequestException as exc:
         err = str(exc)
         if "404" in err or "400" in err:
             _speak_response(
-                f"Le modèle de vision n'est pas installé. Lance : ollama pull {VISION_MODEL}"
+                f"Le modèle de vision n'est pas disponible. Vérifie {VISION_MODEL} dans config.yaml"
             )
         else:
             _speak_response(f"Erreur analyse image: {exc}")
@@ -3410,26 +3712,20 @@ def ask_with_images_and_text(
     sounds.play("thinking")
 
     try:
-        response = requests.post(
-            OLLAMA_CHAT_URL,
-            json={
-                "model": VISION_MODEL,
-                "messages": [{
-                    "role": "user",
-                    "content": content,
-                    "images": images_b64,
-                }],
-                "stream": True,
-            },
+        response = _llamacpp_vision_request(
+            [{
+                "role": "user",
+                "content": content,
+                "images": images_b64,
+            }],
             stream=True,
             timeout=120,
         )
-        response.raise_for_status()
     except requests.RequestException as exc:
         err = str(exc)
         if "404" in err or "400" in err:
             _speak_response(
-                f"Le modèle de vision n'est pas installé. Lance : ollama pull {VISION_MODEL}"
+                f"Le modèle de vision n'est pas disponible. Vérifie {VISION_MODEL} dans config.yaml"
             )
         else:
             _speak_response(f"Erreur analyse fichiers: {exc}")
@@ -3526,13 +3822,13 @@ def get_history_summary() -> str:
     if len(_history) <= 1:
         return "Pas de conversation en cours."
     summary_prompt = "Résume brièvement notre conversation en 2-3 phrases."
-    response = _ollama_request(
+    response = _llamacpp_chat_request(
         _history + [{"role": "user", "content": summary_prompt}],
         stream=False,
     )
     if response is None:
-        return "Impossible de résumer, Ollama indisponible."
+        return "Impossible de résumer, llama.cpp indisponible."
     try:
-        return response.json()["message"]["content"]
+        return response.json()["choices"][0]["message"]["content"]
     except (KeyError, json.JSONDecodeError):
         return "Résumé indisponible."

@@ -17,7 +17,7 @@ import yaml
 
 import app_paths
 import sounds
-import ui
+import ui_bridge as ui
 
 if TYPE_CHECKING:
     from faster_whisper import WhisperModel
@@ -175,29 +175,17 @@ def get_audio_level() -> float:
 
 
 def _safe_js(script: str) -> None:
-    """Appelle du JS côté UI uniquement si la fenêtre est encore vivante."""
-    try:
-        import ui as _ui
-
-        if _ui._instance is None:
-            return
-        window = getattr(_ui, "_window", None)
-        if window is None:
-            window = getattr(_ui._instance, "_window", None)
-        if window is None:
-            return
-        _ui._instance._js(script)
-    except Exception as exc:
-        logger.debug("JS call ignoré (fenêtre fermée ou thread mort): %s", exc)
+    """Compat — remplacé par ui_bridge WebSocket."""
+    del script
 
 
 def _present_transcription(text: str) -> None:
-    """Affiche la transcription dans l'input — countdown vocal géré par aria.onSTTResult()."""
-    _safe_js(f"if(window.aria) aria.onSTTResult({json.dumps(text)});")
+    """Affiche la transcription dans l'input."""
+    ui.show_final_transcription(text)
 
 
 def _show_partial_transcription(text: str) -> None:
-    _safe_js(f"if(window.aria) aria.showPartialTranscription({json.dumps(text)})")
+    ui.show_partial_transcription(text)
 
 
 def _show_final_transcription(text: str) -> None:

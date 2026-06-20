@@ -609,6 +609,7 @@
       max-width: min(360px, 90vw);
       max-height: min(420px, 60vh);
       overflow-y: auto;
+      overflow-x: hidden;
       background: rgba(18, 18, 28, 0.96);
       backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-saturate));
       -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-saturate));
@@ -616,47 +617,80 @@
       border-radius: calc(var(--glass-radius) - 4px);
       box-shadow: 0 16px 48px rgba(0,0,0,0.45);
       z-index: 20000;
-      padding: 8px;
+      padding: 6px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,0.15) transparent;
     }
 
-    .model-picker.open .model-picker-menu {
+    .model-picker-menu.is-open,
+    .model-picker.open .model-picker-menu.is-open {
       display: block;
     }
 
     .model-option {
       display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 2px;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
       width: 100%;
       padding: 10px 12px;
       border: none;
-      border-radius: 8px;
+      border-radius: 10px;
       background: transparent;
       color: var(--text);
       font-family: inherit;
       font-size: 13px;
       text-align: left;
       cursor: pointer;
+      transition: background 0.12s;
+    }
+
+    .model-option-main {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .model-option-check {
+      flex-shrink: 0;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 1.5px solid rgba(255,255,255,0.18);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      color: transparent;
+      transition: border-color 0.12s, background 0.12s, color 0.12s;
     }
 
     .model-option:hover {
-      background: var(--hover);
+      background: rgba(255,255,255,0.07);
     }
 
     .model-option.active {
-      background: var(--accent-bg);
-      color: var(--accent);
+      background: rgba(var(--glass-tint, 108, 142, 255), 0.14);
+      color: var(--text);
+    }
+
+    .model-option.active .model-option-check {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
     }
 
     .model-option-sub {
       font-size: 11px;
       color: var(--text3);
+      line-height: 1.35;
     }
 
     .model-option.active .model-option-sub {
-      color: var(--accent-2);
-      opacity: 0.85;
+      color: var(--text2);
     }
 
     /* Cartes de résultats de recherche (spec v20) */
@@ -1286,12 +1320,219 @@
     .theme-swatch.active, .theme-swatch:hover { border-color: var(--text); }
     .settings-btn { width: 100%; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; color: var(--text); font-family: inherit; font-size: 12px; cursor: pointer; margin-bottom: 6px; text-align: left; }
     .settings-btn:hover { background: var(--hover); }
+
+    .settings-validate-btn {
+      width: 100%;
+      margin-top: 12px;
+      padding: 10px;
+      background: linear-gradient(135deg, rgba(108,142,255,0.15), rgba(167,139,250,0.1));
+      border: 1px solid rgba(108,142,255,0.25);
+      border-radius: 10px;
+      color: var(--accent);
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      letter-spacing: 0.3px;
+    }
+
+    .settings-validate-btn:hover {
+      background: linear-gradient(135deg, rgba(108,142,255,0.25), rgba(167,139,250,0.18));
+      transform: translateY(-1px);
+    }
+
+    .settings-validate-btn:active { transform: scale(0.98); }
+    .settings-validate-btn:disabled { opacity: 0.6; cursor: wait; }
+
+    @keyframes glassSweep {
+      0%   { left: -100px; opacity: 0; }
+      10%  { opacity: 1; }
+      90%  { opacity: 1; }
+      100% { left: calc(100vw + 100px); opacity: 0; }
+    }
+
+    @keyframes soundRing {
+      0%   { transform: scale(1); opacity: 0.8; }
+      100% { transform: scale(4); opacity: 0; }
+    }
+
+    @keyframes scanUp {
+      0%   { transform: translateY(0); opacity: 1; }
+      100% { transform: translateY(-40px); opacity: 0; }
+    }
+
+    .topbar-logo.thinking-pulse {
+      animation: logoPulse 0.8s ease-in-out 3;
+    }
+
+    .thinking-wrap { align-self: flex-start; opacity: 0.95; }
+
+    .thinking-content {
+      background: rgba(255,255,255,0.04);
+      border-radius: 4px 18px 18px 18px;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-width: 280px;
+    }
+
+    .model-label {
+      font-size: 10px;
+      color: var(--text3);
+      letter-spacing: 0.3px;
+      opacity: 0.7;
+    }
+
+    .action-log {
+      font-size: 11px;
+      color: var(--accent);
+      opacity: 0.8;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: opacity 0.2s;
+    }
+
+    .action-log::before {
+      content: '⟳';
+      display: inline-block;
+      animation: spin 1.2s linear infinite;
+    }
+
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
+
+    .action-flash { opacity: 1 !important; }
+
+    .thinking-dots {
+      display: flex;
+      gap: 5px;
+      align-items: center;
+      height: 16px;
+    }
+
+    .thinking-dots span {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: rgba(108,142,255,0.5);
+      animation: thinkDot 1.4s ease-in-out infinite;
+    }
+
+    .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes thinkDot {
+      0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+      30%            { transform: translateY(-6px); opacity: 1; }
+    }
+
     .preset-editor { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 10px; }
     .preset-editor-title { font-size: 13px; font-weight: 600; margin-bottom: 10px; color: var(--text); }
     .preset-field { margin-bottom: 8px; }
     .preset-field label { display: block; font-size: 11px; color: var(--text3); margin-bottom: 3px; }
     .preset-field input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; color: var(--text); font-family: inherit; font-size: 12px; }
     .preset-save { width: 100%; margin-top: 6px; padding: 8px; border-radius: 8px; border: 1px solid rgba(255,107,53,0.3); background: var(--accent-bg); color: var(--accent); font-family: inherit; font-size: 12px; cursor: pointer; font-weight: 500; }
+
+    .preset-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px;
+      margin-bottom: 10px;
+    }
+
+    .preset-card-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .preset-icon-preview {
+      font-size: 22px;
+      line-height: 1;
+      transition: transform 0.2s;
+    }
+
+    .preset-name-preview {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .emoji-picker-wrapper { position: relative; }
+
+    .emoji-btn {
+      width: 44px;
+      height: 44px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-size: 22px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s, transform 0.15s;
+      line-height: 1;
+    }
+
+    .emoji-btn:hover {
+      background: rgba(255,255,255,0.08);
+      transform: scale(1.08);
+    }
+
+    .emoji-picker {
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 0;
+      z-index: 1000;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 8px;
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 4px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+      backdrop-filter: blur(20px);
+      width: 240px;
+      animation: pickerIn 0.2s cubic-bezier(0.34,1.4,0.64,1);
+    }
+
+    @keyframes pickerIn {
+      from { opacity: 0; transform: translateY(8px) scale(0.95); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .emoji-option {
+      width: 28px;
+      height: 28px;
+      background: transparent;
+      border: none;
+      border-radius: 6px;
+      font-size: 18px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.1s, transform 0.1s;
+      line-height: 1;
+      padding: 0;
+    }
+
+    .emoji-option:hover {
+      background: rgba(255,255,255,0.1);
+      transform: scale(1.2);
+    }
+
     .app-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; min-height: 0; }
     .app-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-bg); border: 1px solid rgba(108,142,255,0.25); color: var(--accent); border-radius: 6px; padding: 4px 8px; font-size: 12px; }
     .chip-remove { cursor: pointer; opacity: 0.6; font-size: 10px; }
@@ -1556,6 +1797,511 @@
     .mobile-preset-row:hover, .mobile-preset-row:active {
       background: var(--hover);
     }
+
+    /* ── Agents IA (v23) ─────────────────────────────────────────────────── */
+    .hidden { display: none !important; }
+
+    /* Listes déroulantes partagées */
+    .aria-dropdown-panel {
+      position: fixed;
+      z-index: 20000;
+      min-width: 220px;
+      max-width: min(360px, 92vw);
+      max-height: min(420px, 60vh);
+      overflow-y: auto;
+      overflow-x: hidden;
+      background: rgba(18, 18, 28, 0.96);
+      backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-saturate));
+      -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-saturate));
+      border: 1px solid rgba(255,255,255, calc(var(--glass-rim) * 0.34));
+      border-radius: 14px;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.45);
+      padding: 6px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,0.15) transparent;
+      animation: dropIn 0.18s cubic-bezier(0.34,1.4,0.64,1);
+    }
+
+    .aria-dropdown-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 11px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.12s;
+      user-select: none;
+    }
+
+    .aria-dropdown-item:hover { background: rgba(255,255,255,0.07); }
+
+    .aria-dropdown-item.active {
+      background: rgba(var(--glass-tint, 108, 142, 255), 0.14);
+    }
+
+    .aria-dropdown-divider {
+      height: 1px;
+      background: rgba(255,255,255,0.07);
+      margin: 4px 6px;
+    }
+
+    .aria-select,
+    .agent-select {
+      appearance: none;
+      -webkit-appearance: none;
+      background: rgba(255,255,255,0.06) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23aaa' d='M1 1l5 5 5-5'/%3E%3C/svg%3E") no-repeat right 10px center;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px;
+      padding: 9px 32px 9px 11px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 12px;
+      width: 100%;
+      cursor: pointer;
+      outline: none;
+      transition: border-color 0.15s, background 0.15s;
+      box-sizing: border-box;
+    }
+
+    .aria-select:hover,
+    .agent-select:hover { border-color: rgba(255,255,255,0.2); }
+
+    .aria-select:focus,
+    .agent-select:focus { border-color: rgba(108,142,255,0.45); }
+
+    .aria-select option,
+    .agent-select option {
+      background: #14141e;
+      color: var(--text);
+    }
+
+    .agent-selector-wrap {
+      position: relative;
+      margin-bottom: 4px;
+    }
+
+    #agent-selector {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(108,142,255,0.2);
+      border-radius: 20px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: background 0.15s, border-color 0.2s;
+      user-select: none;
+    }
+
+    #agent-selector:hover { background: rgba(255,255,255,0.09); }
+
+    .agent-chevron { font-size: 10px; opacity: 0.5; }
+
+    #agent-dropdown {
+      /* positionné en fixed via JS */
+    }
+
+    @keyframes dropIn {
+      from { opacity:0; transform:translateY(-8px) scale(0.97); }
+      to   { opacity:1; transform:translateY(0) scale(1); }
+    }
+
+    .agent-dropdown-item,
+    #agent-dropdown .aria-dropdown-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 11px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.12s;
+    }
+
+    .agent-dropdown-item:hover,
+    #agent-dropdown .aria-dropdown-item:hover { background: rgba(255,255,255,0.07); }
+
+    .agent-dropdown-item.active {
+      background: rgba(var(--glass-tint, 108, 142, 255), 0.14);
+    }
+
+    .agent-dropdown-divider {
+      height: 1px;
+      background: rgba(255,255,255,0.07);
+      margin: 4px 6px;
+    }
+
+    .agent-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      background: rgba(255,255,255,0.03);
+      border-radius: 10px;
+      margin-bottom: 6px;
+      border-left-width: 3px;
+      border-left-style: solid;
+    }
+
+    .agent-item-info { display: flex; align-items: center; gap: 8px; }
+    .agent-item-icon { font-size: 20px; }
+    .agent-item-name { font-size: 13px; color: var(--text); font-weight: 500; }
+    .agent-item-model { font-size: 10px; color: var(--text3); }
+    .agent-item-actions { display: flex; gap: 6px; align-items: center; }
+
+    .agent-use-btn {
+      padding: 4px 10px;
+      background: rgba(108,142,255,0.12);
+      border: 1px solid rgba(108,142,255,0.25);
+      border-radius: 6px;
+      color: var(--accent);
+      font-size: 11px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .agent-edit-btn {
+      width: 28px; height: 28px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    .agent-count-badge {
+      background: rgba(108,142,255,0.2);
+      color: var(--accent);
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 10px;
+      margin-left: auto;
+    }
+
+    .agent-create-btn {
+      width: 100%;
+      padding: 10px;
+      background: rgba(108,142,255,0.08);
+      border: 1px dashed rgba(108,142,255,0.3);
+      border-radius: 10px;
+      color: var(--accent);
+      font-family: inherit;
+      font-size: 13px;
+      cursor: pointer;
+      margin-top: 8px;
+      transition: background 0.15s;
+    }
+
+    .agent-create-btn:hover { background: rgba(108,142,255,0.15); }
+
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5);
+      backdrop-filter: blur(8px);
+      z-index: 9000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .agent-editor-card {
+      background: rgba(16,16,26,0.92);
+      backdrop-filter: blur(40px) saturate(180%);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 22px;
+      width: min(860px, 95vw);
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+      opacity: 0;
+      transform: scale(0.96) translateY(12px);
+      transition: opacity 0.25s, transform 0.25s cubic-bezier(0.34,1.2,0.64,1);
+    }
+
+    #agent-editor-modal.modal-open .agent-editor-card {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+
+    .agent-editor-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 22px;
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+    }
+
+    .agent-preview {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    #agent-preview-icon { font-size: 26px; }
+
+    .agent-editor-body {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 0;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .agent-editor-section {
+      padding: 18px 20px;
+      border-right: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .agent-editor-section:last-child { border-right: none; }
+
+    .agent-section-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 14px;
+    }
+
+    .agent-label {
+      display: block;
+      font-size: 11px;
+      color: var(--text3);
+      margin-bottom: 5px;
+    }
+
+    .agent-input {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 8px 10px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 13px;
+      outline: none;
+      width: 100%;
+      transition: border-color 0.15s;
+      box-sizing: border-box;
+    }
+
+    .agent-input:focus { border-color: rgba(108,142,255,0.4); }
+
+    .agent-textarea {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 12px;
+      line-height: 1.6;
+      resize: vertical;
+      width: 100%;
+      outline: none;
+      transition: border-color 0.15s;
+      box-sizing: border-box;
+    }
+
+    .agent-textarea:focus { border-color: rgba(108,142,255,0.4); }
+
+    .agent-tag-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 8px;
+      background: rgba(255,255,255,0.04);
+      border-radius: 6px;
+      margin-bottom: 4px;
+      font-size: 11px;
+      color: var(--text2);
+      gap: 6px;
+    }
+
+    .agent-tag-item button {
+      background: none; border: none; color: var(--text3);
+      cursor: pointer; font-size: 10px; flex-shrink: 0;
+      padding: 2px 4px; border-radius: 4px;
+    }
+
+    .agent-tag-item button:hover { background: rgba(239,68,68,0.15); color: var(--error); }
+
+    .agent-repo-item { border-left: 2px solid rgba(74,222,128,0.3); padding-left: 8px; }
+
+    .agent-add-btn {
+      width: 36px; height: 36px;
+      background: rgba(108,142,255,0.12);
+      border: 1px solid rgba(108,142,255,0.25);
+      border-radius: 8px;
+      color: var(--accent);
+      font-size: 18px;
+      cursor: pointer;
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    .color-swatches { display: flex; flex-wrap: wrap; gap: 4px; }
+
+    .color-swatch {
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      border: 2px solid transparent;
+      cursor: pointer;
+      transition: transform 0.15s, border-color 0.15s;
+    }
+
+    .color-swatch:hover { transform: scale(1.2); }
+    .color-swatch.active { border-color: white; transform: scale(1.1); }
+
+    .agent-editor-footer {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 22px;
+      border-top: 1px solid rgba(255,255,255,0.07);
+    }
+
+    .agent-save-btn {
+      padding: 10px 24px;
+      background: var(--accent);
+      border: none;
+      border-radius: 10px;
+      color: white;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+
+    .agent-save-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+
+    .agent-cancel-btn {
+      padding: 10px 18px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text2);
+      font-family: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .agent-delete-btn {
+      padding: 8px 14px;
+      background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.2);
+      border-radius: 10px;
+      color: var(--error);
+      font-family: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      display: flex; align-items: center; gap: 5px;
+    }
+
+    .agent-emoji-avatar { font-size: 16px; line-height: 1; }
+
+    .bubble-aria-wrap .bubble-content {
+      border-left: 3px solid var(--agent-color, transparent);
+    }
+
+    @media (max-width: 768px) {
+      .agent-editor-body { grid-template-columns: 1fr; }
+      .agent-editor-section { border-right: none; border-bottom: 1px solid rgba(255,255,255,0.06); }
+      #agent-selector { font-size: 11px; padding: 4px 8px; }
+    }
+
+    /* ── IA Cloud (API) ──────────────────────────────────────────────────── */
+    .cloud-provider-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 10px;
+    }
+
+    .cloud-provider-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .cloud-provider-icon { font-size: 22px; }
+
+    .cloud-provider-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      flex: 1;
+    }
+
+    .cloud-provider-status {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 10px;
+    }
+
+    .cloud-provider-status.ok {
+      background: rgba(74,222,128,0.15);
+      color: var(--success, #4ade80);
+    }
+
+    .cloud-provider-status.off {
+      background: rgba(255,255,255,0.06);
+      color: var(--text3);
+    }
+
+    .cloud-key-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .cloud-key-input {
+      flex: 1;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 8px;
+      padding: 8px 10px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 12px;
+      outline: none;
+    }
+
+    .cloud-key-input:focus { border-color: rgba(108,142,255,0.4); }
+
+    .cloud-models-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 6px;
+    }
+
+    .cloud-model-tag {
+      font-size: 10px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: rgba(108,142,255,0.1);
+      color: var(--text2);
+      border: 1px solid rgba(108,142,255,0.15);
+    }
+
+    .model-option-divider {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      padding: 8px 12px 4px;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body class="theme-slate">
@@ -1570,6 +2316,14 @@
   <header id="header" class="topbar glass">
     <div class="topbar-logo ontop" aria-hidden="true"></div>
     <div class="topbar-brand ontop">
+      <div class="agent-selector-wrap">
+        <div id="agent-selector" onclick="aria.toggleAgentDropdown(event)">
+          <span id="active-agent-icon">🤖</span>
+          <span id="active-agent-name">ARIA</span>
+          <span class="agent-chevron">▾</span>
+        </div>
+        <div id="agent-dropdown" class="aria-dropdown-panel hidden"></div>
+      </div>
       <div id="header-title" class="brand">A R I A</div>
       <div id="status-text" class="sub">En veille</div>
       <span id="assistant-name" class="sr-only">ARIA</span>
@@ -1730,13 +2484,96 @@
 </div>
 
 <script>
+function showStyledSettingToast(message, color = 'var(--accent)') {
+  const toast = document.createElement('div');
+  toast.style.cssText = `
+    position: fixed; top: 50px; right: 20px; z-index: 9000;
+    background: rgba(20,20,30,0.7); backdrop-filter: blur(30px) saturate(180%);
+    border: 1px solid ${color}40;
+    border-left: 3px solid ${color};
+    border-radius: 12px; padding: 11px 18px;
+    font-size: 13px; color: white;
+    opacity: 0; transform: translateX(20px);
+    transition: opacity 0.25s, transform 0.25s;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+    pointer-events: none; max-width: 280px;
+  `;
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => {
+    toast.style.opacity = '1';
+    toast.style.transform = 'translateX(0)';
+  });
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateX(20px)';
+    setTimeout(() => toast.remove(), 300);
+  }, 2500);
+}
+
+const AnimationController = {
+  _current: null,
+  _skipCleanup: null,
+
+  play(animFn, opts = {}) {
+    if (window.aria?.reducedMotion) return null;
+    this.stop();
+    const skip = () => this.stop();
+    this._skipCleanup = this.makeSkippable(skip);
+    const ctrl = { stopped: false, cleanup: null };
+    this._current = ctrl;
+    const fn = typeof animFn === 'function' ? animFn : animFn.bind(window.aria);
+    ctrl.cleanup = fn(ctrl, opts);
+    return ctrl;
+  },
+
+  stop() {
+    if (this._current) {
+      this._current.stopped = true;
+      if (typeof this._current.cleanup === 'function') {
+        this._current.cleanup();
+      }
+      this._current = null;
+    }
+    if (this._skipCleanup) {
+      this._skipCleanup();
+      this._skipCleanup = null;
+    }
+  },
+
+  makeSkippable(onSkip) {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:7998;cursor:pointer;';
+    const handler = () => onSkip();
+    overlay.addEventListener('click', handler);
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        onSkip();
+        document.removeEventListener('keydown', onKey);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(overlay);
+    return () => {
+      overlay.removeEventListener('click', handler);
+      document.removeEventListener('keydown', onKey);
+      overlay.remove();
+    };
+  },
+};
+
 const aria = {
   _focusActive: false,
   _partialTranscription: false,
   status: 'idle',
   theme: 'slate',
+  _pendingTheme: null,
   themes: ['slate','warm','forest','rose','mono','contrast'],
   themeColors: { slate:'#FF6B35', warm:'#F59E0B', forest:'#4ADE80', rose:'#F472B6', mono:'#ECECEC', contrast:'#ffffff' },
+  wallpaperLabels: {
+    aurora: 'Aurora', sunset: 'Sunset', forest: 'Forest', midnight: 'Midnight',
+    'mesh-animated': 'Mesh', mesh: 'Mesh', mono: 'Mono', custom: 'Personnalisé',
+  },
   settingsOpen: false,
   trainingInterval: null,
   rms: 0, displayRms: 0,
@@ -1771,12 +2608,18 @@ const aria = {
   currentOuter: null,
   currentContent: null,
   presetKeys: ['vol','etude','gaming','detente','nuit'],
+  presetEmojis: [
+    '✈️','🎮','📚','🎵','🌙','🏃','💼','🔥','⚡','🎯',
+    '🚀','🎨','🎧','📷','🏠','🌿','☀️','❄️','🎪',
+    '🦁','🐉','🌊','🏔️','🎸','🎹','🎺','🎻','🥁','🎤',
+    '🤖','👾','🎲','♟️','🃏','🎰','🏆','🥇','🎖️','🏅',
+  ],
   defaultPresets: {
-    vol: { label:'Vol', icon:'✈', apps_open:['msfs'], apps_close:['discord','spotify'], volume:50 },
-    etude: { label:'Étude', icon:'📚', apps_open:['cursor'], apps_close:['discord','steam','spotify'], volume:30 },
-    gaming: { label:'Gaming', icon:'🎮', apps_open:['steam','discord'], apps_close:[], volume:80 },
-    detente: { label:'Détente', icon:'🎵', apps_open:['spotify','discord'], apps_close:[], volume:60 },
-    nuit: { label:'Nuit', icon:'🌙', apps_open:[], apps_close:['discord','steam','spotify','chrome'], volume:15, brightness:20 },
+    vol: { name:'Vol', label:'Vol', icon:'✈️', apps_open:['msfs'], apps_close:['discord','spotify'], volume:50, brightness:100 },
+    etude: { name:'Étude', label:'Étude', icon:'📚', apps_open:['cursor'], apps_close:['discord','steam','spotify'], volume:30, brightness:80 },
+    gaming: { name:'Gaming', label:'Gaming', icon:'🎮', apps_open:['steam','discord'], apps_close:[], volume:80, brightness:100 },
+    detente: { name:'Détente', label:'Détente', icon:'🎵', apps_open:['spotify','discord'], apps_close:[], volume:60, brightness:60 },
+    nuit: { name:'Nuit', label:'Nuit', icon:'🌙', apps_open:[], apps_close:['discord','steam','spotify','chrome'], volume:15, brightness:20 },
   },
   presetsCustom: {},
   wallpaperType: 'mesh-animated',
@@ -1787,11 +2630,32 @@ const aria = {
   glassIntensity: 60,
   currentDevice: 'pc',
   _modelPickerData: null,
+  _modelsCacheTime: 0,
+  _modelsCache: null,
+  _modelsFetchPromise: null,
   _initDone: false,
   _pinUnlocking: false,
   _pinUnlocked: false,
   _pinCorrect: '0000',
   _pinKeyHandler: null,
+  _editingAgentId: null,
+  _agentRules: [],
+  _agentRepos: [],
+  _selectedColor: '#6C8EFF',
+  _activeAgentId: 'default',
+  _activeAgentIcon: '🤖',
+  _activeAgentName: 'ARIA',
+  AGENT_COLORS: [
+    '#6C8EFF', '#4ADE80', '#F59E0B', '#F87171',
+    '#A78BFA', '#34D399', '#FB923C', '#60A5FA',
+    '#E879F9', '#2DD4BF', '#FBBF24', '#94A3B8',
+  ],
+  AGENT_EMOJIS: [
+    '🤖','🛠️','📚','🎯','🚀','💡','🔬','🎨',
+    '🏆','⚡','🔥','❄️','🌊','🎸','🎧','📷',
+    '✈️','🚁','🏎️','⚽','🎮','🎲','♟️','🃏',
+    '👨‍💻','👩‍💻','🧑‍🔬','🧑‍🎨','👨‍✈️','🦁','🐉','🦊',
+  ],
 
   async loadAppPin() {
     try {
@@ -1984,12 +2848,16 @@ const aria = {
     this.setGlassIntensity(60);
     this.orbCtx = document.getElementById('orb-canvas').getContext('2d');
     this.buildSettingsPanel();
+    this._bindModelMenuEvents();
+    this._bindAgentDropdownEvents();
+    this._bindAgentsListEvents();
     this.loadSettings();
     await this.restoreWallpaper();
     await this.loadWallpapers();
     this.detectDevice();
     this.loadPresets();
     this.loadConversations();
+    await this.loadAgents();
     await this.loadModelPicker();
     this.setStatus('idle');
     this._micActive = false;
@@ -2037,12 +2905,21 @@ const aria = {
       });
     }
     document.addEventListener('click', e => {
+      if (!e.target.closest('.emoji-picker-wrapper')) {
+        document.querySelectorAll('.emoji-picker').forEach(p => { p.style.display = 'none'; });
+      }
       const picker = document.getElementById('model-picker');
       const menu = document.getElementById('model-picker-menu');
+      const agentSel = document.getElementById('agent-selector');
+      const agentMenu = document.getElementById('agent-dropdown');
       const inPicker = picker?.contains(e.target) || menu?.contains(e.target);
+      const inAgent = agentSel?.contains(e.target) || agentMenu?.contains(e.target);
       if (picker?.classList.contains('open') && !inPicker) {
         picker.classList.remove('open');
         this._restoreModelMenuHome();
+      }
+      if (!inAgent) {
+        this.closeAgentDropdown();
       }
       const presetsSheet = document.getElementById('mobile-presets-sheet');
       if (presetsSheet?.classList.contains('open') && !presetsSheet.contains(e.target) &&
@@ -2053,6 +2930,10 @@ const aria = {
     window.addEventListener('resize', () => {
       if (document.getElementById('model-picker')?.classList.contains('open')) {
         this.positionModelMenu();
+      }
+      const agentDd = document.getElementById('agent-dropdown');
+      if (agentDd?.classList.contains('is-open')) {
+        this.positionDropdownPanel(document.getElementById('agent-selector'), agentDd, 240);
       }
     });
 
@@ -2272,12 +3153,624 @@ const aria = {
   },
 
   logoAvatarHtml() {
+    if (this._activeAgentId && this._activeAgentId !== 'default' && this._activeAgentIcon) {
+      return `<span class="agent-emoji-avatar">${this._activeAgentIcon}</span>`;
+    }
     return `<svg viewBox="0 0 64 64" width="20" height="20" aria-hidden="true">
       <circle cx="32" cy="32" r="29" fill="none" stroke="#6C8EFF" stroke-width="1.5" stroke-dasharray="100 82"/>
       <circle cx="32" cy="32" r="17" fill="none" stroke="rgba(167,139,250,0.4)" stroke-width="1"/>
       <circle cx="32" cy="32" r="9" fill="#6C8EFF"/>
       <path d="M32 26 L37 38 L34 38 L32.5 34 L31.5 34 L30 38 L27 38 Z" fill="rgba(12,12,15,0.9)"/>
     </svg>`;
+  },
+
+  _getMicBtn() {
+    return document.getElementById('input-mic-btn')
+      || document.getElementById('dock-mic')
+      || document.getElementById('mic-btn');
+  },
+
+  _getLogoEl() {
+    const logo = document.getElementById('aria-logo');
+    if (logo?.innerHTML.trim()) return logo;
+    return document.querySelector('.topbar-logo');
+  },
+
+  previewTheme(name, el) {
+    document.body.className = `theme-${name}` + (this.reducedMotion ? ' reduced-motion' : '');
+    this._pendingTheme = name;
+    document.querySelectorAll('.theme-swatch').forEach(s => s.classList.remove('active'));
+    (el || document.querySelector(`.theme-swatch[data-theme="${name}"]`))?.classList.add('active');
+  },
+
+  onGlassIntensityInput(value) {
+    this.setGlassIntensity(value);
+    AnimationController.play(this.animGlassIntensity.bind(this), { value: Number(value), light: true });
+  },
+
+  onTtsRateInput(value) {
+    AnimationController.play(this.animTTSRate.bind(this), { rate: parseInt(value, 10) || 0 });
+  },
+
+  animThemeChange(ctrl, { newTheme, accentColor }) {
+    const themeName = newTheme || this.theme || 'slate';
+    document.body.className = `theme-${themeName}` + (this.reducedMotion ? ' reduced-motion' : '');
+    this.theme = themeName;
+
+    const flash = document.createElement('div');
+    flash.style.cssText = `
+      position: fixed; inset: 0; z-index: 7999;
+      background: ${accentColor || this.themeColors[themeName] || 'var(--accent)'};
+      opacity: 0.35; pointer-events: none; transition: opacity 0.6s ease-out;
+    `;
+    document.body.appendChild(flash);
+
+    const label = document.createElement('div');
+    label.style.cssText = `
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      z-index: 8000; font-size: 28px; font-weight: 700; color: white;
+      letter-spacing: 4px; text-transform: uppercase;
+      opacity: 0; transition: opacity 0.3s;
+      text-shadow: 0 2px 20px rgba(0,0,0,0.5); pointer-events: none;
+    `;
+    label.textContent = themeName.toUpperCase();
+    document.body.appendChild(label);
+
+    requestAnimationFrame(() => {
+      label.style.opacity = '1';
+      setTimeout(() => {
+        if (ctrl.stopped) { flash.remove(); label.remove(); return; }
+        flash.style.opacity = '0';
+        label.style.opacity = '0';
+        setTimeout(() => { flash.remove(); label.remove(); }, 650);
+      }, 800);
+    });
+
+    return () => { flash.remove(); label.remove(); };
+  },
+
+  animGlassIntensity(ctrl, { value, light }) {
+    this.setGlassIntensity(value);
+
+    const ray = document.createElement('div');
+    ray.style.cssText = `
+      position: fixed; top: 0; bottom: 0; left: -100px;
+      width: 80px; z-index: 7999; pointer-events: none;
+      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.15) 50%, transparent 100%);
+      animation: glassSweep 0.9s cubic-bezier(0.4,0,0.2,1) forwards;
+    `;
+    document.body.appendChild(ray);
+
+    let label = null;
+    if (!light) {
+      label = document.createElement('div');
+      label.style.cssText = `
+        position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+        z-index: 8000; background: rgba(0,0,0,0.6); backdrop-filter: blur(20px);
+        padding: 8px 18px; border-radius: 20px; font-size: 13px; color: white;
+        opacity: 0; transition: opacity 0.3s; pointer-events: none;
+        border: 1px solid rgba(255,255,255,0.15);
+      `;
+      label.textContent = `Transparence : ${value}%`;
+      document.body.appendChild(label);
+      requestAnimationFrame(() => { label.style.opacity = '1'; });
+    }
+
+    setTimeout(() => {
+      if (ctrl.stopped) return;
+      if (label) label.style.opacity = '0';
+      setTimeout(() => { ray.remove(); label?.remove(); }, 600);
+    }, light ? 900 : 900);
+
+    return () => { ray.remove(); label?.remove(); };
+  },
+
+  animWallpaperChange(ctrl, { type, url, label: wallpaperLabel }) {
+    const preview = document.createElement('div');
+    preview.style.cssText = `
+      position: fixed; inset: 0; z-index: 7990;
+      background-size: cover; background-position: center;
+      transform: translateY(100%);
+      transition: transform 0.7s cubic-bezier(0.34,1.2,0.64,1);
+      pointer-events: none;
+    `;
+
+    if (type === 'custom' && url) {
+      preview.style.backgroundImage = `url("${url}")`;
+    } else {
+      preview.className = `wp-${type}`;
+    }
+    document.body.appendChild(preview);
+
+    const badge = document.createElement('div');
+    badge.style.cssText = `
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      z-index: 8001; background: rgba(0,0,0,0.55); backdrop-filter: blur(20px);
+      padding: 10px 22px; border-radius: 24px; font-size: 14px; color: white;
+      font-weight: 500; letter-spacing: 0.5px;
+      border: 1px solid rgba(255,255,255,0.12);
+      opacity: 0; transition: opacity 0.3s; pointer-events: none;
+    `;
+    badge.innerHTML = `🖼️ ${wallpaperLabel || type}`;
+    document.body.appendChild(badge);
+
+    const applyFinal = () => {
+      this._applyWallpaperImmediate(type, url, true);
+      preview.remove();
+      badge.remove();
+    };
+
+    requestAnimationFrame(() => {
+      preview.style.transform = 'translateY(0)';
+      badge.style.opacity = '1';
+    });
+
+    setTimeout(() => {
+      if (ctrl.stopped) { applyFinal(); return; }
+      applyFinal();
+      preview.style.opacity = '0';
+      preview.style.transition = 'opacity 0.4s';
+      badge.style.opacity = '0';
+      setTimeout(() => { preview.remove(); badge.remove(); }, 450);
+    }, 1200);
+
+    return applyFinal;
+  },
+
+  animTTSToggle(ctrl, { enabled }) {
+    const micBtn = this._getMicBtn();
+    if (!micBtn) return;
+
+    const rect = micBtn.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+
+    if (enabled) {
+      for (let i = 0; i < 3; i++) {
+        const ring = document.createElement('div');
+        ring.style.cssText = `
+          position: fixed; left: ${cx}px; top: ${cy}px;
+          width: 40px; height: 40px; margin-left: -20px; margin-top: -20px;
+          border-radius: 50%; border: 2px solid rgba(74,222,128,0.6);
+          pointer-events: none; z-index: 7999;
+          animation: soundRing 1s ${i * 0.2}s ease-out forwards;
+        `;
+        document.body.appendChild(ring);
+        setTimeout(() => ring.remove(), 1200 + i * 200);
+      }
+      showStyledSettingToast('🔊 Voix activée', '#4ADE80');
+      return () => {};
+    }
+
+    micBtn.style.transition = 'transform 0.3s, background 0.3s';
+    micBtn.style.background = 'rgba(239,68,68,0.2)';
+    micBtn.style.transform = 'scale(0.85)';
+    setTimeout(() => {
+      if (ctrl.stopped) return;
+      micBtn.style.transform = 'scale(1)';
+      micBtn.style.background = '';
+      setTimeout(() => { micBtn.style.transition = ''; }, 300);
+    }, 400);
+    showStyledSettingToast('🔇 Voix désactivée', '#F87171');
+    return () => {
+      micBtn.style.transform = '';
+      micBtn.style.background = '';
+      micBtn.style.transition = '';
+    };
+  },
+
+  animModelChange(ctrl, { role, modelName }) {
+    const logo = this._getLogoEl();
+    const topbarLogo = document.querySelector('.topbar-logo');
+    const statusEl = document.getElementById('status-text');
+    const arcs = logo?.querySelectorAll('.logo-arc, .logo-arc-1, .logo-arc-2, .logo-arc-3');
+
+    if (arcs?.length) {
+      arcs.forEach((arc, i) => {
+        arc.style.animationDuration = ['1.5s', '1s', '0.7s'][i] || '1s';
+      });
+    }
+    topbarLogo?.classList.add('thinking-pulse');
+
+    const oldStatus = statusEl?.textContent;
+    if (statusEl) statusEl.textContent = 'Chargement...';
+
+    const badge = document.createElement('div');
+    badge.style.cssText = `
+      font-size: 10px; color: var(--accent); opacity: 0;
+      transition: opacity 0.3s; text-align: center; letter-spacing: 0.5px;
+    `;
+    badge.textContent = modelName;
+    document.getElementById('assistant-name')?.after(badge);
+    requestAnimationFrame(() => { badge.style.opacity = '1'; });
+
+    const roleColors = {
+      intent: 'rgba(74,222,128,0.4)',
+      fast: 'rgba(108,142,255,0.4)',
+      heavy: 'rgba(167,139,250,0.4)',
+      vision: 'rgba(245,158,11,0.4)',
+    };
+    const color = roleColors[role] || 'rgba(108,142,255,0.4)';
+
+    const cleanup = () => {
+      if (arcs?.length) {
+        arcs.forEach((arc, i) => {
+          arc.style.animationDuration = ['12s', '8s', '5s'][i] || '8s';
+        });
+      }
+      topbarLogo?.classList.remove('thinking-pulse');
+      if (statusEl) statusEl.textContent = oldStatus || 'En veille';
+      badge.remove();
+    };
+
+    setTimeout(() => {
+      if (ctrl.stopped) { cleanup(); return; }
+      if (logo) {
+        logo.style.filter = `drop-shadow(0 0 16px ${color})`;
+        logo.style.transition = 'filter 0.5s';
+        setTimeout(() => {
+          logo.style.filter = 'drop-shadow(0 0 8px rgba(108,142,255,0.3))';
+        }, 500);
+      }
+      if (topbarLogo) {
+        topbarLogo.style.boxShadow = `0 0 24px ${color}`;
+        setTimeout(() => { topbarLogo.style.boxShadow = ''; }, 500);
+      }
+      if (arcs?.length) {
+        arcs.forEach((arc, i) => {
+          arc.style.animationDuration = ['12s', '8s', '5s'][i] || '8s';
+        });
+      }
+      topbarLogo?.classList.remove('thinking-pulse');
+      if (statusEl) statusEl.textContent = oldStatus || 'En veille';
+
+      const roleLabels = { intent: 'Classification', fast: 'Rapide', heavy: 'Approfondi', vision: 'Vision' };
+      showStyledSettingToast(`🤖 ${roleLabels[role] || role} → ${modelName}`, '#A78BFA');
+
+      setTimeout(() => {
+        badge.style.opacity = '0';
+        setTimeout(() => badge.remove(), 300);
+      }, 2000);
+    }, 1200);
+
+    return cleanup;
+  },
+
+  animWhisperModelChange(ctrl, { modelName }) {
+    const micBtn = this._getMicBtn();
+    const rect = micBtn?.getBoundingClientRect();
+
+    const scan = document.createElement('div');
+    scan.style.cssText = `
+      position: fixed;
+      left: ${(rect?.left ?? 0) - 10}px;
+      width: ${(rect?.width ?? 60) + 20}px;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, rgba(108,142,255,0.9), transparent);
+      z-index: 7999; pointer-events: none;
+      animation: scanUp 0.8s ease-in-out 3 forwards;
+      bottom: ${window.innerHeight - (rect?.bottom || 0)}px;
+    `;
+    document.body.appendChild(scan);
+
+    const badge = document.createElement('div');
+    badge.style.cssText = `
+      position: fixed; left: ${rect?.left || 0}px; top: ${(rect?.top || 60) - 40}px;
+      background: rgba(0,0,0,0.7); backdrop-filter: blur(16px);
+      padding: 4px 10px; border-radius: 8px;
+      font-size: 11px; color: rgba(108,142,255,0.9);
+      opacity: 0; transition: opacity 0.3s; pointer-events: none;
+      z-index: 8000; white-space: nowrap;
+      border: 1px solid rgba(108,142,255,0.2);
+    `;
+    badge.textContent = `Whisper ${modelName}`;
+    document.body.appendChild(badge);
+    requestAnimationFrame(() => { badge.style.opacity = '1'; });
+
+    setTimeout(() => {
+      if (ctrl.stopped) return;
+      badge.style.opacity = '0';
+      scan.remove();
+      setTimeout(() => badge.remove(), 300);
+      showStyledSettingToast(`🎤 Whisper → ${modelName}`, '#6C8EFF');
+    }, 1500);
+
+    return () => { scan.remove(); badge.remove(); };
+  },
+
+  animDeviceChange(ctrl, { deviceIndex }) {
+    const micBtn = this._getMicBtn();
+    if (!micBtn) return;
+
+    let count = 0;
+    const interval = setInterval(() => {
+      if (ctrl.stopped || count >= 3) {
+        clearInterval(interval);
+        micBtn.style.boxShadow = '';
+        return;
+      }
+      micBtn.style.boxShadow = `0 0 0 ${count % 2 === 0 ? '8px' : '0px'} rgba(74,222,128,0.35)`;
+      micBtn.style.transition = 'box-shadow 0.25s';
+      count++;
+    }, 250);
+
+    showStyledSettingToast(`🎤 Device ${deviceIndex ?? 'auto'} sélectionné`, '#4ADE80');
+
+    setTimeout(() => {
+      clearInterval(interval);
+      micBtn.style.boxShadow = '';
+      micBtn.style.transition = '';
+    }, 1000);
+
+    return () => {
+      clearInterval(interval);
+      micBtn.style.boxShadow = '';
+      micBtn.style.transition = '';
+    };
+  },
+
+  animFocusMode(ctrl, { enabled }) {
+    const logo = this._getLogoEl();
+    const focusIndicator = document.getElementById('focus-indicator');
+
+    if (enabled) {
+      const veil = document.createElement('div');
+      veil.id = 'focus-veil';
+      veil.style.cssText = `
+        position: fixed; inset: 0; z-index: 7980;
+        background: rgba(0,0,0,0.12); opacity: 0;
+        transition: opacity 0.8s ease; pointer-events: none;
+      `;
+      document.body.appendChild(veil);
+      requestAnimationFrame(() => { veil.style.opacity = '1'; });
+
+      logo?.querySelectorAll('.logo-arc, .logo-arc-1, .logo-arc-2, .logo-arc-3').forEach((arc, i) => {
+        arc.style.animationDuration = ['20s', '15s', '10s'][i] || '15s';
+      });
+
+      if (focusIndicator) {
+        focusIndicator.style.display = 'block';
+        focusIndicator.style.transform = 'translateX(120%)';
+        focusIndicator.style.transition = 'transform 0.5s cubic-bezier(0.34,1.4,0.64,1)';
+        requestAnimationFrame(() => { focusIndicator.style.transform = 'translateX(0)'; });
+      }
+
+      showStyledSettingToast('🎯 Mode focus activé — distractions réduites', '#A78BFA');
+
+      return () => {
+        veil.style.opacity = '0';
+        setTimeout(() => veil.remove(), 800);
+        logo?.querySelectorAll('.logo-arc, .logo-arc-1, .logo-arc-2, .logo-arc-3').forEach((arc, i) => {
+          arc.style.animationDuration = ['12s', '8s', '5s'][i];
+        });
+      };
+    }
+
+    const veil = document.getElementById('focus-veil');
+    if (veil) {
+      veil.style.opacity = '0';
+      setTimeout(() => veil.remove(), 800);
+    }
+
+    logo?.querySelectorAll('.logo-arc, .logo-arc-1, .logo-arc-2, .logo-arc-3').forEach((arc, i) => {
+      arc.style.animationDuration = ['12s', '8s', '5s'][i];
+    });
+
+    if (focusIndicator) {
+      focusIndicator.style.transform = 'translateX(120%)';
+      setTimeout(() => {
+        focusIndicator.style.display = 'none';
+        focusIndicator.style.transform = '';
+      }, 500);
+    }
+
+    showStyledSettingToast('🎯 Mode focus désactivé', '#6C8EFF');
+    return () => {};
+  },
+
+  animDailyBriefToggle(ctrl, { enabled }) {
+    const statusEl = document.getElementById('status-text');
+    const original = statusEl?.textContent;
+
+    if (statusEl) {
+      statusEl.style.transition = 'color 0.3s, opacity 0.3s';
+      statusEl.style.color = enabled ? '#4ADE80' : '#F87171';
+      statusEl.textContent = enabled ? '☀️ Brief quotidien activé' : 'Brief désactivé';
+      setTimeout(() => {
+        if (ctrl.stopped) return;
+        statusEl.style.color = '';
+        statusEl.textContent = original || 'En veille';
+      }, 1800);
+    }
+
+    showStyledSettingToast(
+      enabled ? '☀️ Brief du matin activé' : '🌙 Brief désactivé',
+      enabled ? '#4ADE80' : '#F87171'
+    );
+
+    return () => {
+      if (statusEl) {
+        statusEl.style.color = '';
+        statusEl.textContent = original || 'En veille';
+      }
+    };
+  },
+
+  animTTSRate(ctrl, { rate }) {
+    const slider = document.getElementById('set-tts-rate');
+    const rect = slider?.getBoundingClientRect();
+    if (!rect) return;
+
+    const wave = document.createElement('canvas');
+    wave.width = 120;
+    wave.height = 30;
+    wave.style.cssText = `
+      position: fixed; left: ${rect.right + 10}px; top: ${rect.top - 5}px;
+      z-index: 8000; pointer-events: none; opacity: 0; transition: opacity 0.3s;
+    `;
+    document.body.appendChild(wave);
+    requestAnimationFrame(() => { wave.style.opacity = '1'; });
+
+    const ctx = wave.getContext('2d');
+    let t = 0;
+    const speed = 0.05 + (rate + 50) / 100 * 0.15;
+    let rafId = 0;
+
+    const drawWave = () => {
+      if (ctrl.stopped) return;
+      ctx.clearRect(0, 0, 120, 30);
+      ctx.strokeStyle = 'rgba(108,142,255,0.7)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let x = 0; x < 120; x++) {
+        const y = 15 + Math.sin(x * 0.1 + t) * 10;
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      t += speed;
+      rafId = requestAnimationFrame(drawWave);
+    };
+    drawWave();
+
+    const label = document.createElement('div');
+    label.style.cssText = `
+      position: fixed; left: ${rect.right + 10}px; top: ${rect.top + 30}px;
+      font-size: 10px; color: var(--accent); z-index: 8000;
+      pointer-events: none; opacity: 0; transition: opacity 0.3s;
+    `;
+    label.textContent = `${rate > 0 ? '+' : ''}${rate}% vitesse`;
+    document.body.appendChild(label);
+    requestAnimationFrame(() => { label.style.opacity = '1'; });
+
+    setTimeout(() => {
+      if (ctrl.stopped) return;
+      cancelAnimationFrame(rafId);
+      wave.style.opacity = '0';
+      label.style.opacity = '0';
+      setTimeout(() => { wave.remove(); label.remove(); }, 350);
+    }, 1500);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      wave.remove();
+      label.remove();
+    };
+  },
+
+  animWallpaperImport(ctrl, { filename, url }) {
+    const importBtn = document.querySelector('label.settings-btn-outline') || document.querySelector('label.settings-btn');
+    const grid = document.getElementById('wallpaper-custom-grid');
+    if (!importBtn || !grid) return;
+
+    const fromRect = importBtn.getBoundingClientRect();
+    const toRect = grid.getBoundingClientRect();
+
+    const fly = document.createElement('div');
+    fly.style.cssText = `
+      position: fixed;
+      left: ${fromRect.left + fromRect.width / 2 - 36}px;
+      top: ${fromRect.top}px;
+      width: 72px; height: 50px; border-radius: 8px;
+      background-image: url("${url}");
+      background-size: cover; background-position: center;
+      z-index: 8001; pointer-events: none;
+      transition: all 0.6s cubic-bezier(0.34,1.2,0.64,1);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      border: 2px solid var(--accent);
+    `;
+    document.body.appendChild(fly);
+
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        fly.style.left = `${toRect.left}px`;
+        fly.style.top = `${toRect.top}px`;
+      }, 50);
+    });
+
+    setTimeout(() => {
+      if (ctrl.stopped) return;
+      fly.style.opacity = '0';
+      fly.style.transform = 'scale(0.8)';
+      setTimeout(() => fly.remove(), 400);
+      showStyledSettingToast('📷 Image ajoutée', '#4ADE80');
+    }, 750);
+
+    return () => fly.remove();
+  },
+
+  async validateSection(sectionId) {
+    const btn = document.querySelector(`#acc-${sectionId} .settings-validate-btn`);
+    if (btn) {
+      btn.textContent = '⟳ Application...';
+      btn.disabled = true;
+    }
+
+    try {
+      switch (sectionId) {
+        case 'apparence': {
+          if (this._pendingTheme) {
+            this.theme = this._pendingTheme;
+            document.body.className = `theme-${this._pendingTheme}` + (this.reducedMotion ? ' reduced-motion' : '');
+          }
+          this.saveSettings();
+          AnimationController.play(this.animThemeChange.bind(this), {
+            newTheme: this.theme,
+            accentColor: this.themeColors[this.theme] || getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),
+          });
+          this._pendingTheme = null;
+          break;
+        }
+        case 'voix': {
+          const ttsEnabled = document.getElementById('set-tts-enabled')?.checked;
+          const briefEnabled = document.getElementById('set-daily-brief')?.checked;
+          this.saveSettings();
+          const db = this.api('set_daily_brief', briefEnabled);
+          if (db?.then) await db;
+          AnimationController.play(this.animTTSToggle.bind(this), { enabled: !!ttsEnabled });
+          setTimeout(() => {
+            AnimationController.play(this.animDailyBriefToggle.bind(this), { enabled: !!briefEnabled });
+          }, 1100);
+          break;
+        }
+        case 'micro': {
+          const deviceVal = document.getElementById('set-device-index')?.value;
+          const deviceIdx = deviceVal === '' || deviceVal == null ? null : parseInt(deviceVal, 10);
+          const whisperModel = document.getElementById('set-whisper-model')?.value;
+          const dp = this.api('set_stt_device_index', deviceIdx ?? '');
+          if (dp?.then) await dp;
+          const wp = this.api('set_whisper_model', whisperModel);
+          if (wp?.then) await wp;
+          this.saveSettings();
+          AnimationController.play(this.animDeviceChange.bind(this), { deviceIndex: deviceIdx });
+          if (whisperModel) {
+            setTimeout(() => {
+              AnimationController.play(this.animWhisperModelChange.bind(this), { modelName: whisperModel });
+            }, 1200);
+          }
+          break;
+        }
+        case 'systeme': {
+          const focusEnabled = document.getElementById('set-focus')?.checked;
+          const fp = this.api('set_focus_mode', focusEnabled);
+          if (fp?.then) await fp;
+          this.updateFocusIndicator(focusEnabled);
+          this.saveSettings();
+          AnimationController.play(this.animFocusMode.bind(this), { enabled: !!focusEnabled });
+          break;
+        }
+      }
+    } catch (e) {
+      console.warn('validateSection', e);
+      showStyledSettingToast('Erreur lors de l\'application', '#F87171');
+    }
+
+    setTimeout(() => {
+      if (btn) {
+        btn.textContent = '✓ Appliquer';
+        btn.disabled = false;
+      }
+    }, 2200);
   },
 
   setGlassIntensity(value) {
@@ -2307,6 +3800,27 @@ const aria = {
   },
 
   setWallpaper(type, url = null, skipSave) {
+    if (!skipSave && !this.reducedMotion) {
+      this.wallpaperType = type || 'mesh-animated';
+      this.wallpaperPath = url || '';
+      this.wallpaperFilename = (type === 'custom' && url)
+        ? (url.split('/').pop()?.split('?')[0] || '')
+        : '';
+      document.querySelectorAll('.wp-thumb').forEach(t => {
+        t.classList.toggle('active', type !== 'custom' && t.dataset.wp === this.wallpaperType);
+      });
+      AnimationController.play(this.animWallpaperChange.bind(this), {
+        type,
+        url,
+        label: this.wallpaperLabels[type] || type,
+      });
+      this.saveSettings();
+      return;
+    }
+    this._applyWallpaperImmediate(type, url, skipSave);
+  },
+
+  _applyWallpaperImmediate(type, url = null, skipSave) {
     const layer = document.getElementById('wallpaper-image');
     if (!layer) return;
 
@@ -2450,13 +3964,17 @@ const aria = {
           this._staticPort = result.port;
           this.WALLPAPER_STATIC_PORT = result.port;
         }
-        this.setWallpaper('custom', result.url);
+        this._applyWallpaperImmediate('custom', result.url, true);
         this.wallpaperFilename = result.filename || '';
         if (!this.wallpaperFilename && result.url) {
           this.wallpaperFilename = result.url.split('/').pop()?.split('?')[0] || '';
         }
         this.saveSettings();
         await this.loadWallpapers();
+        AnimationController.play(this.animWallpaperImport.bind(this), {
+          filename: file.name,
+          url: result.url,
+        });
       } else {
         this.showToast('Erreur import: ' + (result.error || 'inconnue'), 'error');
       }
@@ -2892,16 +4410,38 @@ const aria = {
     this.refreshClockLine();
   },
 
-  async _fetchAvailableModels() {
-    const fn = window.pywebview?.api?.get_available_models;
-    if (!fn) {
-      throw new Error('API pywebview indisponible');
+  async _fetchAvailableModels(force = false) {
+    const now = Date.now();
+    if (!force && this._modelsCache && (now - this._modelsCacheTime) < 30000) {
+      return this._modelsCache;
     }
-    const raw = await Promise.resolve(fn());
-    if (typeof raw === 'string') {
-      return JSON.parse(raw || '{}');
+    if (this._modelsFetchPromise && !force) {
+      return this._modelsFetchPromise;
     }
-    return raw || {};
+
+    this._modelsFetchPromise = (async () => {
+      try {
+        const fn = window.pywebview?.api?.get_available_models;
+        if (!fn) {
+          throw new Error('API pywebview indisponible');
+        }
+        const raw = await Promise.resolve(fn());
+        const data = typeof raw === 'string' ? JSON.parse(raw || '{}') : (raw || {});
+        this._modelsCache = data;
+        this._modelsCacheTime = Date.now();
+        this._modelPickerData = data;
+        return data;
+      } finally {
+        this._modelsFetchPromise = null;
+      }
+    })();
+
+    return this._modelsFetchPromise;
+  },
+
+  _invalidateModelsCache() {
+    this._modelsCacheTime = 0;
+    this._modelsCache = null;
   },
 
   setModel(roleOrName, modelName) {
@@ -2915,6 +4455,42 @@ const aria = {
 
   normModelId(id) {
     return String(id || '').replace(/:latest$/, '');
+  },
+
+  positionDropdownPanel(triggerEl, panelEl, minWidth = 220) {
+    if (!triggerEl || !panelEl) return;
+    const r = triggerEl.getBoundingClientRect();
+    const menuW = Math.max(minWidth, Math.min(360, panelEl.offsetWidth || minWidth, window.innerWidth - 24));
+    let left = r.left;
+    if (left + menuW > window.innerWidth - 12) {
+      left = Math.max(12, window.innerWidth - menuW - 12);
+    }
+    if (panelEl.parentElement !== document.body) {
+      panelEl._dropdownHome = panelEl.parentElement;
+      document.body.appendChild(panelEl);
+    }
+    panelEl.style.position = 'fixed';
+    panelEl.style.top = `${Math.round(r.bottom + 6)}px`;
+    panelEl.style.left = `${Math.round(left)}px`;
+    panelEl.style.minWidth = `${Math.round(Math.max(r.width, minWidth))}px`;
+    panelEl.style.zIndex = '20000';
+    panelEl.classList.remove('hidden');
+    panelEl.classList.add('is-open');
+  },
+
+  restoreDropdownPanel(panelEl) {
+    if (!panelEl) return;
+    panelEl.classList.remove('is-open');
+    panelEl.classList.add('hidden');
+    panelEl.style.position = '';
+    panelEl.style.top = '';
+    panelEl.style.left = '';
+    panelEl.style.minWidth = '';
+    panelEl.style.zIndex = '';
+    const home = panelEl._dropdownHome;
+    if (home && panelEl.parentElement === document.body) {
+      home.appendChild(panelEl);
+    }
   },
 
   async loadModelPicker() {
@@ -2945,29 +4521,37 @@ const aria = {
     const menu = document.getElementById('model-picker-menu');
     const picker = document.getElementById('model-picker');
     if (!btn || !menu || !picker?.classList.contains('open')) return;
-
-    if (menu.parentElement !== document.body) {
-      menu._modelPickerHome = picker;
-      document.body.appendChild(menu);
-    }
-
-    const r = btn.getBoundingClientRect();
-    const menuW = Math.max(280, r.width);
-    let left = r.left;
-    if (left + menuW > window.innerWidth - 12) {
-      left = Math.max(12, window.innerWidth - menuW - 12);
-    }
-    menu.style.top = `${Math.round(r.bottom + 6)}px`;
-    menu.style.left = `${Math.round(left)}px`;
-    menu.style.minWidth = `${Math.round(menuW)}px`;
+    this.positionDropdownPanel(btn, menu, 280);
   },
 
   _restoreModelMenuHome() {
     const menu = document.getElementById('model-picker-menu');
-    const home = menu?._modelPickerHome || document.getElementById('model-picker');
-    if (menu && home && menu.parentElement === document.body) {
+    if (!menu) return;
+    menu.classList.remove('is-open');
+    menu.style.position = '';
+    menu.style.top = '';
+    menu.style.left = '';
+    menu.style.minWidth = '';
+    menu.style.zIndex = '';
+    const home = menu._dropdownHome;
+    if (home && menu.parentElement === document.body) {
       home.appendChild(menu);
     }
+  },
+
+  _bindModelMenuEvents() {
+    const menu = document.getElementById('model-picker-menu');
+    if (!menu || menu._pickBound) return;
+    menu._pickBound = true;
+    menu.addEventListener('mousedown', e => e.stopPropagation());
+    menu.addEventListener('click', e => {
+      const btn = e.target.closest('.model-option[data-model-id]');
+      if (!btn) return;
+      e.stopPropagation();
+      e.preventDefault();
+      const modelId = btn.getAttribute('data-model-id');
+      if (modelId != null) this.pickModel(modelId);
+    });
   },
 
   toggleAccordion(id) {
@@ -2982,21 +4566,34 @@ const aria = {
     if (id === 'modeles' && isCollapsed) {
       this.loadModelSettings();
     }
+    if (id === 'cloud' && isCollapsed) {
+      this.loadCloudProviders();
+    }
   },
 
-  async loadModelSettings() {
+  async loadModelSettings(force = false) {
     const container = document.getElementById('model-settings');
     if (!container) return;
 
-    container.innerHTML = '<div style="color:var(--text3);font-size:12px">Chargement...</div>';
-
-    let data;
-    try {
-      data = await this._fetchAvailableModels();
-    } catch (e) {
-      container.innerHTML = `<div style="color:var(--error);font-size:12px">Erreur: ${this.esc(e.message || e)}</div>`;
+    const now = Date.now();
+    if (!force && this._modelsCache && (now - this._modelsCacheTime) < 30000) {
+      this._renderModelSettings(this._modelsCache);
       return;
     }
+
+    container.innerHTML = '<div style="color:var(--text3);font-size:12px">Chargement...</div>';
+
+    try {
+      const data = await this._fetchAvailableModels(force);
+      this._renderModelSettings(data);
+    } catch (e) {
+      container.innerHTML = `<div style="color:var(--error);font-size:12px">Erreur: ${this.esc(e.message || e)}</div>`;
+    }
+  },
+
+  _renderModelSettings(data) {
+    const container = document.getElementById('model-settings');
+    if (!container) return;
 
     if (!data.ollama_running) {
       container.innerHTML = `
@@ -3008,7 +4605,7 @@ const aria = {
       return;
     }
 
-    if (!data.local_models || data.local_models.length === 0) {
+    if (!data.local_models?.length) {
       container.innerHTML = `
         <div style="color:var(--text3);font-size:12px;padding:10px">
           Aucun modèle installé.<br>
@@ -3018,22 +4615,20 @@ const aria = {
     }
 
     const roles = [
-      { key: 'intent', label: '⚡ Classification (1B)', desc: 'Ultra-rapide' },
-      { key: 'fast', label: '💬 Réponses rapides', desc: 'Quotidien' },
-      { key: 'heavy', label: '🧠 Analyse approfondie', desc: 'Maths, aviation' },
-      { key: 'vision', label: '👁️ Vision (images)', desc: 'Photos, docs' },
+      { key: 'intent', label: '⚡ Classification (1B)', desc: 'Ultra-rapide, actions simples' },
+      { key: 'fast', label: '💬 Réponses rapides', desc: 'Conversation quotidienne' },
+      { key: 'heavy', label: '🧠 Analyse approfondie', desc: 'Maths, aviation, raisonnement' },
+      { key: 'vision', label: '👁️ Vision (images)', desc: 'Photos, documents' },
     ];
     const configured = data.configured || {};
 
     container.innerHTML = roles.map(r => `
       <div style="margin-bottom:12px">
-        <div style="font-size:12px;color:var(--text2);font-weight:500">${r.label}</div>
-        <div style="font-size:10px;color:var(--text3);margin-bottom:5px">${r.desc}</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:2px">${r.desc}</div>
+        <div style="font-size:12px;color:var(--text2);font-weight:500;margin-bottom:4px">${r.label}</div>
         <select
           id="model-select-${r.key}"
-          style="width:100%;background:var(--surface,#1a1a24);border:1px solid var(--border,rgba(255,255,255,0.08));
-                 border-radius:8px;padding:7px 10px;color:var(--text,#f1f1f3);
-                 font-family:inherit;font-size:12px;cursor:pointer;outline:none"
+          class="aria-select"
           onchange="aria.setModel('${r.key}', this.value)"
         >
           ${data.local_models.map(m => `
@@ -3054,7 +4649,14 @@ const aria = {
       const result = JSON.parse(raw || '{}');
       if (result.success) {
         this.showToast(`${role} → ${modelName}`, 'success');
-        this.loadModelPicker();
+        if (this._modelsCache?.configured) {
+          this._modelsCache.configured[role] = modelName;
+        }
+        if (document.getElementById('model-picker')?.classList.contains('open')) {
+          this.renderModelMenu(this._modelsCache || this._modelPickerData || {});
+        }
+        this.updateModelPickerLabel(this._modelsCache?.current || 'auto');
+        AnimationController.play(this.animModelChange.bind(this), { role, modelName });
       } else {
         this.showToast('Erreur: ' + (result.error || '?'), 'error');
       }
@@ -3076,7 +4678,7 @@ const aria = {
       return;
     }
     const options = this._modelPickerData?.options || [];
-    const match = options.find(o => this.normModelId(o.id) === this.normModelId(cur));
+    const match = options.find(o => o.id === cur || this.normModelId(o.id) === this.normModelId(cur));
     const short = match?.label || this.normModelId(cur);
     label.textContent = short;
     if (sidebarLbl) sidebarLbl.textContent = short.toLowerCase();
@@ -3101,28 +4703,53 @@ const aria = {
       ];
     }
 
-    if (!data.ollama_running && !data.local_models?.length) {
+    if (!data.ollama_running && !data.local_models?.length && !(data.cloud_models?.length)) {
       menu.innerHTML = `<div class="model-option-sub" style="padding:10px 12px;color:var(--error,#f87171)">
-        ⚠️ Ollama non disponible<br>
-        <span style="font-size:11px;opacity:0.8">Lance Ollama puis rouvre ce menu</span>
+        ⚠️ Aucun modèle disponible<br>
+        <span style="font-size:11px;opacity:0.8">Configure llama.cpp ou une clé API cloud dans Paramètres</span>
       </div>`;
       return;
     }
 
     if (!options.length) {
       menu.innerHTML = `<div class="model-option-sub" style="padding:10px 12px;color:var(--text3)">
-        Aucun modèle installé — <code style="font-size:10px">ollama pull llama3.2:1b</code>
+        Aucun modèle — configure llama.cpp ou une clé API
       </div>`;
       return;
     }
 
-    menu.innerHTML = options.map(opt => {
-      const active = this.normModelId(opt.id) === this.normModelId(current);
-      return `<button type="button" class="model-option${active ? ' active' : ''}" onclick="aria.pickModel(${JSON.stringify(opt.id)})">
-        <span>${this.esc(opt.label)}</span>
-        <span class="model-option-sub">${this.esc(opt.subtitle || opt.id)}</span>
+    const renderOpt = opt => {
+      const active = String(opt.id) === String(current);
+      return `<button type="button" class="model-option${active ? ' active' : ''}"
+        data-model-id="${this.esc(opt.id)}">
+        <span class="model-option-main">
+          <span>${opt.cloud ? '☁️ ' : ''}${this.esc(opt.label)}</span>
+          <span class="model-option-sub">${this.esc(opt.subtitle || opt.id)}</span>
+        </span>
+        <span class="model-option-check">${active ? '✓' : ''}</span>
       </button>`;
-    }).join('');
+    };
+
+    const localOpts = options.filter(o => !o.cloud && o.id !== 'auto');
+    const cloudOpts = options.filter(o => o.cloud);
+    const autoOpt = options.find(o => o.id === 'auto');
+
+    let html = '';
+    if (autoOpt) html += renderOpt(autoOpt);
+    if (localOpts.length) {
+      html += `<div class="model-option-divider">💻 Local</div>`;
+      html += localOpts.map(renderOpt.bind(this)).join('');
+    }
+    if (cloudOpts.length) {
+      html += `<div class="model-option-divider">☁️ Cloud (API)</div>`;
+      html += cloudOpts.map(renderOpt.bind(this)).join('');
+    }
+    if (!localOpts.length && !cloudOpts.length) {
+      html = options.map(renderOpt.bind(this)).join('');
+    }
+
+    menu.innerHTML = html;
+    this._bindModelMenuEvents();
   },
 
   async toggleModelMenu(event) {
@@ -3131,6 +4758,7 @@ const aria = {
     if (!picker) return;
     const willOpen = !picker.classList.contains('open');
     if (willOpen) {
+      this.closeAgentDropdown();
       picker.classList.add('open');
       this.positionModelMenu();
       await this.loadModelPicker();
@@ -3146,21 +4774,37 @@ const aria = {
     this._restoreModelMenuHome();
   },
 
+  _switchModelOk(raw) {
+    if (raw == null) return false;
+    const s = String(raw).trim().toLowerCase();
+    return s === 'ok';
+  },
+
   async pickModel(modelId) {
+    const prev = this._modelPickerData?.current || 'auto';
     try {
       let raw = this.api('switch_model', modelId);
       if (raw?.then) raw = await raw;
-      if (raw !== 'ok') {
-        this.showToast('Erreur changement de modèle', 'error');
+      if (!this._switchModelOk(raw)) {
+        this.showToast('Erreur changement de modèle' + (raw ? `: ${raw}` : ''), 'error');
         return;
       }
-      if (this._modelPickerData) this._modelPickerData.current = modelId;
+      if (this._modelPickerData) {
+        this._modelPickerData.current = modelId;
+      } else {
+        this._modelPickerData = { current: modelId, options: [] };
+      }
       this.updateModelPickerLabel(modelId);
-      this.setModel(modelId === 'auto' ? '' : modelId);
+      const el = document.getElementById('model-display');
+      if (el) el.textContent = modelId === 'auto' ? '' : modelId;
       const opt = (this._modelPickerData?.options || []).find(o => o.id === modelId);
       const name = opt?.label || (modelId === 'auto' ? 'Auto' : modelId);
-      this.showToast(`Modèle : ${name}`, 'info', 2500);
-      this.renderModelMenu(this._modelPickerData || { current: modelId, options: [] });
+      if (this.normModelId(prev) !== this.normModelId(modelId)) {
+        this.showToast(`Modèle : ${name}`, 'success', 2500);
+      } else {
+        this.showToast(`Modèle actif : ${name}`, 'info', 1800);
+      }
+      this.renderModelMenu(this._modelPickerData);
     } catch (e) {
       this.showToast('Erreur changement de modèle', 'error');
     } finally {
@@ -3839,6 +5483,15 @@ const aria = {
     if (pill) pill.textContent = label || key;
   },
 
+  activatePresetFromMobile(key) {
+    const merged = this.mergePresets(this.presetsCustom);
+    const p = merged[key] || {};
+    const name = this.presetDisplayName(p) || key;
+    const icon = p.icon || '⚙️';
+    this.activatePreset(key, `${icon} ${name}`);
+    this.closeMobilePresets();
+  },
+
   cycleTheme() {
     const i = this.themes.indexOf(this.theme);
     const next = this.themes[(i + 1) % this.themes.length];
@@ -3847,12 +5500,13 @@ const aria = {
     this.showToast('Thème : ' + next, 'info');
   },
 
-  setTheme(name, el) {
+  setTheme(name, el, skipSave) {
     document.body.className = `theme-${name}` + (this.reducedMotion ? ' reduced-motion' : '');
     this.theme = name;
+    this._pendingTheme = null;
     document.querySelectorAll('.theme-swatch').forEach(s => s.classList.remove('active'));
     (el || document.querySelector(`.theme-swatch[data-theme="${name}"]`))?.classList.add('active');
-    this.saveSettings();
+    if (!skipSave) this.saveSettings();
   },
 
   applyBubbleStyles() {
@@ -3873,7 +5527,7 @@ const aria = {
   collectSettings() {
     const rate = document.getElementById('set-tts-rate')?.value ?? 0;
     return {
-      theme: this.theme,
+      theme: this._pendingTheme || this.theme,
       opacity: (document.getElementById('set-opacity')?.value ?? 100) / 100,
       reduced_motion: document.getElementById('set-reduced-motion')?.checked ?? false,
       liquid_glass: document.getElementById('set-liquid-glass')?.checked ?? true,
@@ -3933,11 +5587,7 @@ const aria = {
   },
 
   onTtsToggle(enabled) {
-    if (window.pywebview?.api) {
-      window.pywebview.api.set_tts_enabled(enabled);
-    }
-    this.showToast(enabled ? '🔊 Parole activée' : '🔇 Parole désactivée', 'info');
-    this.saveSettings();
+    this.ttsEnabledForSession = !!enabled;
   },
 
   loadSettings() {
@@ -3946,7 +5596,7 @@ const aria = {
     p.then(raw => {
       try {
         const d = JSON.parse(raw || '{}');
-        if (d.theme) this.setTheme(d.theme);
+        if (d.theme) this.setTheme(d.theme, null, true);
         if (d.opacity != null) {
           document.getElementById('set-opacity').value = Math.round(d.opacity * 100);
           document.body.style.opacity = d.opacity;
@@ -4020,21 +5670,46 @@ const aria = {
 
   mergePresets(custom) {
     const m = {};
-    this.presetKeys.forEach(k => { m[k] = { ...this.defaultPresets[k], ...(custom[k] || {}) }; });
+    this.presetKeys.forEach(k => {
+      const base = { ...this.defaultPresets[k], ...(custom[k] || {}) };
+      const name = base.name || base.label || k;
+      m[k] = { ...base, name, label: name, icon: base.icon || '⚙️' };
+    });
     return m;
+  },
+
+  presetDisplayName(p) {
+    return p?.name || p?.label || '';
   },
 
   renderPresetSidebar(merged) {
     const list = document.getElementById('presets-list');
+    if (!list) return;
     list.innerHTML = '';
     this.presetKeys.forEach(k => {
       const p = merged[k];
+      const name = this.presetDisplayName(p) || k;
+      const icon = p.icon || '⚙️';
       const row = document.createElement('div');
       row.className = 'preset-row navrow';
-      row.textContent = `${p.icon} ${p.label}`;
-      row.onclick = e => this.activatePreset(k, `${p.icon} ${p.label}`, e);
+      row.dataset.preset = k;
+      row.title = `Mode ${name}`;
+      row.innerHTML = `<span class="preset-btn-icon">${icon}</span> <span class="preset-btn-name">${this.esc(name)}</span>`;
+      row.onclick = e => this.activatePreset(k, `${icon} ${name}`, e);
       list.appendChild(row);
     });
+    this.renderMobilePresets(merged);
+  },
+
+  renderMobilePresets(merged) {
+    const list = document.getElementById('mobile-presets-list');
+    if (!list) return;
+    list.innerHTML = this.presetKeys.map(k => {
+      const p = merged[k];
+      const name = this.presetDisplayName(p) || k;
+      const icon = p.icon || '⚙️';
+      return `<div class="mobile-preset-row" data-preset="${k}" onclick="aria.activatePresetFromMobile('${k}')">${icon} <span>${this.esc(name)}</span></div>`;
+    }).join('');
   },
 
   loadPresets() {
@@ -4050,9 +5725,15 @@ const aria = {
   },
 
   readPresetForm(key) {
+    const name = document.getElementById(`preset-name-${key}`)?.value?.trim()
+      || document.getElementById(`pre-${key}-label`)?.value?.trim();
+    const icon = document.getElementById(`emoji-btn-${key}`)?.textContent?.trim()
+      || document.getElementById(`pre-${key}-icon`)?.value?.trim()
+      || '⚙️';
     return {
-      label: document.getElementById(`pre-${key}-label`)?.value?.trim(),
-      icon: document.getElementById(`pre-${key}-icon`)?.value?.trim(),
+      name,
+      label: name,
+      icon,
       apps_open: this._appLists[`open-${key}`]?.selected || [],
       apps_close: this._appLists[`close-${key}`]?.selected || [],
       volume: parseInt(document.getElementById(`pre-${key}-vol`)?.value, 10),
@@ -4060,13 +5741,55 @@ const aria = {
     };
   },
 
+  toggleEmojiPicker(key) {
+    const picker = document.getElementById(`emoji-picker-${key}`);
+    if (!picker) return;
+    document.querySelectorAll('.emoji-picker').forEach(p => {
+      if (p.id !== `emoji-picker-${key}`) p.style.display = 'none';
+    });
+    picker.style.display = picker.style.display === 'none' ? 'grid' : 'none';
+  },
+
+  selectEmoji(key, emoji) {
+    const btn = document.getElementById(`emoji-btn-${key}`);
+    if (btn) btn.textContent = emoji;
+    const picker = document.getElementById(`emoji-picker-${key}`);
+    if (picker) picker.style.display = 'none';
+    this.updatePresetPreview(key);
+  },
+
+  updatePresetPreview(key) {
+    const nameEl = document.getElementById(`preset-name-${key}`);
+    const iconBtn = document.getElementById(`emoji-btn-${key}`);
+    const previewName = document.getElementById(`preset-name-preview-${key}`);
+    const previewIcon = document.getElementById(`preset-icon-preview-${key}`);
+    if (previewName && nameEl) previewName.textContent = nameEl.value || key;
+    if (previewIcon && iconBtn) previewIcon.textContent = iconBtn.textContent;
+  },
+
+  refreshPresetButton(key, icon, name) {
+    document.querySelectorAll(`[data-preset="${key}"]`).forEach(btn => {
+      const iconEl = btn.querySelector('.preset-btn-icon');
+      const nameEl = btn.querySelector('.preset-btn-name');
+      if (iconEl) iconEl.textContent = icon;
+      if (nameEl) nameEl.textContent = name;
+      if (btn.classList.contains('mobile-preset-row')) {
+        btn.innerHTML = `${icon} <span>${this.esc(name)}</span>`;
+      }
+      btn.title = `Mode ${name}`;
+    });
+  },
+
   savePreset(key) {
     const data = this.readPresetForm(key);
     this.api('save_settings', JSON.stringify({ presets: { [key]: data } }));
     this.presetsCustom[key] = { ...(this.presetsCustom[key] || {}), ...data };
     const merged = this.mergePresets(this.presetsCustom);
+    const name = data.name || key;
+    const icon = data.icon || '⚙️';
     this.renderPresetSidebar(merged);
-    this.showToast(`Preset « ${data.label || key} » enregistré`, 'success');
+    this.refreshPresetButton(key, icon, name);
+    this.showToast(`Mode "${icon} ${name}" sauvegardé`, 'success');
   },
 
   csvToList(s) { return String(s || '').split(',').map(x => x.trim()).filter(Boolean); },
@@ -4175,47 +5898,68 @@ const aria = {
       appList = JSON.parse(raw || '[]');
     } catch (e) {}
 
-    box.innerHTML = '';
+    const emojiOptions = this.presetEmojis.map(e =>
+      `<button type="button" class="emoji-option" onclick="aria.selectEmoji('KEY', ${JSON.stringify(e)})">${e}</button>`
+    ).join('');
+
+    box.innerHTML = this.presetKeys.map(key => {
+      const p = merged[key];
+      const displayName = this.presetDisplayName(p) || key;
+      const icon = p.icon || '⚙️';
+      const emojis = emojiOptions.replace(/KEY/g, key);
+      return `
+    <div class="preset-card" id="preset-card-${key}">
+      <div class="preset-card-header" id="preset-header-${key}">
+        <span class="preset-icon-preview" id="preset-icon-preview-${key}">${icon}</span>
+        <span class="preset-name-preview" id="preset-name-preview-${key}">${this.esc(displayName)}</span>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <div style="flex-shrink:0">
+          <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:4px">Icône</label>
+          <div class="emoji-picker-wrapper">
+            <button type="button" class="emoji-btn" id="emoji-btn-${key}" onclick="aria.toggleEmojiPicker('${key}')" title="Changer l'icône">${icon}</button>
+            <div class="emoji-picker" id="emoji-picker-${key}" style="display:none">${emojis}</div>
+          </div>
+        </div>
+        <div style="flex:1">
+          <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:4px">Nom du mode</label>
+          <input type="text" id="preset-name-${key}" value="${this.esc(displayName)}" maxlength="20" placeholder="Nom du mode..."
+            style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-family:inherit;font-size:13px;outline:none"
+            oninput="aria.updatePresetPreview('${key}')">
+        </div>
+      </div>
+
+      <div class="preset-field">
+        <label>Apps à ouvrir</label>
+        <div id="chips-open-${key}" class="app-chips"></div>
+        <input type="text" class="app-search" id="search-open-${key}" placeholder="Rechercher une app installée..."
+          oninput="aria.filterAppList('open-${key}', this.value)" autocomplete="off">
+        <div id="results-open-${key}" class="app-results"></div>
+      </div>
+
+      <div class="preset-field">
+        <label>Apps à fermer</label>
+        <div id="chips-close-${key}" class="app-chips"></div>
+        <input type="text" class="app-search" id="search-close-${key}" placeholder="Rechercher une app installée..."
+          oninput="aria.filterAppList('close-${key}', this.value)" autocomplete="off">
+        <div id="results-close-${key}" class="app-results"></div>
+      </div>
+
+      <div class="setting-row"><label>Volume</label><input type="range" id="pre-${key}-vol" min="0" max="100" value="${p.volume ?? 50}"><span id="pre-${key}-vol-val">${p.volume ?? 50}%</span></div>
+      <div class="setting-row"><label>Luminosité</label><input type="range" id="pre-${key}-bri" min="0" max="100" value="${p.brightness ?? 50}"></div>
+
+      <button type="button" class="settings-validate-btn" onclick="aria.savePreset('${key}')">✓ Appliquer</button>
+    </div>`;
+    }).join('');
+
     this.presetKeys.forEach(key => {
       const p = merged[key];
-      const openApps = p.apps_open || [];
-      const closeApps = p.apps_close || [];
-
-      const ed = document.createElement('div');
-      ed.className = 'preset-editor';
-      ed.innerHTML = `
-        <div class="preset-editor-title">${this.esc(p.icon)} ${this.esc(p.label)}</div>
-        <div class="preset-field"><label>Nom</label><input id="pre-${key}-label" value="${this.esc(p.label)}"></div>
-        <div class="preset-field"><label>Icône</label><input id="pre-${key}-icon" value="${this.esc(p.icon)}" maxlength="4"></div>
-
-        <div class="preset-field">
-          <label>Apps à ouvrir</label>
-          <div id="chips-open-${key}" class="app-chips"></div>
-          <input type="text" class="app-search" id="search-open-${key}" placeholder="Rechercher une app installée..."
-            oninput="aria.filterAppList('open-${key}', this.value)" autocomplete="off">
-          <div id="results-open-${key}" class="app-results"></div>
-        </div>
-
-        <div class="preset-field">
-          <label>Apps à fermer</label>
-          <div id="chips-close-${key}" class="app-chips"></div>
-          <input type="text" class="app-search" id="search-close-${key}" placeholder="Rechercher une app installée..."
-            oninput="aria.filterAppList('close-${key}', this.value)" autocomplete="off">
-          <div id="results-close-${key}" class="app-results"></div>
-        </div>
-
-        <div class="setting-row"><label>Volume</label><input type="range" id="pre-${key}-vol" min="0" max="100" value="${p.volume ?? 50}"><span id="pre-${key}-vol-val">${p.volume ?? 50}%</span></div>
-        <div class="setting-row"><label>Luminosité</label><input type="range" id="pre-${key}-bri" min="0" max="100" value="${p.brightness ?? 50}"></div>
-        <button type="button" class="preset-save" onclick="aria.savePreset('${key}')">Enregistrer</button>`;
-      box.appendChild(ed);
-
       this._appLists = this._appLists || {};
-      this._appLists[`open-${key}`] = { all: appList, selected: [...openApps] };
-      this._appLists[`close-${key}`] = { all: appList, selected: [...closeApps] };
-
+      this._appLists[`open-${key}`] = { all: appList, selected: [...(p.apps_open || [])] };
+      this._appLists[`close-${key}`] = { all: appList, selected: [...(p.apps_close || [])] };
       this.renderChips(`open-${key}`);
       this.renderChips(`close-${key}`);
-
       document.getElementById(`pre-${key}-vol`)?.addEventListener('input', function() {
         document.getElementById(`pre-${key}-vol-val`).textContent = this.value + '%';
       });
@@ -4239,17 +5983,17 @@ const aria = {
       <div class="settings-section">
         <div class="settings-title">Thème &amp; verre</div>
         <div class="theme-grid">
-          <div class="theme-swatch active" data-theme="slate" style="background:#FF6B35" onclick="aria.setTheme('slate',this)">Slate</div>
-          <div class="theme-swatch" data-theme="warm" style="background:#F59E0B" onclick="aria.setTheme('warm',this)">Warm</div>
-          <div class="theme-swatch" data-theme="forest" style="background:#4ADE80" onclick="aria.setTheme('forest',this)">Forest</div>
-          <div class="theme-swatch" data-theme="rose" style="background:#F472B6" onclick="aria.setTheme('rose',this)">Rose</div>
-          <div class="theme-swatch" data-theme="mono" style="background:#555" onclick="aria.setTheme('mono',this)">Mono</div>
-          <div class="theme-swatch" data-theme="contrast" style="background:linear-gradient(135deg,#fff,#000);color:#000" onclick="aria.setTheme('contrast',this)">Contrast</div>
+          <div class="theme-swatch active" data-theme="slate" style="background:#FF6B35" onclick="aria.previewTheme('slate',this)">Slate</div>
+          <div class="theme-swatch" data-theme="warm" style="background:#F59E0B" onclick="aria.previewTheme('warm',this)">Warm</div>
+          <div class="theme-swatch" data-theme="forest" style="background:#4ADE80" onclick="aria.previewTheme('forest',this)">Forest</div>
+          <div class="theme-swatch" data-theme="rose" style="background:#F472B6" onclick="aria.previewTheme('rose',this)">Rose</div>
+          <div class="theme-swatch" data-theme="mono" style="background:#555" onclick="aria.previewTheme('mono',this)">Mono</div>
+          <div class="theme-swatch" data-theme="contrast" style="background:linear-gradient(135deg,#fff,#000);color:#000" onclick="aria.previewTheme('contrast',this)">Contrast</div>
         </div>
         <div class="setting-row"><label>Opacité</label><input type="range" id="set-opacity" min="70" max="100" value="100" oninput="aria.saveSettings()"></div>
         <div class="setting-row"><label>Réduction animations</label><input type="checkbox" id="set-reduced-motion" onchange="aria.saveSettings()"></div>
         <div class="setting-row"><label>Effet verre (Liquid Glass)</label><input type="checkbox" id="set-liquid-glass" checked onchange="aria.saveSettings()"></div>
-        <div class="setting-row"><label>Intensité Liquid Glass</label><input type="range" id="set-glass-intensity" min="0" max="100" value="60" oninput="aria.setGlassIntensity(this.value); aria.saveSettings()"></div>
+        <div class="setting-row"><label>Intensité Liquid Glass</label><input type="range" id="set-glass-intensity" min="0" max="100" value="60" oninput="aria.onGlassIntensityInput(this.value)"></div>
       </div>
 
       <div class="settings-section">
@@ -4267,7 +6011,7 @@ const aria = {
         <div style="font-size:11px;color:var(--text3);margin-bottom:6px">Images personnalisées</div>
         <div id="wallpaper-custom-grid" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;min-height:24px"></div>
 
-        <label class="settings-btn" style="display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer">
+        <label class="settings-btn settings-btn-outline" style="display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer">
           📷 Importer une image
           <input
             type="file"
@@ -4287,9 +6031,11 @@ const aria = {
         <div class="setting-row"><label>Timestamps</label><input type="checkbox" id="set-timestamps" checked onchange="aria.saveSettings()"></div>
         <div class="setting-row"><label>Avatars</label><input type="checkbox" id="set-avatars" checked onchange="aria.saveSettings()"></div>
         <div class="setting-row"><label>Alignement ARIA</label>
-          <select id="set-aria-align" onchange="aria.saveSettings()"><option value="left">Gauche</option><option value="center">Centre</option></select>
+          <select id="set-aria-align" class="aria-select" onchange="aria.saveSettings()"><option value="left">Gauche</option><option value="center">Centre</option></select>
         </div>
       </div>
+
+      <button type="button" class="settings-validate-btn" onclick="aria.validateSection('apparence')">✓ Appliquer</button>
 
         </div>
       </div>
@@ -4304,13 +6050,13 @@ const aria = {
           <input type="checkbox" id="set-tts-enabled" onchange="aria.onTtsToggle(this.checked)">
         </div>
         <div class="setting-row"><label>Voix</label>
-          <select id="set-voice" onchange="aria.saveSettings()">
+          <select id="set-voice" class="aria-select" onchange="aria.saveSettings()">
             <option value="fr-FR-DeniseNeural">Denise</option>
             <option value="fr-FR-HenriNeural">Henri</option>
             <option value="fr-FR-EloiseNeural">Eloise</option>
           </select>
         </div>
-        <div class="setting-row"><label>Vitesse</label><input type="range" id="set-tts-rate" min="-50" max="50" value="0" oninput="aria.saveSettings()"></div>
+        <div class="setting-row"><label>Vitesse</label><input type="range" id="set-tts-rate" min="-50" max="50" value="0" oninput="aria.onTtsRateInput(this.value)"></div>
         <div class="setting-row"><label>Volume</label><input type="range" id="set-tts-vol" min="0" max="100" value="90" oninput="aria.saveSettings()"></div>
         <div class="setting-row"><label>Sons ambiance</label><input type="checkbox" id="set-sounds" checked onchange="aria.saveSettings()"></div>
         <div class="setting-row">
@@ -4325,15 +6071,14 @@ const aria = {
         <div style="font-size:11px;color:var(--text3);margin:-6px 0 10px 0">Affiche le texte au fur et à mesure (plus de ressources GPU)</div>
         <div class="setting-row">
           <label style="font-weight:500;color:var(--text)">Brief quotidien automatique</label>
-          <input type="checkbox" id="set-daily-brief" checked onchange="aria.toggleDailyBrief(this.checked)">
+          <input type="checkbox" id="set-daily-brief" checked>
         </div>
         <div class="setting-row">
           <label style="font-weight:500;color:var(--text)">Mode allemand immersif</label>
           <input type="checkbox" id="set-german-mode" onchange="aria.toggleGermanMode(this.checked)">
         </div>
         <button class="settings-btn" onclick="aria.showToast('Test voix bientôt disponible','info')">Tester la voix</button>
-      </div>
-
+        <button type="button" class="settings-validate-btn" onclick="aria.validateSection('voix')">✓ Appliquer</button>
         </div>
       </div>
 
@@ -4345,7 +6090,7 @@ const aria = {
           <div id="model-settings">
             <div style="color:var(--text3);font-size:12px">Chargement...</div>
           </div>
-          <button class="settings-btn" onclick="aria.loadModelSettings()" style="margin-top:8px">
+          <button class="settings-btn" onclick="aria.loadModelSettings(true)" style="margin-top:8px">
             🔄 Rafraîchir
           </button>
           <div class="setting-row" style="margin-top:12px">
@@ -4360,6 +6105,34 @@ const aria = {
       </div>
 
       <div class="settings-accordion">
+        <div class="settings-accordion-header" onclick="aria.toggleAccordion('cloud')">
+          ☁️ IA externes (API) <span id="chevron-cloud">▸</span>
+        </div>
+        <div class="settings-accordion-body collapsed" id="acc-cloud">
+          <div style="font-size:11px;color:var(--text3);margin-bottom:12px">
+            Connecte OpenAI, Anthropic, Groq, OpenRouter… via clé API.
+            Les modèles cloud apparaîtront dans le sélecteur de modèle.
+          </div>
+          <div id="cloud-providers-list">
+            <div style="color:var(--text3);font-size:12px">Chargement...</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-accordion">
+        <div class="settings-accordion-header" onclick="aria.toggleAccordion('agents')">
+          🧠 Agents IA <span id="chevron-agents">▸</span>
+          <span id="agents-count-badge" class="agent-count-badge">1</span>
+        </div>
+        <div class="settings-accordion-body collapsed" id="acc-agents">
+          <div id="agents-list"></div>
+          <button type="button" class="agent-create-btn" onclick="aria.openAgentEditor(null)">
+            + Créer un agent
+          </button>
+        </div>
+      </div>
+
+      <div class="settings-accordion">
         <div class="settings-accordion-header" onclick="aria.toggleAccordion('micro')">
           🎤 Micro <span id="chevron-micro">▸</span>
         </div>
@@ -4368,14 +6141,11 @@ const aria = {
             <label>Device index</label>
             <input type="number" id="set-device-index" placeholder="auto" min="0" max="200"
               style="width:70px;background:var(--surface);border:1px solid var(--border);
-                     border-radius:6px;padding:4px 8px;color:var(--text);font-size:12px"
-              onchange="aria.setDeviceIndex(this.value)">
+                     border-radius:6px;padding:4px 8px;color:var(--text);font-size:12px">
           </div>
           <div class="setting-row">
             <label>Modèle Whisper</label>
-            <select id="set-whisper-model" onchange="aria.setWhisperModel(this.value)"
-              style="background:var(--surface);border:1px solid var(--border);border-radius:6px;
-                     padding:4px 8px;color:var(--text);font-size:12px">
+            <select id="set-whisper-model" class="aria-select">
               <option value="tiny">Tiny (rapide)</option>
               <option value="base">Base</option>
               <option value="small">Small (recommandé)</option>
@@ -4385,6 +6155,7 @@ const aria = {
           <div class="setting-row"><label>Seuil silence</label><input type="range" id="set-silence-th" min="100" max="2000" value="500" oninput="aria.saveSettings()"></div>
           <div class="setting-row"><label>Durée silence</label><input type="range" id="set-silence-dur" min="0.5" max="3" step="0.1" value="2" oninput="aria.saveSettings()"></div>
           <div class="setting-row"><label>Auto au démarrage</label><input type="checkbox" id="set-auto-mic" onchange="aria.saveSettings()"></div>
+          <button type="button" class="settings-validate-btn" onclick="aria.validateSection('micro')">✓ Appliquer</button>
         </div>
       </div>
 
@@ -4395,8 +6166,9 @@ const aria = {
         <div class="settings-accordion-body collapsed" id="acc-systeme">
         <div class="setting-row">
           <label>Mode focus</label>
-          <input type="checkbox" id="set-focus" onchange="aria.toggleFocusMode(this.checked)">
+          <input type="checkbox" id="set-focus">
         </div>
+        <button type="button" class="settings-validate-btn" onclick="aria.validateSection('systeme')">✓ Appliquer</button>
         <div class="setting-row">
           <label>Nexus (local)</label>
           <span id="nexus-status" style="font-size:11px;color:var(--text3)">Non configuré</span>
@@ -4618,6 +6390,491 @@ const aria = {
   esc(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   },
+
+  async loadCloudProviders() {
+    const list = document.getElementById('cloud-providers-list');
+    if (!list) return;
+    try {
+      let raw = this.api('get_cloud_providers');
+      if (raw?.then) raw = await raw;
+      const providers = JSON.parse(raw || '[]');
+      this.renderCloudProviders(providers);
+    } catch (e) {
+      list.innerHTML = `<div style="color:var(--error);font-size:12px">Erreur chargement providers</div>`;
+    }
+  },
+
+  renderCloudProviders(providers) {
+    const list = document.getElementById('cloud-providers-list');
+    if (!list) return;
+    if (!providers.length) {
+      list.innerHTML = '<div style="color:var(--text3);font-size:12px">Aucun provider configuré</div>';
+      return;
+    }
+    list.innerHTML = providers.map(p => {
+      const statusCls = p.enabled && p.has_key ? 'ok' : 'off';
+      const statusTxt = p.enabled && p.has_key ? 'Actif' : (p.enabled ? 'Clé manquante' : 'Désactivé');
+      const modelsHtml = (p.models || []).map(m =>
+        `<span class="cloud-model-tag">${this.esc(m.name || m.id)}</span>`
+      ).join('');
+      return `
+        <div class="cloud-provider-card" data-provider="${this.esc(p.id)}">
+          <div class="cloud-provider-head">
+            <span class="cloud-provider-icon">${p.icon || '☁️'}</span>
+            <span class="cloud-provider-name">${this.esc(p.name)}</span>
+            <span class="cloud-provider-status ${statusCls}">${statusTxt}</span>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text3)">
+              <input type="checkbox" id="cloud-en-${this.esc(p.id)}"
+                ${p.enabled ? 'checked' : ''}
+                onchange="aria.saveCloudProvider('${this.esc(p.id)}')"> Activer
+            </label>
+          </div>
+          <div class="cloud-key-row">
+            <input type="password" class="cloud-key-input" id="cloud-key-${this.esc(p.id)}"
+              placeholder="${p.has_key ? 'Clé configurée (' + this.esc(p.key_preview) + ') — laisser vide pour conserver' : 'Coller la clé API ici'}"
+              autocomplete="off">
+            <button type="button" class="agent-use-btn" onclick="aria.saveCloudProvider('${this.esc(p.id)}')">Sauver</button>
+            <button type="button" class="agent-use-btn" onclick="aria.testCloudProvider('${this.esc(p.id)}')">Tester</button>
+          </div>
+          <div class="cloud-models-tags">${modelsHtml}</div>
+        </div>`;
+    }).join('');
+  },
+
+  async saveCloudProvider(providerId) {
+    const enabled = document.getElementById(`cloud-en-${providerId}`)?.checked ?? false;
+    const keyInput = document.getElementById(`cloud-key-${providerId}`);
+    const data = { enabled };
+    const key = keyInput?.value?.trim();
+    if (key) data.api_key = key;
+
+    let raw = this.api('save_cloud_provider', providerId, JSON.stringify(data));
+    if (raw?.then) raw = await raw;
+    const result = JSON.parse(raw || '{}');
+    if (result.success) {
+      this.showToast(`Provider ${providerId} sauvegardé ✓`, 'success');
+      if (keyInput && key) keyInput.value = '';
+      this._invalidateModelsCache();
+      await this.loadCloudProviders();
+      await this.loadModelPicker();
+    } else {
+      this.showToast('Erreur: ' + (result.error || '?'), 'error');
+    }
+  },
+
+  async testCloudProvider(providerId) {
+    const keyInput = document.getElementById(`cloud-key-${providerId}`);
+    if (keyInput?.value?.trim()) {
+      await this.saveCloudProvider(providerId);
+    }
+    const enabled = document.getElementById(`cloud-en-${providerId}`)?.checked;
+    if (!enabled) {
+      this.showToast('Active le provider et sauvegarde la clé avant de tester', 'warning');
+      return;
+    }
+    this.showToast('Test en cours…', 'info', 2000);
+    let raw = this.api('test_cloud_provider', providerId);
+    if (raw?.then) raw = await raw;
+    const result = JSON.parse(raw || '{}');
+    if (result.success) {
+      this.showToast(result.message || 'Connexion OK ✓', 'success', 4000);
+    } else {
+      this.showToast('Échec: ' + (result.error || '?'), 'error', 5000);
+    }
+  },
+
+  applyActiveAgentUI(agent) {
+    if (!agent) return;
+    this._activeAgentId = agent.id || 'default';
+    this._activeAgentIcon = agent.icon || '🤖';
+    this._activeAgentName = agent.name || 'ARIA';
+    const iconEl = document.getElementById('active-agent-icon');
+    const nameEl = document.getElementById('active-agent-name');
+    const sel = document.getElementById('agent-selector');
+    const color = agent.color || '#6C8EFF';
+    if (iconEl) iconEl.textContent = this._activeAgentIcon;
+    if (nameEl) nameEl.textContent = this._activeAgentName;
+    if (sel) sel.style.borderColor = color;
+    document.documentElement.style.setProperty('--agent-color', color);
+  },
+
+  async loadAgents() {
+    try {
+      let raw = this.api('get_agents');
+      if (raw?.then) raw = await raw;
+      const agents = JSON.parse(raw || '[]');
+      let activeRaw = this.api('get_active_agent');
+      if (activeRaw?.then) activeRaw = await activeRaw;
+      const active = JSON.parse(activeRaw || '{}');
+      this.applyActiveAgentUI(active);
+      this.renderAgentsList(agents);
+      this.renderAgentDropdown(agents);
+      this.updateAgentCountBadge(agents.length);
+    } catch (e) {
+      console.error('loadAgents error:', e);
+    }
+  },
+
+  renderAgentsList(agents) {
+    const list = document.getElementById('agents-list');
+    if (!list) return;
+    const activeId = this._activeAgentId || 'default';
+    list.innerHTML = agents.map(agent => `
+      <div class="agent-item" style="border-left-color:${agent.color || '#6C8EFF'}">
+        <div class="agent-item-info">
+          <span class="agent-item-icon">${agent.icon || '🤖'}</span>
+          <div>
+            <div class="agent-item-name">${this.esc(agent.name)}</div>
+            <div class="agent-item-model">${this.esc(agent.model || 'Modèle par défaut')}</div>
+          </div>
+        </div>
+        <div class="agent-item-actions">
+          ${agent.id !== activeId ? `
+            <button type="button" data-agent-id="${this.esc(agent.id)}" class="agent-use-btn agent-pick-btn">Utiliser</button>
+          ` : '<span style="font-size:10px;color:var(--accent)">Actif</span>'}
+          <button type="button" data-agent-edit-id="${this.esc(agent.id)}" class="agent-edit-btn agent-edit-open-btn">✏️</button>
+        </div>
+      </div>
+    `).join('');
+    this._bindAgentsListEvents();
+  },
+
+  _bindAgentsListEvents() {
+    const list = document.getElementById('agents-list');
+    if (!list || list._pickBound) return;
+    list._pickBound = true;
+    list.addEventListener('click', e => {
+      const pick = e.target.closest('.agent-pick-btn[data-agent-id]');
+      if (pick) {
+        this.setActiveAgent(pick.getAttribute('data-agent-id'));
+        return;
+      }
+      const edit = e.target.closest('.agent-edit-open-btn[data-agent-edit-id]');
+      if (edit) {
+        this.openAgentEditor(edit.getAttribute('data-agent-edit-id'));
+      }
+    });
+  },
+
+  _bindAgentDropdownEvents() {
+    const dropdown = document.getElementById('agent-dropdown');
+    if (!dropdown || dropdown._pickBound) return;
+    dropdown._pickBound = true;
+    dropdown.addEventListener('mousedown', e => e.stopPropagation());
+    dropdown.addEventListener('click', e => {
+      const createBtn = e.target.closest('[data-agent-create]');
+      if (createBtn) {
+        e.stopPropagation();
+        e.preventDefault();
+        this.openAgentEditor(null);
+        this.closeAgentDropdown();
+        return;
+      }
+      const item = e.target.closest('.agent-dropdown-item[data-agent-id]');
+      if (!item) return;
+      e.stopPropagation();
+      e.preventDefault();
+      const agentId = item.getAttribute('data-agent-id');
+      if (agentId != null) this.setActiveAgent(agentId);
+    });
+  },
+
+  renderAgentDropdown(agents) {
+    const dropdown = document.getElementById('agent-dropdown');
+    if (!dropdown) return;
+    const activeId = this._activeAgentId || 'default';
+    dropdown.innerHTML = agents.map(agent => {
+      const active = agent.id === activeId;
+      return `
+      <div class="aria-dropdown-item agent-dropdown-item${active ? ' active' : ''}"
+        data-agent-id="${this.esc(agent.id)}">
+        <span style="font-size:18px">${agent.icon || '🤖'}</span>
+        <div style="min-width:0;flex:1">
+          <div style="font-size:13px;color:var(--text)">${this.esc(agent.name)}</div>
+          <div style="font-size:10px;color:var(--text3)">${this.esc(agent.model || '')}</div>
+        </div>
+        ${active ? '<span style="color:var(--accent);font-size:12px">✓</span>' : ''}
+      </div>`;
+    }).join('') + `
+      <div class="aria-dropdown-divider agent-dropdown-divider"></div>
+      <div class="aria-dropdown-item agent-dropdown-item" data-agent-create>
+        <span style="font-size:16px">+</span>
+        <div style="font-size:13px;color:var(--accent)">Créer un agent</div>
+      </div>
+    `;
+    this._bindAgentDropdownEvents();
+  },
+
+  toggleAgentDropdown(event) {
+    event?.stopPropagation();
+    const dropdown = document.getElementById('agent-dropdown');
+    const trigger = document.getElementById('agent-selector');
+    if (!dropdown || !trigger) return;
+    const isOpen = dropdown.classList.contains('is-open');
+    if (!isOpen) {
+      this.closeModelMenu();
+      this.positionDropdownPanel(trigger, dropdown, 240);
+    } else {
+      this.closeAgentDropdown();
+    }
+  },
+
+  closeAgentDropdown() {
+    this.restoreDropdownPanel(document.getElementById('agent-dropdown'));
+  },
+
+  async setActiveAgent(agentId) {
+    let raw = this.api('set_active_agent', agentId);
+    if (raw?.then) raw = await raw;
+    const result = JSON.parse(raw || '{}');
+    if (result.success) {
+      this.applyActiveAgentUI(result.agent);
+      this.closeAgentDropdown();
+      let agentsRaw = this.api('get_agents');
+      if (agentsRaw?.then) agentsRaw = await agentsRaw;
+      const agents = JSON.parse(agentsRaw || '[]');
+      this.renderAgentsList(agents);
+      this.renderAgentDropdown(agents);
+      this.showToast(`Agent "${result.agent.icon} ${result.agent.name}" activé`, 'success');
+    }
+  },
+
+  toggleAgentEmojiPicker() {
+    const picker = document.getElementById('agent-emoji-picker');
+    if (!picker) return;
+    document.querySelectorAll('.emoji-picker').forEach(p => {
+      if (p.id !== 'agent-emoji-picker') p.style.display = 'none';
+    });
+    picker.style.display = picker.style.display === 'none' ? 'grid' : 'none';
+  },
+
+  async openAgentEditor(agentId) {
+    this._editingAgentId = agentId;
+    this._agentRules = [];
+    this._agentRepos = [];
+
+    let modelsRaw = this.api('get_available_models');
+    if (modelsRaw?.then) modelsRaw = await modelsRaw;
+    const modelsData = JSON.parse(modelsRaw || '{}');
+    const models = modelsData.local_models || [];
+    const cloudModels = modelsData.cloud_models || [];
+
+    const modelSelect = document.getElementById('agent-model-select');
+    if (modelSelect) {
+      let html = '';
+      if (models.length) {
+        html += `<optgroup label="💻 Local">${models.map(m =>
+          `<option value="${this.esc(m)}">${this.esc(m)}</option>`
+        ).join('')}</optgroup>`;
+      }
+      if (cloudModels.length) {
+        html += `<optgroup label="☁️ Cloud (API)">${cloudModels.map(cm =>
+          `<option value="${this.esc(cm.id)}">☁️ ${this.esc(cm.label)} (${this.esc(cm.provider_name)})</option>`
+        ).join('')}</optgroup>`;
+      }
+      modelSelect.innerHTML = html || '<option value="">Aucun modèle disponible</option>';
+    }
+
+    const picker = document.getElementById('agent-emoji-picker');
+    if (picker) {
+      picker.innerHTML = this.AGENT_EMOJIS.map(e =>
+        `<button type="button" class="emoji-option" onclick="aria.selectAgentEmoji('${e}')">${e}</button>`
+      ).join('');
+    }
+
+    const colorSwatches = document.getElementById('agent-color-swatches');
+    if (colorSwatches) {
+      colorSwatches.innerHTML = this.AGENT_COLORS.map(c => `
+        <button type="button" class="color-swatch" style="background:${c}"
+          onclick="aria.selectAgentColor('${c}')"
+          title="${c}">
+        </button>
+      `).join('');
+    }
+
+    if (agentId) {
+      let raw = this.api('get_agents');
+      if (raw?.then) raw = await raw;
+      const agents = JSON.parse(raw || '[]');
+      const agent = agents.find(a => a.id === agentId);
+      if (agent) {
+        document.getElementById('agent-name-input').value = agent.name;
+        document.getElementById('agent-icon-btn').textContent = agent.icon || '🤖';
+        document.getElementById('agent-system-prompt').value = agent.system_prompt || '';
+        if (modelSelect) modelSelect.value = agent.model || models[0] || '';
+        this._agentRules = [...(agent.rules || [])];
+        this._agentRepos = [...(agent.git_repos || [])];
+        this._selectedColor = agent.color || '#6C8EFF';
+        const deleteBtn = document.getElementById('agent-delete-btn');
+        if (deleteBtn) deleteBtn.style.display = agentId === 'default' ? 'none' : 'flex';
+      }
+    } else {
+      document.getElementById('agent-name-input').value = '';
+      document.getElementById('agent-icon-btn').textContent = '🤖';
+      document.getElementById('agent-system-prompt').value = '';
+      this._selectedColor = '#6C8EFF';
+      document.getElementById('agent-delete-btn').style.display = 'none';
+      if (modelSelect && models[0]) modelSelect.value = models[0];
+    }
+
+    this.renderAgentRulesList();
+    this.renderAgentReposList();
+    this.updateAgentPreview();
+    this.selectAgentColor(this._selectedColor);
+
+    const modal = document.getElementById('agent-editor-modal');
+    modal?.classList.remove('hidden');
+    requestAnimationFrame(() => modal?.classList.add('modal-open'));
+  },
+
+  closeAgentEditor() {
+    const modal = document.getElementById('agent-editor-modal');
+    modal?.classList.remove('modal-open');
+    setTimeout(() => modal?.classList.add('hidden'), 250);
+  },
+
+  updateAgentPreview() {
+    const name = document.getElementById('agent-name-input')?.value || 'Nouvel agent';
+    const icon = document.getElementById('agent-icon-btn')?.textContent || '🤖';
+    const previewName = document.getElementById('agent-preview-name');
+    const previewIcon = document.getElementById('agent-preview-icon');
+    if (previewName) previewName.textContent = name;
+    if (previewIcon) previewIcon.textContent = icon;
+  },
+
+  selectAgentEmoji(emoji) {
+    document.getElementById('agent-icon-btn').textContent = emoji;
+    document.getElementById('agent-emoji-picker').style.display = 'none';
+    this.updateAgentPreview();
+  },
+
+  selectAgentColor(color) {
+    this._selectedColor = color;
+    document.querySelectorAll('#agent-color-swatches .color-swatch').forEach(s => {
+      s.classList.toggle('active', s.getAttribute('title') === color);
+    });
+  },
+
+  addAgentRule() {
+    const input = document.getElementById('agent-rule-input');
+    const rule = input?.value?.trim();
+    if (!rule) return;
+    this._agentRules.push(rule);
+    input.value = '';
+    this.renderAgentRulesList();
+  },
+
+  removeAgentRule(idx) {
+    this._agentRules.splice(idx, 1);
+    this.renderAgentRulesList();
+  },
+
+  renderAgentRulesList() {
+    const list = document.getElementById('agent-rules-list');
+    if (!list) return;
+    list.innerHTML = this._agentRules.map((rule, i) => `
+      <div class="agent-tag-item">
+        <span>${this.esc(rule)}</span>
+        <button type="button" onclick="aria.removeAgentRule(${i})">✕</button>
+      </div>
+    `).join('');
+  },
+
+  async addAgentRepo() {
+    const input = document.getElementById('agent-repo-input');
+    const path = input?.value?.trim();
+    if (!path) return;
+
+    const statusEl = document.getElementById('agent-repo-status');
+    statusEl.textContent = 'Vérification...';
+    statusEl.style.color = 'var(--text3)';
+
+    let raw = this.api('validate_git_repo', path);
+    if (raw?.then) raw = await raw;
+    const result = JSON.parse(raw || '{}');
+
+    if (result.valid) {
+      this._agentRepos.push(result.path);
+      input.value = '';
+      statusEl.textContent = '✅ Repo Git valide';
+      statusEl.style.color = 'var(--success)';
+      this.renderAgentReposList();
+      setTimeout(() => { statusEl.textContent = ''; }, 2000);
+    } else {
+      statusEl.textContent = '❌ Chemin invalide ou pas un repo Git';
+      statusEl.style.color = 'var(--error)';
+    }
+  },
+
+  removeAgentRepo(idx) {
+    this._agentRepos.splice(idx, 1);
+    this.renderAgentReposList();
+  },
+
+  renderAgentReposList() {
+    const list = document.getElementById('agent-repos-list');
+    if (!list) return;
+    list.innerHTML = this._agentRepos.map((repo, i) => `
+      <div class="agent-tag-item agent-repo-item">
+        <span style="font-size:11px">📁 ${this.esc(repo)}</span>
+        <button type="button" onclick="aria.removeAgentRepo(${i})">✕</button>
+      </div>
+    `).join('');
+  },
+
+  async saveAgent() {
+    const name = document.getElementById('agent-name-input')?.value?.trim();
+    if (!name) {
+      this.showToast('Le nom est obligatoire', 'error');
+      return;
+    }
+
+    const data = {
+      name,
+      icon: document.getElementById('agent-icon-btn')?.textContent || '🤖',
+      color: this._selectedColor || '#6C8EFF',
+      model: document.getElementById('agent-model-select')?.value,
+      system_prompt: document.getElementById('agent-system-prompt')?.value || '',
+      rules: this._agentRules,
+      git_repos: this._agentRepos,
+    };
+
+    let raw;
+    if (this._editingAgentId) {
+      raw = this.api('update_agent', this._editingAgentId, JSON.stringify(data));
+    } else {
+      raw = this.api('create_agent', JSON.stringify(data));
+    }
+    if (raw?.then) raw = await raw;
+
+    const result = JSON.parse(raw || '{}');
+    if (result.success) {
+      this.showToast(`Agent "${data.icon} ${data.name}" sauvegardé ✓`, 'success');
+      this.closeAgentEditor();
+      await this.loadAgents();
+    } else {
+      this.showToast('Erreur: ' + (result.error || 'inconnue'), 'error');
+    }
+  },
+
+  async deleteCurrentAgent() {
+    if (!this._editingAgentId || this._editingAgentId === 'default') return;
+    if (!confirm('Supprimer cet agent ? Cette action est irréversible.')) return;
+
+    let raw = this.api('delete_agent', this._editingAgentId);
+    if (raw?.then) raw = await raw;
+    const result = JSON.parse(raw || '{}');
+    if (result.success) {
+      this.showToast('Agent supprimé', 'success');
+      this.closeAgentEditor();
+      await this.loadAgents();
+    }
+  },
+
+  updateAgentCountBadge(count) {
+    const badge = document.getElementById('agents-count-badge');
+    if (badge) badge.textContent = count;
+  },
 };
 
 window.aria = aria;
@@ -4647,11 +6904,99 @@ window.addEventListener('load', () => {
 <div id="mobile-presets-sheet">
   <div style="width:36px;height:4px;background:var(--border2);border-radius:2px;margin:0 auto 16px"></div>
   <div style="font-size:13px;font-weight:600;color:var(--text3);margin-bottom:12px;letter-spacing:0.5px">MODES</div>
-  <div class="mobile-preset-row" onclick="aria.activatePreset('vol','✈ Vol');aria.closeMobilePresets()">✈️ <span>Vol</span></div>
-  <div class="mobile-preset-row" onclick="aria.activatePreset('etude','📚 Étude');aria.closeMobilePresets()">📚 <span>Étude</span></div>
-  <div class="mobile-preset-row" onclick="aria.activatePreset('gaming','🎮 Gaming');aria.closeMobilePresets()">🎮 <span>Gaming</span></div>
-  <div class="mobile-preset-row" onclick="aria.activatePreset('detente','🎵 Détente');aria.closeMobilePresets()">🎵 <span>Détente</span></div>
-  <div class="mobile-preset-row" onclick="aria.activatePreset('nuit','🌙 Nuit');aria.closeMobilePresets()">🌙 <span>Nuit</span></div>
+  <div id="mobile-presets-list"></div>
+</div>
+
+<!-- MODAL ÉDITEUR AGENT -->
+<div id="agent-editor-modal" class="modal-overlay hidden">
+  <div class="agent-editor-card">
+    <div class="agent-editor-header">
+      <div class="agent-preview" id="agent-preview">
+        <span id="agent-preview-icon">🤖</span>
+        <span id="agent-preview-name">Nouvel agent</span>
+      </div>
+      <button type="button" class="hbtn" onclick="aria.closeAgentEditor()">✕</button>
+    </div>
+
+    <div class="agent-editor-body">
+      <div class="agent-editor-section">
+        <div class="agent-section-title">Identité</div>
+        <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:12px">
+          <div>
+            <label class="agent-label">Icône</label>
+            <div class="emoji-picker-wrapper">
+              <button type="button" class="emoji-btn" id="agent-icon-btn" onclick="aria.toggleAgentEmojiPicker()">🤖</button>
+              <div class="emoji-picker" id="agent-emoji-picker" style="display:none"></div>
+            </div>
+          </div>
+          <div style="flex:1">
+            <label class="agent-label">Nom de l'agent</label>
+            <input type="text" id="agent-name-input" placeholder="DevBot, Coach Maths, Copilote..."
+              maxlength="30" oninput="aria.updateAgentPreview()" class="agent-input">
+          </div>
+          <div style="width:100px">
+            <label class="agent-label">Couleur</label>
+            <div class="color-swatches" id="agent-color-swatches"></div>
+          </div>
+        </div>
+        <div style="margin-bottom:12px">
+          <label class="agent-label">Modèle IA local</label>
+          <select id="agent-model-select" class="agent-select"></select>
+          <div style="font-size:10px;color:var(--text3);margin-top:4px">
+            100% local — aucune donnée envoyée en ligne
+          </div>
+        </div>
+      </div>
+
+      <div class="agent-editor-section">
+        <div class="agent-section-title">Comportement</div>
+        <div style="margin-bottom:12px">
+          <label class="agent-label">Instructions personnalisées</label>
+          <textarea id="agent-system-prompt"
+            placeholder="Ex: Tu es un expert en mathématiques. Explique toujours avec des exemples concrets."
+            rows="4" class="agent-textarea"></textarea>
+        </div>
+        <div style="margin-bottom:12px">
+          <label class="agent-label">Règles supplémentaires</label>
+          <div id="agent-rules-list"></div>
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <input type="text" id="agent-rule-input"
+              placeholder="Ex: Toujours proposer des alternatives"
+              class="agent-input" style="flex:1"
+              onkeydown="if(event.key==='Enter') aria.addAgentRule()">
+            <button type="button" class="agent-add-btn" onclick="aria.addAgentRule()">+</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="agent-editor-section">
+        <div class="agent-section-title">Contexte de code (Git)</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:10px">
+          L'agent accédera aux fichiers récemment modifiés dans ces repos
+          pour mieux comprendre ton code.
+        </div>
+        <div id="agent-repos-list"></div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <input type="text" id="agent-repo-input"
+            placeholder="C:\Users\mathi\projets\mon-repo"
+            class="agent-input" style="flex:1"
+            onkeydown="if(event.key==='Enter') aria.addAgentRepo()">
+          <button type="button" class="agent-add-btn" onclick="aria.addAgentRepo()" title="Ajouter">+</button>
+        </div>
+        <div id="agent-repo-status" style="font-size:10px;margin-top:4px;height:14px"></div>
+        <div id="agent-repo-stats" style="margin-top:8px"></div>
+      </div>
+    </div>
+
+    <div class="agent-editor-footer">
+      <button type="button" class="agent-delete-btn" id="agent-delete-btn" onclick="aria.deleteCurrentAgent()" style="display:none">
+        🗑️ Supprimer
+      </button>
+      <div style="flex:1"></div>
+      <button type="button" class="agent-cancel-btn" onclick="aria.closeAgentEditor()">Annuler</button>
+      <button type="button" class="agent-save-btn" onclick="aria.saveAgent()">✓ Enregistrer</button>
+    </div>
+  </div>
 </div>
 
 </body>

@@ -19,6 +19,15 @@ import app_paths
 
 logger = logging.getLogger(__name__)
 
+
+def _runtime_main_module():
+    """Retourne le module main.py en cours (python main.py) sans re-import."""
+    mod = sys.modules.get("__main__")
+    if mod is not None and hasattr(mod, "_on_aria_closing"):
+        return mod
+    return None
+
+
 _window: webview.Window | None = None
 _api: AriaAPI | None = None
 _pending_finalize_model: str = ""
@@ -118,15 +127,11 @@ class AriaAPI:
             self._on_quit()
 
     def toggle_activation(self) -> None:
-        import sys
-
-        mod = sys.modules.get("__main__")
+        mod = _runtime_main_module()
         if mod is not None and hasattr(mod, "_on_hotkey"):
             mod._on_hotkey()
             return
-        import main as _main
-
-        _main._on_hotkey()
+        logger.warning("toggle_activation: module main introuvable")
 
     def save_settings(self, settings_json: str) -> None:
         try:
@@ -620,16 +625,11 @@ class AriaAPI:
         )
 
     def send_text(self, text: str) -> None:
-        import llm, threading, ollama_manager
+        import llm, threading
 
         def _run():
             if _instance:
                 _instance.set_status("thinking")
-            if not ollama_manager.is_running():
-                if _instance:
-                    _instance.show_toast("Démarrage Ollama...", toast_type="info")
-                ollama_manager.start()
-                ollama_manager.wait_until_ready(timeout=30)
             llm.ask(text, show_user=False)
             if _instance:
                 _instance.set_status("idle")
@@ -855,32 +855,34 @@ class AriaAPI:
         })
 
     def get_available_models(self) -> str:
-        """Modèles Ollama locaux + config par rôle (+ options sélecteur en-tête)."""
+        """Modèles llama.cpp locaux + config par rôle (+ options sélecteur en-tête)."""
         import json
 
-        running = False
         local: list[str] = []
+        running_servers: dict[str, bool] = {}
+        ollama_running = False
         try:
-            import ollama_manager
+            import llamacpp_manager
+            from llm import MODELS
 
-            running = ollama_manager.is_running()
-            local = ollama_manager.list_local_models() if running else []
-            if not local:
-                # Nouvelle tentative sans bloquer le démarrage (évite freeze UI 15s)
-                local = ollama_manager.list_local_models()
-                running = running or ollama_manager.is_running() or bool(local)
+            local = llamacpp_manager.list_available_models()
+            running_servers = {m: llamacpp_manager.is_running(m) for m in local}
+            ollama_running = llamacpp_manager.is_running() or bool(local)
+            configured = dict(MODELS)
         except Exception as exc:
             logger.error("get_available_models error: %s", exc)
-            running = False
             local = []
+            configured = {}
+            from llm import MODELS as _M
 
-        configured: dict = {}
+            configured = dict(_M)
+
         current = "auto"
         options: list[dict[str, str]] = []
+        cloud_models: list[dict] = []
         try:
             import llm
 
-            configured = dict(llm.MODELS)
             current = llm.FORCED_MODEL or "auto"
 
             def norm(name: str) -> str:
@@ -919,17 +921,38 @@ class AriaAPI:
                     "label": norm(current),
                     "subtitle": "Modèle actif",
                 })
+
+            try:
+                from actions.cloud_llm import list_available_cloud_models
+
+                cloud_models = list_available_cloud_models()
+                for cm in cloud_models:
+                    cid = cm["id"]
+                    if norm(cid) not in seen:
+                        seen.add(norm(cid))
+                        options.append({
+                            "id": cid,
+                            "label": cm.get("label", cid),
+                            "subtitle": cm.get("subtitle", "☁️ Cloud"),
+                            "cloud": True,
+                        })
+            except Exception as exc:
+                logger.debug("Cloud models unavailable: %s", exc)
+                cloud_models = []
         except Exception as exc:
             logger.error("get_available_models llm error: %s", exc)
+            cloud_models = []
 
         result = {
-            "ollama_running": running,
+            "ollama_running": ollama_running,
             "local_models": local,
             "configured": configured,
             "current": current,
             "options": options,
+            "running_servers": running_servers,
+            "cloud_models": cloud_models,
         }
-        logger.info("get_available_models: running=%s, models=%s", running, local)
+        logger.info("get_available_models: running=%s, models=%s", ollama_running, local)
         return json.dumps(result)
 
     def get_static_port(self) -> int:
@@ -1028,6 +1051,116 @@ class AriaAPI:
                 pass
         _training_status = "idle"
 
+    def get_agents(self) -> str:
+        from actions import agents as _agents
+
+        try:
+            return json.dumps(_agents.get_all_agents(), ensure_ascii=False)
+        except Exception as exc:
+            logger.error("get_agents error: %s", exc)
+            return json.dumps([])
+
+    def create_agent(self, data_json: str) -> str:
+        from actions import agents as _agents
+
+        try:
+            data = json.loads(data_json)
+            agent = _agents.create_agent(
+                name=data.get("name", "Nouvel agent"),
+                icon=data.get("icon", "🤖"),
+                color=data.get("color", "#6C8EFF"),
+                model=data.get("model"),
+                system_prompt=data.get("system_prompt", ""),
+                rules=data.get("rules", []),
+                git_repos=data.get("git_repos", []),
+            )
+            return json.dumps({"success": True, "agent": agent}, ensure_ascii=False)
+        except Exception as exc:
+            logger.error("create_agent error: %s", exc)
+            return json.dumps({"success": False, "error": str(exc)})
+
+    def update_agent(self, agent_id: str, data_json: str) -> str:
+        from actions import agents as _agents
+
+        try:
+            data = json.loads(data_json)
+            agent = _agents.update_agent(agent_id, **data)
+            return json.dumps({"success": True, "agent": agent}, ensure_ascii=False)
+        except Exception as exc:
+            logger.error("update_agent error: %s", exc)
+            return json.dumps({"success": False, "error": str(exc)})
+
+    def delete_agent(self, agent_id: str) -> str:
+        from actions import agents as _agents
+
+        try:
+            success = _agents.delete_agent(agent_id)
+            return json.dumps({"success": success})
+        except Exception as exc:
+            logger.error("delete_agent error: %s", exc)
+            return json.dumps({"success": False, "error": str(exc)})
+
+    def set_active_agent(self, agent_id: str) -> str:
+        from actions import agents as _agents
+
+        try:
+            agent = _agents.set_active_agent(agent_id)
+            try:
+                import llm
+
+                llm._refresh_system_prompt()
+            except Exception:
+                logger.debug("Refresh system prompt après changement d'agent", exc_info=True)
+            return json.dumps({"success": True, "agent": agent}, ensure_ascii=False)
+        except Exception as exc:
+            logger.error("set_active_agent error: %s", exc)
+            return json.dumps({"success": False, "error": str(exc)})
+
+    def get_active_agent(self) -> str:
+        from actions import agents as _agents
+
+        return json.dumps(_agents.get_active_agent(), ensure_ascii=False)
+
+    def validate_git_repo(self, path: str) -> str:
+        p = Path(path)
+        valid = p.exists() and (p / ".git").exists()
+        return json.dumps({
+            "valid": valid,
+            "path": str(p.resolve()) if valid else None,
+        })
+
+    def get_cloud_providers(self) -> str:
+        from actions import cloud_llm as _cloud
+
+        try:
+            return json.dumps(_cloud.get_all_providers(), ensure_ascii=False)
+        except Exception as exc:
+            logger.error("get_cloud_providers error: %s", exc)
+            return json.dumps([])
+
+    def save_cloud_provider(self, provider_id: str, data_json: str) -> str:
+        from actions import cloud_llm as _cloud
+
+        try:
+            data = json.loads(data_json)
+            provider = _cloud.update_provider(provider_id, **data)
+            safe = dict(provider)
+            if safe.get("api_key"):
+                safe["api_key"] = "***"
+            return json.dumps({"success": True, "provider": safe}, ensure_ascii=False)
+        except Exception as exc:
+            logger.error("save_cloud_provider error: %s", exc)
+            return json.dumps({"success": False, "error": str(exc)})
+
+    def test_cloud_provider(self, provider_id: str) -> str:
+        from actions import cloud_llm as _cloud
+
+        try:
+            result = _cloud.test_provider(provider_id)
+            return json.dumps(result, ensure_ascii=False)
+        except Exception as exc:
+            return json.dumps({"success": False, "error": str(exc)})
+
     def stop_speaking(self) -> None:
         import tts
 
@@ -1074,10 +1207,9 @@ class UI:
         logger.info("Fenêtre créée: %s", _window)
 
         try:
-            import main as _main
-
-            if hasattr(_main, "_on_aria_closing"):
-                _window.events.closing += _main._on_aria_closing
+            mod = _runtime_main_module()
+            if mod is not None and hasattr(mod, "_on_aria_closing"):
+                _window.events.closing += mod._on_aria_closing
                 logger.info("Callback fermeture ARIA branché sur events.closing")
         except Exception:
             logger.exception("Impossible de brancher l'event closing")
@@ -1092,7 +1224,7 @@ class UI:
             webview.start(
                 _on_webview_ready,
                 args=(_window,),
-                debug=True,
+                debug=False,
                 http_server=False,
                 private_mode=False,
                 storage_path=str(app_paths.data_dir() / "webview_cache"),

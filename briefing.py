@@ -69,7 +69,7 @@ def run_morning_briefing() -> None:
     parts.append("Bonne journée !")
     full_text = " ".join(parts)
 
-    import ui
+    import ui_bridge as ui
     ui.set_status("speaking")
     tts.speak(full_text)
     ui.set_status("listening")

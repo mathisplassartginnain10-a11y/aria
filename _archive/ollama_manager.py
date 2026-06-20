@@ -216,20 +216,34 @@ def pull_missing_models() -> None:
 
 
 def warmup_model(model_name: str) -> None:
-    """Charge un modèle en VRAM via une requête vide."""
+    """Charge un modèle en VRAM. Utilise keep_alive avec un prompt minimal valide."""
     if not model_exists(model_name):
         logger.warning("Modèle '%s' absent — warmup ignoré", model_name)
         return
     try:
         logger.info("Chargement modèle %s en VRAM...", model_name)
-        requests.post(
+        resp = requests.post(
             OLLAMA_GENERATE_URL,
-            json={"model": model_name, "prompt": " ", "keep_alive": "10m"},
-            timeout=120,
+            json={
+                "model": model_name,
+                "prompt": "Hi",
+                "stream": False,
+                "keep_alive": "10m",
+                "options": {"num_predict": 1},
+            },
+            timeout=60,
         )
-        logger.info("Modèle %s chargé en VRAM", model_name)
+        if resp.status_code == 200:
+            logger.info("Modèle %s chargé en VRAM", model_name)
+        else:
+            logger.warning(
+                "Warmup %s: HTTP %d — %s",
+                model_name,
+                resp.status_code,
+                resp.text[:100],
+            )
     except requests.RequestException as exc:
-        logger.warning("Warmup échoué pour %s: %s", model_name, exc)
+        logger.error("Warmup %s échoué: %s", model_name, exc)
 
 
 def stop() -> None:

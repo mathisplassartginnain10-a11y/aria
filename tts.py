@@ -225,20 +225,13 @@ def speak_sound(sound_name: str) -> None:
 
 
 def _safe_js(script: str) -> None:
-    """Appelle du JS côté UI uniquement si la fenêtre est encore vivante."""
-    try:
-        import ui as _ui
+    """Compat — remplacé par ui_bridge WebSocket."""
+    del script
 
-        if _ui._instance is None:
-            return
-        window = getattr(_ui, "_window", None)
-        if window is None:
-            window = getattr(_ui._instance, "_window", None)
-        if window is None:
-            return
-        _ui._instance._js(script)
-    except Exception as exc:
-        logger.debug("JS call ignoré (fenêtre fermée ou thread mort): %s", exc)
+
+def _notify_tts_finished() -> None:
+    import ui_bridge
+    ui_bridge.emit_tts_finished()
 
 
 def speak(text: str, *, force: bool = False, notify_finished: bool = True) -> None:
@@ -309,9 +302,9 @@ def speak(text: str, *, force: bool = False, notify_finished: bool = True) -> No
         logger.error("Erreur TTS: %s", exc)
     finally:
         if notify_finished:
-            _safe_js("if(window.aria) aria.onTTSFinished();")
+            _notify_tts_finished()
 
 
 def notify_speech_finished() -> None:
     """Déclenche aria.onTTSFinished() côté JS (une fois par lecture complète)."""
-    _safe_js("if(window.aria) aria.onTTSFinished();")
+    _notify_tts_finished()

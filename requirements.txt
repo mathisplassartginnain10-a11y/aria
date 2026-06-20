@@ -26,7 +26,7 @@ pygetwindow
 watchdog
 playwright
 pyinstaller
-pywebview
+websockets>=12.0
 pypdf
 flask
 gevent
