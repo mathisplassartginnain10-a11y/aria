@@ -742,4 +742,131 @@ def test_cloud_provider(provider_id: str) -> dict:
     return _cloud.test_provider(provider_id)
 
 
+@expose
+def get_api_keys_status() -> dict:
+    from actions.api_keys import get_all_status
+    return get_all_status()
+
+
+@expose
+def save_api_key(provider: str, key: str, model: str = "") -> dict:
+    from actions.api_keys import check_status, set_default_model, set_key
+    try:
+        set_key(provider, key)
+        if model:
+            set_default_model(provider, model)
+        return {"success": True, "status": check_status(provider)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@expose
+def delete_api_key(provider: str) -> dict:
+    from actions.api_keys import set_key
+    set_key(provider, "")
+    return {"success": True}
+
+
+@expose
+def test_api_key(provider: str) -> dict:
+    from actions.api_keys import generate_with_api, get_key
+    if not get_key(provider):
+        return {"success": False, "error": "Clé non configurée"}
+    try:
+        result = generate_with_api("Réponds juste: OK", provider=provider, max_tokens=5)
+        ok = bool(result) and "erreur" not in result.lower()
+        return {"success": ok, "response": result[:50]}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@expose
+def get_weather_widget() -> dict:
+    """Météo pour le widget — OpenWeatherMap si clé dispo, sinon wttr.in."""
+    import requests
+    import yaml
+    import app_paths
+
+    try:
+        with app_paths.config_path().open("r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+
+        weather_cfg = cfg.get("weather") or {}
+        city = weather_cfg.get("city") or cfg.get("city", "Couëron")
+        api_key = weather_cfg.get("api_key") or cfg.get("openweather_api_key", "")
+
+        if api_key:
+            r = requests.get(
+                "https://api.openweathermap.org/data/2.5/weather",
+                params={"q": city, "appid": api_key, "units": "metric", "lang": "fr"},
+                timeout=5,
+            )
+            if r.status_code == 200:
+                d = r.json()
+                return {
+                    "temp": d["main"]["temp"],
+                    "description": d["weather"][0]["description"],
+                    "city": d["name"],
+                    "humidity": d["main"]["humidity"],
+                    "wind": d["wind"]["speed"],
+                }
+
+        r = requests.get(
+            f"https://wttr.in/{requests.utils.quote(city)}?format=j1",
+            timeout=5,
+            headers={"User-Agent": "ARIA/1.0"},
+        )
+        if r.status_code == 200:
+            d = r.json()
+            current = d["current_condition"][0]
+            return {
+                "temp": float(current["temp_C"]),
+                "description": current["weatherDesc"][0]["value"],
+                "city": city,
+                "humidity": int(current["humidity"]),
+                "wind": float(current["windspeedKmph"]),
+            }
+    except Exception as e:
+        logger.debug("Weather widget error: %s", e)
+
+    return {"error": "unavailable"}
+
+
+@expose
+def get_memory_stats() -> dict:
+    """Statistiques mémoire pour le widget (conversations, messages, sessions)."""
+    import memory_engine as _me
+
+    try:
+        engine = _me.get_engine()
+        total_msgs = sum(len(c.get("messages", [])) for c in engine.conversations)
+        return {
+            "conversations": len(engine.conversations),
+            "messages": total_msgs,
+            "sessions": len(engine.sessions),
+        }
+    except Exception as e:
+        logger.error("get_memory_stats: %s", e)
+        return {"conversations": 0, "messages": 0, "sessions": 0}
+
+
+@expose
+def get_presets() -> list:
+    """Retourne les presets configurés pour les raccourcis."""
+    import yaml
+    import app_paths
+
+    try:
+        with app_paths.config_path().open("r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        presets = cfg.get("presets", {})
+        return [
+            {"id": k, "name": v.get("name", k), "icon": v.get("icon", "⚙️")}
+            for k, v in presets.items()
+        ]
+    except Exception as e:
+        logger.debug("get_presets: %s", e)
+        return []
+
+
 STATIC_FILE_PORT: int | None = None

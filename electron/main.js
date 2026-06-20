@@ -3,7 +3,7 @@
  * Lance le backend Python, gère la fenêtre, le tray icon.
  */
 
-const { app, BrowserWindow, Tray, Menu, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, shell, screen } = require('electron');
 const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
@@ -195,15 +195,19 @@ ipcMain.on('window-close', () => { if (mainWindow) mainWindow.close(); });
 // ── Création de la fenêtre principale ─────────────────────────────────────────
 
 function createWindow() {
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width, height } = primaryDisplay.workAreaSize;
+
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 800,
+    width: width,
+    height: height,
+    minWidth: 900,
     minHeight: 600,
     backgroundColor: '#0C0C0F',
-    titleBarStyle: 'hiddenInset',  // Barre de titre intégrée (macOS-like)
-    frame: false,                   // Pas de barre de titre Windows
+    titleBarStyle: 'hidden',
+    frame: false,
     transparent: false,
+    maximized: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -212,22 +216,19 @@ function createWindow() {
       webSecurity: true,
     },
     icon: path.join(__dirname, 'assets', 'icon.png'),
-    show: false,  // Ne pas afficher avant que l'UI soit prête
+    show: false,
   });
 
-  // Charger l'UI
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
-  // Afficher quand prêt (évite le flash blanc)
   mainWindow.once('ready-to-show', () => {
+    mainWindow.maximize();
     mainWindow.show();
-    // Ouvrir DevTools en développement
     if (process.env.ARIA_DEV) {
       mainWindow.webContents.openDevTools();
     }
   });
 
-  // Masquer au lieu de fermer (tray icon)
   mainWindow.on('close', (event) => {
     if (!app.isQuitting) {
       event.preventDefault();
@@ -258,6 +259,7 @@ function createTray() {
       click: () => {
         if (mainWindow) {
           mainWindow.show();
+          mainWindow.maximize();
           mainWindow.focus();
         }
       },

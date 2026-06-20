@@ -7,6 +7,7 @@
 
 const state = {
   currentConvId: null,
+  currentPage: 'home',
   conversationMode: 'ecrit',
   micActive: false,
   micPaused: false,
@@ -15,8 +16,9 @@ const state = {
   settings: {},
   _vocalCountdownTimer: null,
   _originalTranscription: '',
-  _staticPort: 9998,  // Port du serveur de fichiers statiques Python
-  _streamingMessage: null,  // Élément DOM de la bulle ARIA en cours de streaming
+  _staticPort: 9998,
+  _streamingMessage: null,
+  _clockInterval: null,
 };
 
 // ── API Python ────────────────────────────────────────────────────────────────
@@ -43,16 +45,22 @@ const api = {
 
 async function init() {
   console.log('[ARIA] Initialisation...');
-  console.log('[ARIA] Attente backend...');
   await waitForBackend();
   console.log('[ARIA] Backend prêt');
 
+  try {
+    const port = await api.call('get_static_port');
+    if (port) state._staticPort = port;
+  } catch (_) {}
+
   await loadSettings();
   applyTheme(state.settings.theme || 'slate');
-  setGlassIntensity(state.settings.glass_intensity || 60);
-  restoreWallpaper();
+  setGlassIntensity(state.settings.glass_intensity ?? 60);
+  await restoreWallpaper();
+  applySettingsForm();
 
   await refreshConversationList();
+  await initWidgets();
 
   const lastConvId = state.settings.last_conversation_id;
   if (lastConvId) {
@@ -62,6 +70,9 @@ async function init() {
   }
 
   setupEventListeners();
+  initLogoParticles();
+  navigate('home');
+  updateClock();
   console.log('[ARIA] Prêt');
 }
 
@@ -122,6 +133,17 @@ function setupEventListeners() {
   // Statut ARIA
   api.on('status_change', (status) => setStatus(status));
 
+  api.on('thinking_start', () => setStatus('thinking'));
+  api.on('thinking_action', (action) => {
+    const subtitle = document.getElementById('sidebar-subtitle');
+    if (subtitle && action) subtitle.textContent = action;
+    setStatus('thinking');
+  });
+  api.on('thinking_hide', () => {
+    if (state.micActive) setStatus('listening');
+    else setStatus('idle');
+  });
+
   // Waveform micro
   api.on('waveform', (rms) => updateWaveform(rms));
 
@@ -129,7 +151,10 @@ function setupEventListeners() {
   api.on('toast', ({ message, type }) => showToast(message, type));
 
   // Message utilisateur depuis le backend
-  api.on('user_message', (text) => addUserBubble(text));
+  api.on('user_message', (text) => {
+    showHomeConversation();
+    addUserBubble(text);
+  });
 
   // Token LLM streaming
   api.on('assistant_token', (token) => appendStreamToken(token));
@@ -155,46 +180,53 @@ async function refreshConversationList() {
 }
 
 function renderConversationList(conversations) {
-  const list = document.getElementById('conversations-list');
-  if (!list) return;
+  const badge = document.getElementById('conv-badge');
+  if (badge) badge.textContent = conversations.length ? String(conversations.length) : '';
 
-  if (!conversations.length) {
-    list.innerHTML = '<div class="empty-conv-list">Aucune conversation</div>';
-    return;
-  }
+  const html = !conversations.length
+    ? '<div class="empty-conv-list">Aucune conversation</div>'
+    : conversations.map(conv => {
+        const isActive = conv.id === state.currentConvId;
+        const title = esc(conv.title || 'Nouvelle conversation');
+        const date = conv.updated_at
+          ? new Date(conv.updated_at).toLocaleDateString('fr-FR')
+          : '';
 
-  list.innerHTML = conversations.map(conv => {
-    const isActive = conv.id === state.currentConvId;
-    const title = esc(conv.title || 'Nouvelle conversation');
-    const date = conv.updated_at
-      ? new Date(conv.updated_at).toLocaleDateString('fr-FR')
-      : '';
+        return `
+          <div class="conv-item ${isActive ? 'active' : ''}" id="conv-${conv.id}"
+               onmouseenter="this.querySelector('.conv-delete')?.style && (this.querySelector('.conv-delete').style.opacity='1')"
+               onmouseleave="this.querySelector('.conv-delete')?.style && (this.querySelector('.conv-delete').style.opacity='0')">
+            <div class="conv-content" onclick="loadConversation('${conv.id}')">
+              <div class="conv-title">${title}</div>
+              <div class="conv-date">${date}</div>
+            </div>
+            <button class="conv-delete"
+              onclick="event.stopPropagation();deleteConversation('${conv.id}','${title.replace(/'/g, "\\'")}')">
+              ✕
+            </button>
+          </div>`;
+      }).join('');
 
-    return `
-      <div class="conv-item ${isActive ? 'active' : ''}" id="conv-${conv.id}"
-           onmouseenter="this.querySelector('.conv-delete').style.opacity='1'"
-           onmouseleave="this.querySelector('.conv-delete').style.opacity='0'">
-        <div class="conv-content" onclick="loadConversation('${conv.id}')">
-          <div class="conv-title">${title}</div>
-          <div class="conv-date">${date}</div>
-        </div>
-        <button class="conv-delete"
-          onclick="event.stopPropagation();deleteConversation('${conv.id}','${title}')">
-          ✕
-        </button>
-      </div>`;
-  }).join('');
+  const listFull = document.getElementById('conv-list-full');
+  if (listFull) listFull.innerHTML = html;
+
+  const listLegacy = document.getElementById('conversations-list');
+  if (listLegacy) listLegacy.innerHTML = html;
+}
+
+function loadFullConversationList() {
+  refreshConversationList();
 }
 
 async function newConversation() {
   try {
     const result = await api.call('new_conversation');
     state.currentConvId = result.id;
-    document.getElementById('messages').innerHTML = '';
-    document.getElementById('conv-title').textContent = 'Nouvelle conversation';
+    showHomeIdle();
     await refreshConversationList();
+    navigate('home');
     showModeSelector();
-  } catch(e) {
+  } catch (e) {
     showToast('Erreur création conversation', 'error');
   }
 }
@@ -204,15 +236,13 @@ async function loadConversation(convId) {
     const result = await api.call('load_conversation', convId);
     state.currentConvId = result.id;
 
-    // Afficher les messages
     const messagesEl = document.getElementById('messages');
-    messagesEl.innerHTML = '';
+    if (messagesEl) messagesEl.innerHTML = '';
     (result.messages || []).forEach(msg => {
       if (msg.role === 'user') addUserBubble(msg.content, false);
       else addAriaBubble(msg.content, false);
     });
 
-    // Restaurer le mode
     const mode = await api.call('get_conversation_mode', convId);
     if (mode) {
       applyConversationMode(mode);
@@ -220,9 +250,13 @@ async function loadConversation(convId) {
       showModeSelector();
     }
 
+    if ((result.messages || []).length) showHomeConversation();
+    else showHomeIdle();
+
     await refreshConversationList();
+    navigate('home');
     scrollToBottom();
-  } catch(e) {
+  } catch (e) {
     showToast('Erreur chargement conversation', 'error');
   }
 }
@@ -261,7 +295,9 @@ async function deleteAllConversations() {
 // ── Messages ──────────────────────────────────────────────────────────────────
 
 function addUserBubble(text, scroll = true) {
+  showHomeConversation();
   const messages = document.getElementById('messages');
+  if (!messages) return;
   const div = document.createElement('div');
   div.className = 'bubble-wrap user-wrap';
   div.innerHTML = `
@@ -335,6 +371,8 @@ async function sendMessage() {
   input.style.height = 'auto';
 
   cancelVocalCountdown();
+  navigate('home');
+  showHomeConversation();
   setStatus('thinking');
 
   try {
@@ -530,24 +568,63 @@ function triggerMicRings() {
 
 // ── Statut ────────────────────────────────────────────────────────────────────
 
+function initLogoParticles() {
+  const container = document.getElementById('home-logo-particles');
+  if (!container || container.childElementCount > 0) return;
+
+  for (let i = 0; i < 8; i++) {
+    const p = document.createElement('div');
+    p.className = 'logo-particle';
+    const angle = (i / 8) * Math.PI * 2;
+    const radius = 25 + Math.random() * 15;
+    p.style.cssText = `
+      --x: ${50 + Math.cos(angle) * radius}%;
+      --y: ${50 + Math.sin(angle) * radius}%;
+      --dx: ${(Math.random() - 0.5) * 20}px;
+      --dy: ${(Math.random() - 0.5) * 20}px;
+      --dx2: ${(Math.random() - 0.5) * 30}px;
+      --dy2: ${(Math.random() - 0.5) * 30}px;
+      --dx3: ${(Math.random() - 0.5) * 40}px;
+      --dy3: ${(Math.random() - 0.5) * 40}px;
+      --dur: ${1.5 + Math.random() * 2}s;
+      --delay: ${Math.random() * 2}s;
+    `;
+    container.appendChild(p);
+  }
+}
+
 function setStatus(s) {
-  const statusText = document.getElementById('status-text');
-  const logo = document.getElementById('aria-logo');
+  const subtitle = document.getElementById('sidebar-subtitle');
+  const homeLogo = document.getElementById('home-logo');
+  const sidebarWrap = document.getElementById('sidebar-logo-wrap');
 
   const labels = {
-    idle: 'En veille', listening: 'Écoute...', transcribing: 'Transcription...',
-    thinking: 'Réfléchit...', speaking: 'Parle...',
+    idle: 'En veille',
+    listening: 'Écoute...',
+    transcribing: 'Transcription...',
+    thinking: 'Réfléchit...',
+    speaking: 'Parle...',
   };
-  if (statusText) statusText.textContent = labels[s] || s;
-
-  if (logo) {
-    logo.classList.remove('logo-idle', 'logo-listening', 'logo-thinking', 'logo-speaking');
-    const map = {
-      idle: 'logo-idle', listening: 'logo-listening', transcribing: 'logo-listening',
-      thinking: 'logo-thinking', speaking: 'logo-speaking',
-    };
-    logo.classList.add(map[s] || 'logo-idle');
+  const label = labels[s] || s;
+  if (subtitle) {
+    subtitle.textContent = label;
+    subtitle.className = `status-${s === 'idle' ? 'idle' : 'active'}`;
   }
+
+  const map = {
+    idle: 'logo-idle',
+    listening: 'logo-listening',
+    transcribing: 'logo-listening',
+    thinking: 'logo-thinking',
+    speaking: 'logo-speaking',
+  };
+  const cls = map[s] || 'logo-idle';
+
+  [homeLogo, sidebarWrap].forEach(el => {
+    if (!el) return;
+    el.classList.remove('logo-idle', 'logo-listening', 'logo-thinking', 'logo-speaking');
+    el.classList.add(cls);
+  });
 }
 
 // ── Paramètres ────────────────────────────────────────────────────────────────
@@ -564,14 +641,14 @@ async function saveSetting(key, value) {
   state.settings[key] = value;
   try {
     await api.call('save_settings', state.settings);
-  } catch(e) {
+    if (['user_firstname', 'hello_text', 'sub_text'].includes(key)) updateClock();
+  } catch (e) {
     console.error('Erreur sauvegarde setting:', e);
   }
 }
 
 function toggleSettings() {
-  const panel = document.getElementById('settings-panel');
-  panel?.classList.toggle('hidden');
+  navigate(state.currentPage === 'settings' ? 'home' : 'settings');
 }
 
 function toggleAccordion(id) {
@@ -736,6 +813,453 @@ async function deleteWallpaper(filename) {
   } catch(e) {}
 }
 
+// ── Widgets temps réel ────────────────────────────────────────────────────────
+
+async function initWidgets() {
+  updateClock();
+  if (state._clockInterval) clearInterval(state._clockInterval);
+  state._clockInterval = setInterval(updateClock, 1000);
+
+  await loadWeatherWidget();
+  setInterval(loadWeatherWidget, 5 * 60 * 1000);
+
+  await loadMemoryWidget();
+  setInterval(loadMemoryWidget, 30 * 1000);
+
+  loadShortcutsWidget();
+  updateBattery();
+}
+
+function updateClock() {
+  const now = new Date();
+  const timeEl = document.getElementById('wval-time');
+  const greetingEl = document.getElementById('home-greeting');
+  const dateEl = document.getElementById('home-date');
+
+  if (timeEl) {
+    timeEl.textContent = now.toLocaleTimeString('fr-FR', {
+      hour: '2-digit', minute: '2-digit',
+    });
+  }
+
+  const firstname = state.settings?.user_firstname || 'Mathis';
+  const h = now.getHours();
+  const salut = h < 12 ? 'Bonjour' : h < 18 ? 'Bon après-midi' : 'Bonsoir';
+
+  if (greetingEl) greetingEl.textContent = `${salut}, ${firstname}.`;
+
+  if (dateEl) {
+    dateEl.textContent = now.toLocaleDateString('fr-FR', {
+      weekday: 'long', day: 'numeric', month: 'long',
+    });
+  }
+
+  const helloEl = document.getElementById('home-hello-text');
+  const subEl = document.getElementById('home-sub-text');
+  if (helloEl) {
+    helloEl.textContent = state.settings?.hello_text ||
+      `${salut}, ${firstname}.`;
+  }
+  if (subEl) {
+    subEl.textContent = state.settings?.sub_text || 'Comment puis-je vous aider aujourd\'hui ?';
+  }
+
+  const tasksLabel = document.getElementById('wlabel-tasks');
+  if (tasksLabel && tasksLabel.textContent === 'Chargement...') {
+    tasksLabel.textContent = 'Aucune tâche planifiée';
+  }
+}
+
+async function updateBattery() {
+  const el = document.getElementById('wval-battery');
+  if (!el || !navigator.getBattery) {
+    if (el) el.textContent = 'N/A';
+    return;
+  }
+  try {
+    const bat = await navigator.getBattery();
+    const pct = Math.round(bat.level * 100);
+    el.textContent = `${pct}%${bat.charging ? ' ⚡' : ''}`;
+    bat.addEventListener('levelchange', () => {
+      el.textContent = `${Math.round(bat.level * 100)}%${bat.charging ? ' ⚡' : ''}`;
+    });
+  } catch {
+    if (el) el.textContent = 'N/A';
+  }
+}
+
+async function loadWeatherWidget() {
+  try {
+    const data = await api.call('get_weather_widget') || {};
+    const valEl = document.getElementById('wval-meteo');
+    const iconEl = document.getElementById('wicon-meteo');
+
+    if (data.error || data.temp == null) {
+      if (valEl) valEl.textContent = 'N/A';
+      return;
+    }
+
+    const weatherIcons = {
+      ensoleillé: '☀️', clair: '☀️', soleil: '☀️',
+      nuageux: '☁️', couvert: '☁️', nuage: '☁️',
+      pluie: '🌧️', pluvieux: '🌧️',
+      brouillard: '🌫️', brume: '🌫️',
+      neige: '❄️', orage: '⛈️',
+    };
+    const desc = (data.description || '').toLowerCase();
+    const icon = Object.entries(weatherIcons).find(([k]) => desc.includes(k))?.[1] || '🌡️';
+
+    if (iconEl) iconEl.textContent = icon;
+    if (valEl) valEl.textContent = `${Math.round(data.temp)}° ${data.city || ''}`;
+  } catch {
+    const el = document.getElementById('wval-meteo');
+    if (el) el.textContent = 'N/A';
+  }
+}
+
+async function loadMemoryWidget() {
+  try {
+    const data = await api.call('get_memory_stats') || {};
+
+    document.getElementById('mem-convs')?.replaceChildren(document.createTextNode(String(data.conversations ?? 0)));
+    document.getElementById('mem-msgs')?.replaceChildren(document.createTextNode(String(data.messages ?? 0)));
+    document.getElementById('mem-sessions')?.replaceChildren(document.createTextNode(String(data.sessions ?? 0)));
+
+    const pct = Math.min(100, Math.round((data.messages || 0) / 5));
+    const pctEl = document.getElementById('memory-pct');
+    if (pctEl) pctEl.textContent = `${pct}%`;
+    drawMemoryDonut(pct);
+
+    const statsEl = document.getElementById('memory-stats-label');
+    if (statsEl) {
+      statsEl.textContent = `${data.conversations ?? 0} conversations · ${data.messages ?? 0} messages`;
+    }
+  } catch (e) {
+    console.warn('loadMemoryWidget:', e);
+  }
+}
+
+function drawMemoryDonut(pct) {
+  const canvas = document.getElementById('memory-donut');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const cx = 50; const cy = 50; const r = 38; const lw = 8;
+
+  ctx.clearRect(0, 0, 100, 100);
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth = lw;
+  ctx.stroke();
+
+  const angle = (pct / 100) * Math.PI * 2 - Math.PI / 2;
+  const grad = ctx.createLinearGradient(0, 0, 100, 100);
+  grad.addColorStop(0, '#6C8EFF');
+  grad.addColorStop(1, '#A78BFA');
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, -Math.PI / 2, angle);
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = lw;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+}
+
+async function loadShortcutsWidget() {
+  try {
+    const presets = await api.call('get_presets') || [];
+    const grid = document.getElementById('shortcuts-grid');
+    if (!grid) return;
+
+    const fixed = [
+      { icon: '✉️', label: 'Rédiger un email', action: 'rédige un email', color: '#6C8EFF' },
+      { icon: '🎯', label: 'Démarrer focus', action: 'active le mode focus', color: '#A78BFA' },
+      { icon: '📊', label: 'Analyse système', action: 'analyse le système', color: '#4ADE80' },
+    ];
+
+    const presetShortcuts = presets.slice(0, 3).map(p => ({
+      icon: p.icon || '⚡',
+      label: `Mode ${p.name}`,
+      action: `active le mode ${p.name}`,
+      color: '#F59E0B',
+    }));
+
+    const all = [...fixed, ...presetShortcuts].slice(0, 6);
+
+    grid.innerHTML = all.map(s => `
+      <button class="shortcut-btn" onclick="app.quickAction(${JSON.stringify(s.action)})"
+              style="--shortcut-color: ${s.color}">
+        <span class="shortcut-icon">${s.icon}</span>
+        <span class="shortcut-label">${esc(s.label)}</span>
+      </button>
+    `).join('');
+  } catch (e) {
+    console.warn('loadShortcutsWidget:', e);
+  }
+}
+
+async function quickAction(text) {
+  navigate('home');
+  showHomeConversation();
+  if (!state.currentConvId) {
+    try {
+      const result = await api.call('new_conversation');
+      state.currentConvId = result.id;
+      await refreshConversationList();
+    } catch (e) {
+      showToast('Erreur création conversation', 'error');
+      return;
+    }
+  }
+  hideModeSelector();
+  setStatus('thinking');
+  try {
+    await api.call('ask', text, state.conversationMode);
+  } catch (e) {
+    showToast('Erreur: ' + e.message, 'error');
+    setStatus('idle');
+  }
+}
+
+function navigate(page) {
+  document.querySelectorAll('.page').forEach(p => {
+    p.classList.add('hidden');
+    p.classList.remove('active');
+  });
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+
+  const pageEl = document.getElementById(`page-${page}`);
+  if (pageEl) {
+    pageEl.classList.remove('hidden');
+    pageEl.classList.add('active');
+  }
+
+  document.querySelectorAll(`[data-page="${page}"]`).forEach(btn => btn.classList.add('active'));
+
+  state.currentPage = page;
+
+  if (page === 'conversations') loadFullConversationList();
+  if (page === 'agents') loadAgentsPage();
+  if (page === 'memory') loadMemoryPage();
+  if (page === 'settings') {
+    loadModelSettings();
+    loadApiKeys();
+    applySettingsForm();
+    loadCustomWallpapers();
+  }
+}
+
+function showHomeConversation() {
+  document.getElementById('home-logo-container')?.classList.add('shrunk');
+  document.getElementById('home-messages')?.classList.remove('hidden');
+}
+
+function showHomeIdle() {
+  document.getElementById('home-logo-container')?.classList.remove('shrunk');
+  document.getElementById('home-messages')?.classList.add('hidden');
+  const messages = document.getElementById('messages');
+  if (messages) messages.innerHTML = '';
+}
+
+function applyGreeting() {
+  const firstname = document.getElementById('set-firstname')?.value?.trim();
+  const hello = document.getElementById('set-hello-text')?.value?.trim();
+  const sub = document.getElementById('set-sub-text')?.value?.trim();
+  if (firstname) saveSetting('user_firstname', firstname);
+  if (hello) saveSetting('hello_text', hello);
+  if (sub) saveSetting('sub_text', sub);
+  updateClock();
+  showStyledSettingToast('✓ Salutation mise à jour', '#4ADE80');
+}
+
+function applySettingsForm() {
+  const s = state.settings;
+  const firstnameEl = document.getElementById('set-firstname');
+  const helloEl = document.getElementById('set-hello-text');
+  const subEl = document.getElementById('set-sub-text');
+  const glassEl = document.getElementById('set-glass');
+
+  if (firstnameEl && s.user_firstname) firstnameEl.value = s.user_firstname;
+  if (helloEl && s.hello_text) helloEl.value = s.hello_text;
+  if (subEl && s.sub_text) subEl.value = s.sub_text;
+  if (glassEl && s.glass_intensity != null) glassEl.value = s.glass_intensity;
+}
+
+function showStyledSettingToast(message, color) {
+  showToast(message, 'success');
+  void color;
+}
+
+function validateSection(section) {
+  showStyledSettingToast(`✓ Section ${section} appliquée`, '#4ADE80');
+}
+
+function toggleWidget(name) {
+  const body = document.getElementById(`widget-${name}-body`);
+  if (body) body.classList.toggle('collapsed');
+}
+
+function toggleModeMenu() {
+  document.getElementById('mode-menu')?.classList.toggle('hidden');
+}
+
+function toggleAgentDropdown() {
+  document.getElementById('agent-dropdown')?.classList.toggle('hidden');
+}
+
+function setPrivacyMode(enabled) {
+  const badge = document.getElementById('home-mode-badge');
+  if (badge) badge.classList.toggle('private', !!enabled);
+  saveSetting('privacy_mode', !!enabled);
+}
+
+async function loadMemoryPage() {
+  await loadMemoryWidget();
+  const content = document.getElementById('memory-content');
+  if (!content) return;
+  try {
+    const data = await api.call('get_memory_stats') || {};
+    content.innerHTML = `
+      <div class="memory-page-stats">
+        <div class="mem-stat-card"><div class="mem-stat-val">${data.conversations ?? 0}</div><div class="mem-stat-label">Conversations</div></div>
+        <div class="mem-stat-card"><div class="mem-stat-val">${data.messages ?? 0}</div><div class="mem-stat-label">Messages</div></div>
+        <div class="mem-stat-card"><div class="mem-stat-val">${data.sessions ?? 0}</div><div class="mem-stat-label">Sessions</div></div>
+      </div>`;
+  } catch {
+    content.innerHTML = '<div class="error-text">Impossible de charger la mémoire</div>';
+  }
+}
+
+async function loadAgentsPage() {
+  const list = document.getElementById('agents-page-list');
+  if (!list) return;
+  list.innerHTML = '<div class="loading-text">Chargement...</div>';
+  try {
+    const agents = await api.call('get_agents') || [];
+    if (!agents.length) {
+      list.innerHTML = '<div class="info-text">Aucun agent configuré</div>';
+      return;
+    }
+    list.innerHTML = agents.map(a => `
+      <div class="agent-card" onclick="app.openAgentEditor('${esc(a.id)}')">
+        <span class="agent-card-icon">${a.icon || '🤖'}</span>
+        <div>
+          <div class="agent-card-name">${esc(a.name || a.id)}</div>
+          <div class="agent-card-desc">${esc(a.description || '')}</div>
+        </div>
+      </div>
+    `).join('');
+  } catch (e) {
+    list.innerHTML = `<div class="error-text">Erreur: ${esc(e.message)}</div>`;
+  }
+}
+
+function openAgentEditor(agentId) {
+  showToast(agentId ? 'Éditeur agent — bientôt disponible' : 'Création agent — bientôt disponible', 'info');
+}
+
+async function loadApiKeys() {
+  const container = document.getElementById('api-keys-list');
+  if (!container) return;
+  container.innerHTML = '<div class="loading-text">Chargement...</div>';
+
+  try {
+    const providers = await api.call('get_api_keys_status') || {};
+    container.innerHTML = Object.entries(providers).map(([id, p]) => `
+      <div class="api-key-card ${p.has_key ? 'configured' : ''}" id="api-card-${esc(id)}">
+        <div class="api-key-header">
+          <span class="api-key-icon">${p.icon}</span>
+          <div>
+            <div class="api-key-name">${esc(p.name)}</div>
+            <div class="api-key-status ${esc(p.status)}">
+              ${p.has_key
+                ? (p.status === 'ok' ? '✅ Configurée' : '⚠️ ' + esc(p.message || ''))
+                : '○ Non configurée'}
+            </div>
+          </div>
+          <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+            ${p.has_key ? `
+              <button type="button" class="api-test-btn" onclick="app.testApiKey('${esc(id)}')">Tester</button>
+              <button type="button" class="api-delete-btn" onclick="app.deleteApiKey('${esc(id)}')">✕</button>
+            ` : ''}
+          </div>
+        </div>
+        <div class="api-key-input-row" id="api-input-${esc(id)}" style="${p.has_key ? 'display:none' : ''}">
+          <input type="password" id="api-key-field-${esc(id)}" placeholder="${esc(p.name)} API Key"
+            class="agent-input" autocomplete="off" spellcheck="false">
+          <select id="api-model-${esc(id)}" class="agent-select" style="width:auto;flex-shrink:0">
+            ${(p.models || []).map(m =>
+              `<option value="${esc(m)}" ${m === p.default_model ? 'selected' : ''}>${esc(m)}</option>`
+            ).join('')}
+          </select>
+          <button type="button" class="api-save-btn" onclick="app.saveApiKey('${esc(id)}')">Enregistrer</button>
+        </div>
+        ${!p.has_key ? `
+          <a class="api-get-key-link" href="#" onclick="window.ARIA?.openExternal?.('${esc(p.url)}');return false;">
+            Obtenir une clé API gratuite →
+          </a>
+        ` : `
+          <div class="api-model-active">
+            Modèle actif : ${esc(p.default_model)}
+            <button type="button" onclick="app.showApiKeyInput('${esc(id)}')"
+              style="margin-left:8px;font-size:10px;background:rgba(255,255,255,0.06);border:1px solid var(--border);
+              border-radius:4px;padding:2px 6px;color:var(--text3);cursor:pointer">Modifier</button>
+          </div>
+        `}
+      </div>
+    `).join('');
+  } catch {
+    container.innerHTML = '<div class="error-text">Erreur chargement clés API</div>';
+  }
+}
+
+async function saveApiKey(provider) {
+  const key = document.getElementById(`api-key-field-${provider}`)?.value?.trim();
+  const model = document.getElementById(`api-model-${provider}`)?.value;
+  if (!key) { showToast('Clé vide', 'error'); return; }
+  try {
+    const result = await api.call('save_api_key', provider, key, model || '');
+    if (result.success) {
+      showToast('Clé enregistrée ✓', 'success');
+      await loadApiKeys();
+    } else {
+      showToast('Erreur: ' + (result.error || '?'), 'error');
+    }
+  } catch (e) {
+    showToast('Erreur enregistrement clé', 'error');
+  }
+}
+
+async function deleteApiKey(provider) {
+  if (!confirm(`Supprimer la clé ${provider} ?`)) return;
+  try {
+    await api.call('delete_api_key', provider);
+    showToast('Clé supprimée', 'success');
+    await loadApiKeys();
+  } catch {
+    showToast('Erreur suppression clé', 'error');
+  }
+}
+
+async function testApiKey(provider) {
+  const btn = document.querySelector(`#api-card-${provider} .api-test-btn`);
+  if (btn) { btn.textContent = '⟳'; btn.disabled = true; }
+  try {
+    const result = await api.call('test_api_key', provider);
+    if (result.success) showToast(`✅ ${provider} fonctionne !`, 'success');
+    else showToast(`❌ ${provider}: ${result.error || result.response || '?'}`, 'error');
+  } catch (e) {
+    showToast(`❌ ${provider}: ${e.message}`, 'error');
+  } finally {
+    if (btn) { btn.textContent = 'Tester'; btn.disabled = false; }
+  }
+}
+
+function showApiKeyInput(provider) {
+  const row = document.getElementById(`api-input-${provider}`);
+  if (row) row.style.display = 'flex';
+}
+
 // ── Toast ─────────────────────────────────────────────────────────────────────
 
 function showToast(message, type = 'info') {
@@ -771,7 +1295,7 @@ function renderMarkdown(text) {
 }
 
 function scrollToBottom() {
-  const container = document.getElementById('messages-container');
+  const container = document.getElementById('home-messages') || document.getElementById('messages-container');
   if (container) container.scrollTop = container.scrollHeight;
 }
 
@@ -896,13 +1420,11 @@ function bindMainUiButtons() {
 }
 
 function bindModeSelectorButtons() {
-  document.querySelectorAll('#mode-select-buttons button[data-mode]').forEach(btn => {
+  document.querySelectorAll('#mode-select-overlay button[data-mode]').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const mode = btn.getAttribute('data-mode');
-      console.log('Mode sélectionné:', mode);
-      selectConversationMode(mode);
+      selectConversationMode(btn.getAttribute('data-mode'));
     });
   });
 }
@@ -928,6 +1450,21 @@ function exposeGlobalApp() {
     uploadWallpaper,
     deleteWallpaper,
     saveSetting,
+    navigate,
+    quickAction,
+    applyGreeting,
+    applySettingsForm,
+    validateSection,
+    toggleWidget,
+    toggleModeMenu,
+    toggleAgentDropdown,
+    setPrivacyMode,
+    openAgentEditor,
+    loadApiKeys,
+    saveApiKey,
+    deleteApiKey,
+    testApiKey,
+    showApiKeyInput,
     exportConversation: () => api.call('export_current_conversation'),
     runMicDiagnostic: () => api.call('run_mic_diagnostic'),
     handleFiles: () => showToast('Pièces jointes — bientôt disponible', 'info'),

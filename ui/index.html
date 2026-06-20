@@ -2256,6 +2256,115 @@
       color: var(--text3);
     }
 
+    /* ── Clés API (IAs externes) ─────────────────────────────────────────── */
+    .api-key-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      margin-bottom: 8px;
+      transition: border-color 0.2s;
+    }
+
+    .api-key-card.configured {
+      border-color: rgba(74,222,128,0.2);
+      background: rgba(74,222,128,0.03);
+    }
+
+    .api-key-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .api-key-icon { font-size: 20px; }
+
+    .api-key-name {
+      font-size: 13px;
+      color: var(--text);
+      font-weight: 500;
+    }
+
+    .api-key-status {
+      font-size: 10px;
+      color: var(--text3);
+      margin-top: 2px;
+    }
+
+    .api-key-status.ok { color: #4ADE80; }
+    .api-key-status.invalid { color: #F87171; }
+
+    .api-key-input-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .api-key-input-row .agent-input {
+      flex: 1;
+      font-family: monospace;
+      font-size: 11px;
+      letter-spacing: 0.5px;
+    }
+
+    .api-get-key-link {
+      font-size: 11px;
+      color: var(--accent);
+      text-decoration: none;
+      cursor: pointer;
+      opacity: 0.7;
+      transition: opacity 0.15s;
+    }
+
+    .api-get-key-link:hover { opacity: 1; }
+
+    .api-model-active {
+      font-size: 11px;
+      color: var(--text3);
+      display: flex;
+      align-items: center;
+    }
+
+    .api-save-btn {
+      padding: 7px 14px;
+      background: var(--accent);
+      border: none;
+      border-radius: 8px;
+      color: white;
+      font-family: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .api-test-btn {
+      padding: 4px 10px;
+      background: rgba(74,222,128,0.1);
+      border: 1px solid rgba(74,222,128,0.25);
+      border-radius: 6px;
+      color: #4ADE80;
+      font-size: 11px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .api-delete-btn {
+      width: 24px;
+      height: 24px;
+      background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.2);
+      border-radius: 6px;
+      color: var(--error);
+      font-size: 11px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
     .cloud-key-row {
       display: flex;
       gap: 8px;
@@ -4566,6 +4675,9 @@ const aria = {
     if (id === 'modeles' && isCollapsed) {
       this.loadModelSettings();
     }
+    if (id === 'apikeys' && isCollapsed) {
+      this.loadApiKeys();
+    }
     if (id === 'cloud' && isCollapsed) {
       this.loadCloudProviders();
     }
@@ -6105,13 +6217,25 @@ const aria = {
       </div>
 
       <div class="settings-accordion">
+        <div class="settings-accordion-header" onclick="aria.toggleAccordion('apikeys')">
+          🔑 Clés API <span id="chevron-apikeys">▸</span>
+        </div>
+        <div class="settings-accordion-body collapsed" id="acc-apikeys">
+          <div style="font-size:11px;color:var(--text3);margin-bottom:10px;line-height:1.5">
+            Connecte des IAs externes pour les utiliser en complément des modèles locaux.
+            Les clés sont stockées uniquement sur ton PC.
+          </div>
+          <div id="api-keys-list"></div>
+        </div>
+      </div>
+
+      <div class="settings-accordion">
         <div class="settings-accordion-header" onclick="aria.toggleAccordion('cloud')">
-          ☁️ IA externes (API) <span id="chevron-cloud">▸</span>
+          ☁️ IA externes (legacy) <span id="chevron-cloud">▸</span>
         </div>
         <div class="settings-accordion-body collapsed" id="acc-cloud">
           <div style="font-size:11px;color:var(--text3);margin-bottom:12px">
-            Connecte OpenAI, Anthropic, Groq, OpenRouter… via clé API.
-            Les modèles cloud apparaîtront dans le sélecteur de modèle.
+            Ancienne config cloud_providers — préfère la section Clés API ci-dessus.
           </div>
           <div id="cloud-providers-list">
             <div style="color:var(--text3);font-size:12px">Chargement...</div>
@@ -6389,6 +6513,117 @@ const aria = {
 
   esc(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  },
+
+  async loadApiKeys() {
+    const container = document.getElementById('api-keys-list');
+    if (!container) return;
+    container.innerHTML = '<div class="loading-text">Chargement...</div>';
+
+    try {
+      let raw = this.api('get_api_keys_status');
+      if (raw?.then) raw = await raw;
+      const providers = typeof raw === 'object' && raw !== null
+        ? raw
+        : JSON.parse(raw || '{}');
+
+      container.innerHTML = Object.entries(providers).map(([id, p]) => `
+        <div class="api-key-card ${p.has_key ? 'configured' : ''}" id="api-card-${this.esc(id)}">
+          <div class="api-key-header">
+            <span class="api-key-icon">${p.icon}</span>
+            <div>
+              <div class="api-key-name">${this.esc(p.name)}</div>
+              <div class="api-key-status ${this.esc(p.status)}">
+                ${p.has_key
+                  ? (p.status === 'ok' ? '✅ Configurée' : '⚠️ ' + this.esc(p.message))
+                  : '○ Non configurée'}
+              </div>
+            </div>
+            <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+              ${p.has_key ? `
+                <button type="button" class="api-test-btn" onclick="aria.testApiKey('${this.esc(id)}')">Tester</button>
+                <button type="button" class="api-delete-btn" onclick="aria.deleteApiKey('${this.esc(id)}')">✕</button>
+              ` : ''}
+            </div>
+          </div>
+          <div class="api-key-input-row" id="api-input-${this.esc(id)}" style="${p.has_key ? 'display:none' : ''}">
+            <input
+              type="password"
+              id="api-key-field-${this.esc(id)}"
+              placeholder="${this.esc(p.name)} API Key"
+              class="agent-input"
+              autocomplete="off"
+              spellcheck="false"
+            >
+            <select id="api-model-${this.esc(id)}" class="agent-select" style="width:auto;flex-shrink:0">
+              ${(p.models || []).map(m =>
+                `<option value="${this.esc(m)}" ${m === p.default_model ? 'selected' : ''}>${this.esc(m)}</option>`
+              ).join('')}
+            </select>
+            <button type="button" class="api-save-btn" onclick="aria.saveApiKey('${this.esc(id)}')">Enregistrer</button>
+          </div>
+          ${!p.has_key ? `
+            <a class="api-get-key-link"
+               onclick="window.pywebview?.api?.open_external?.('${this.esc(p.url)}') || window.open('${this.esc(p.url)}','_blank'); return false;"
+               href="#">
+              Obtenir une clé API gratuite →
+            </a>
+          ` : `
+            <div class="api-model-active">
+              Modèle actif : ${this.esc(p.default_model)}
+              <button type="button" onclick="aria.showApiKeyInput('${this.esc(id)}')" style="margin-left:8px;font-size:10px;
+                background:rgba(255,255,255,0.06);border:1px solid var(--border);border-radius:4px;
+                padding:2px 6px;color:var(--text3);cursor:pointer">Modifier</button>
+            </div>
+          `}
+        </div>
+      `).join('');
+    } catch (e) {
+      container.innerHTML = `<div style="color:var(--error);font-size:12px">Erreur chargement clés API</div>`;
+    }
+  },
+
+  async saveApiKey(provider) {
+    const key = document.getElementById(`api-key-field-${provider}`)?.value?.trim();
+    const model = document.getElementById(`api-model-${provider}`)?.value;
+    if (!key) { this.showToast('Clé vide', 'error'); return; }
+
+    let raw = this.api('save_api_key', provider, key, model || '');
+    if (raw?.then) raw = await raw;
+    const result = typeof raw === 'object' ? raw : JSON.parse(raw || '{}');
+    if (result.success) {
+      this.showToast('Clé enregistrée ✓', 'success');
+      await this.loadApiKeys();
+    } else {
+      this.showToast('Erreur: ' + (result.error || '?'), 'error');
+    }
+  },
+
+  async deleteApiKey(provider) {
+    if (!confirm(`Supprimer la clé ${provider} ?`)) return;
+    let raw = this.api('delete_api_key', provider);
+    if (raw?.then) raw = await raw;
+    this.showToast('Clé supprimée', 'success');
+    await this.loadApiKeys();
+  },
+
+  async testApiKey(provider) {
+    const btn = document.querySelector(`#api-card-${provider} .api-test-btn`);
+    if (btn) { btn.textContent = '⟳'; btn.disabled = true; }
+    let raw = this.api('test_api_key', provider);
+    if (raw?.then) raw = await raw;
+    const result = typeof raw === 'object' ? raw : JSON.parse(raw || '{}');
+    if (btn) { btn.textContent = 'Tester'; btn.disabled = false; }
+    if (result.success) {
+      this.showToast(`✅ ${provider} fonctionne !`, 'success');
+    } else {
+      this.showToast(`❌ ${provider}: ${result.error || result.response || '?'}`, 'error');
+    }
+  },
+
+  showApiKeyInput(provider) {
+    const row = document.getElementById(`api-input-${provider}`);
+    if (row) row.style.display = 'flex';
   },
 
   async loadCloudProviders() {

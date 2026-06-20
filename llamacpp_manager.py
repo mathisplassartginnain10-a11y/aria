@@ -33,7 +33,7 @@ CUSTOM_MODELS_DIR: Path | None = None
 
 DEFAULT_PARAMS = {
     "ctx_size": 4096,
-    "n_gpu_layers": 99,
+    "n_gpu_layers": 99,  # tout sur GPU — RTX 5080 16GB VRAM
     "threads": 8,
     "batch_size": 512,
 }
@@ -269,7 +269,10 @@ def start_model_server(model_name: str, params: dict | None = None) -> dict | No
         "--log-disable",
     ]
 
-    logger.info("Démarrage llama-server: modèle=%s, port=%d", model_name, port)
+    logger.info(
+        "Démarrage llama-server: modèle=%s, port=%d, n_gpu_layers=%d",
+        model_name, port, p.get("n_gpu_layers", DEFAULT_PARAMS["n_gpu_layers"]),
+    )
     logger.debug("Commande: %s", " ".join(cmd))
 
     try:

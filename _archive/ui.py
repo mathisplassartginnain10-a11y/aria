@@ -1161,6 +1161,40 @@ class AriaAPI:
         except Exception as exc:
             return json.dumps({"success": False, "error": str(exc)})
 
+    def get_api_keys_status(self) -> str:
+        from actions.api_keys import get_all_status
+
+        return json.dumps(get_all_status(), ensure_ascii=False)
+
+    def save_api_key(self, provider: str, key: str, model: str = "") -> str:
+        from actions.api_keys import check_status, set_default_model, set_key
+
+        try:
+            set_key(provider, key)
+            if model:
+                set_default_model(provider, model)
+            return json.dumps({"success": True, "status": check_status(provider)}, ensure_ascii=False)
+        except Exception as exc:
+            return json.dumps({"success": False, "error": str(exc)})
+
+    def delete_api_key(self, provider: str) -> str:
+        from actions.api_keys import set_key
+
+        set_key(provider, "")
+        return json.dumps({"success": True})
+
+    def test_api_key(self, provider: str) -> str:
+        from actions.api_keys import generate_with_api, get_key
+
+        if not get_key(provider):
+            return json.dumps({"success": False, "error": "Clé non configurée"})
+        try:
+            result = generate_with_api("Réponds juste: OK", provider=provider, max_tokens=5)
+            ok = bool(result) and "erreur" not in result.lower()
+            return json.dumps({"success": ok, "response": result[:50]})
+        except Exception as exc:
+            return json.dumps({"success": False, "error": str(exc)})
+
     def stop_speaking(self) -> None:
         import tts
 

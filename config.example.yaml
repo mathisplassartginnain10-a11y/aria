@@ -143,6 +143,29 @@ home_assistant:
   url: "http://homeassistant.local:8123"
   token: ""
 
+# Clés API — IAs externes (OpenAI, Anthropic, Mistral, Groq, Gemini)
+api_keys:
+  openai:
+    key: ""
+    enabled: false
+    default_model: "gpt-4o-mini"
+  anthropic:
+    key: ""
+    enabled: false
+    default_model: "claude-sonnet-4-6"
+  mistral:
+    key: ""
+    enabled: false
+    default_model: "mistral-small-latest"
+  groq:
+    key: ""
+    enabled: false
+    default_model: "llama-3.1-8b-instant"
+  gemini:
+    key: ""
+    enabled: false
+    default_model: "gemini-2.0-flash"
+
 # Réseaux sociaux (stubs — tokens optionnels)
 social:
   discord_bot_token: ""

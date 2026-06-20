@@ -871,6 +871,34 @@ def _select_model(text: str, intent: str = "") -> str:
     return MODELS["fast"]
 
 
+def _select_provider(text: str, conv_mode: str = "ecrit") -> tuple[str, str]:
+    """
+    Retourne (provider, model).
+    'local' = llama.cpp/Ollama, sinon provider API externe.
+    """
+    from actions.api_keys import get_default_model, is_enabled
+
+    try:
+        import llamacpp_manager
+        from pathlib import Path
+
+        local_available = (
+            Path(llamacpp_manager.LLAMA_SERVER_EXE).exists()
+            and bool(llamacpp_manager.list_available_models())
+        ) or llamacpp_manager.is_ollama_available()
+    except Exception:
+        local_available = False
+
+    if local_available:
+        return "local", _select_model(text, intent="")
+
+    for provider in ("groq", "openai", "anthropic", "mistral", "gemini"):
+        if is_enabled(provider):
+            return provider, get_default_model(provider)
+
+    return "local", _select_model(text, intent="")
+
+
 def _llamacpp_available() -> bool:
     try:
         import llamacpp_manager
@@ -992,10 +1020,42 @@ def generate(
     max_tokens: int = 400,
     temperature: float = 0.7,
     on_token=None,
+    provider: str = "local",
 ) -> str:
-    """Génère une réponse via llama.cpp local, fallback Ollama, ou API cloud."""
+    """Génère une réponse via llama.cpp local, fallback Ollama, API cloud ou API externe."""
     if model is None:
         model = MODELS["fast"]
+
+    if provider == "local":
+        try:
+            import llamacpp_manager
+            from pathlib import Path
+
+            local_ok = (
+                Path(llamacpp_manager.LLAMA_SERVER_EXE).exists()
+                and llamacpp_manager.list_available_models()
+            ) or llamacpp_manager.is_ollama_available()
+            if not local_ok:
+                ext_provider, ext_model = _select_provider(prompt, _get_conversation_mode())
+                if ext_provider != "local":
+                    provider = ext_provider
+                    model = ext_model
+        except Exception:
+            pass
+
+    if provider != "local":
+        from actions.api_keys import generate_with_api
+
+        return generate_with_api(
+            prompt,
+            provider=provider,
+            model=model,
+            system=system,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            stream=stream,
+            on_token=on_token,
+        )
 
     try:
         from actions.cloud_llm import generate as cloud_generate, is_cloud_model

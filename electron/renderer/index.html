@@ -1,26 +1,17 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="fr" data-theme="slate">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';
+    content="default-src 'self'; script-src 'self' 'unsafe-inline';
+             style-src 'self' 'unsafe-inline';
              img-src 'self' data: blob: http://127.0.0.1:*;
-             connect-src ws://127.0.0.1:*;">
+             connect-src ws://127.0.0.1:* http://127.0.0.1:*;">
   <title>ARIA</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-
-<!-- Barre de titre custom (sans frame natif) -->
-<div id="title-bar">
-  <div id="title-bar-drag"></div>
-  <div id="window-controls">
-    <button type="button" id="win-minimize" title="Réduire">─</button>
-    <button type="button" id="win-maximize" title="Agrandir">□</button>
-    <button type="button" id="win-close" class="close-btn" title="Fermer">✕</button>
-  </div>
-</div>
 
 <!-- Fond d'écran -->
 <div id="wallpaper-layer">
@@ -28,280 +19,480 @@
   <div id="wallpaper-overlay"></div>
 </div>
 
-<!-- Indicateur focus mode -->
-<div id="focus-indicator">🎯 Mode focus</div>
+<!-- Barre de titre custom -->
+<div id="title-bar">
+  <div id="title-bar-drag"></div>
+  <div id="window-controls">
+    <button class="win-btn" id="win-minimize" title="Réduire">─</button>
+    <button class="win-btn" id="win-maximize" title="Agrandir">□</button>
+    <button class="win-btn close-btn" id="win-close" title="Fermer">✕</button>
+  </div>
+</div>
 
-<!-- Layout principal -->
+<!-- Layout principal 3 colonnes -->
 <div id="app-layout">
 
-  <!-- Sidebar -->
+  <!-- ═══ SIDEBAR GAUCHE ═══ -->
   <aside id="sidebar">
-    <!-- Logo + statut -->
-    <div id="sidebar-header">
-      <div id="aria-logo" class="logo-idle">
-        <svg viewBox="0 0 64 64" width="44" height="44">
-          <defs>
-            <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#6C8EFF"/>
-              <stop offset="100%" stop-color="#A78BFA"/>
-            </linearGradient>
-            <linearGradient id="scanGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stop-color="rgba(108,142,255,0)"/>
-              <stop offset="50%" stop-color="rgba(108,142,255,0.9)"/>
-              <stop offset="100%" stop-color="rgba(108,142,255,0)"/>
-            </linearGradient>
-          </defs>
-          <g class="logo-ticks">
-            <line x1="32" y1="2" x2="32" y2="6" class="tick" style="--i:0"/>
-            <line x1="32" y1="58" x2="32" y2="62" class="tick" style="--i:1"/>
-            <line x1="2" y1="32" x2="6" y2="32" class="tick" style="--i:2"/>
-            <line x1="58" y1="32" x2="62" y2="32" class="tick" style="--i:3"/>
-            <line x1="11" y1="11" x2="14" y2="14" class="tick" style="--i:4"/>
-            <line x1="53" y1="11" x2="50" y2="14" class="tick" style="--i:5"/>
-            <line x1="11" y1="53" x2="14" y2="50" class="tick" style="--i:6"/>
-            <line x1="53" y1="53" x2="50" y2="50" class="tick" style="--i:7"/>
-          </g>
-          <circle class="logo-scan" cx="32" cy="32" r="29" fill="none" stroke="url(#scanGrad)" stroke-width="2" stroke-dasharray="15 200" stroke-linecap="round"/>
-          <circle class="logo-arc logo-arc-1" cx="32" cy="32" r="29" fill="none" stroke="url(#logoGrad)" stroke-width="1.5" stroke-dasharray="100 82" stroke-linecap="round"/>
-          <circle class="logo-arc logo-arc-2" cx="32" cy="32" r="23" fill="none" stroke="rgba(108,142,255,0.5)" stroke-width="1.5" stroke-dasharray="70 75" stroke-linecap="round"/>
-          <circle class="logo-arc logo-arc-3" cx="32" cy="32" r="17" fill="none" stroke="rgba(167,139,250,0.4)" stroke-width="1" stroke-dasharray="50 56" stroke-linecap="round"/>
-          <circle class="logo-core" cx="32" cy="32" r="9" fill="url(#logoGrad)"/>
-          <path class="logo-mark" d="M32 26 L37 38 L34 38 L32.5 34 L31.5 34 L30 38 L27 38 Z" fill="rgba(12,12,15,0.9)"/>
-        </svg>
+
+    <!-- Logo + nom -->
+    <div id="sidebar-brand">
+      <div id="sidebar-logo-wrap">
+        <img src="../assets/icon-128.png"
+             srcset="../assets/icon-128.png 1x, ../assets/icon-256.png 2x"
+             id="sidebar-logo-img" alt="ARIA">
+        <div class="sidebar-logo-ring sidebar-logo-ring-1"></div>
+        <div class="sidebar-logo-ring sidebar-logo-ring-2"></div>
       </div>
-      <div>
-        <div id="assistant-name">ARIA</div>
-        <div id="status-text">En veille</div>
+      <div id="sidebar-brand-text">
+        <div id="sidebar-title">ARIA</div>
+        <div id="sidebar-subtitle" class="status-idle">En veille</div>
       </div>
     </div>
 
-    <!-- Nouvelle conversation -->
-    <button id="new-conv-btn" onclick="app.newConversation()">
-      + Nouvelle conversation
+    <!-- Navigation -->
+    <nav id="sidebar-nav">
+      <button class="nav-item active" data-page="home" onclick="app.navigate('home')">
+        <span class="nav-icon">🏠</span>
+        <span class="nav-label">Accueil</span>
+      </button>
+      <button class="nav-item" data-page="conversations" onclick="app.navigate('conversations')">
+        <span class="nav-icon">💬</span>
+        <span class="nav-label">Conversations</span>
+        <span class="nav-badge" id="conv-badge"></span>
+      </button>
+      <button class="nav-item" data-page="memory" onclick="app.navigate('memory')">
+        <span class="nav-icon">🧠</span>
+        <span class="nav-label">Mémoire</span>
+      </button>
+      <button class="nav-item" data-page="agents" onclick="app.navigate('agents')">
+        <span class="nav-icon">🤖</span>
+        <span class="nav-label">Agents</span>
+      </button>
+      <button class="nav-item" data-page="routines" onclick="app.navigate('routines')">
+        <span class="nav-icon">⚡</span>
+        <span class="nav-label">Routines</span>
+      </button>
+    </nav>
+
+    <!-- Spacer -->
+    <div style="flex:1"></div>
+
+    <!-- Agent actif -->
+    <div id="active-agent-chip" onclick="app.toggleAgentDropdown()">
+      <span id="agent-chip-icon">🤖</span>
+      <span id="agent-chip-name">ARIA</span>
+      <span style="opacity:0.4;font-size:10px">▾</span>
+    </div>
+    <div id="agent-dropdown" class="hidden"></div>
+
+    <!-- Paramètres -->
+    <button class="nav-item" data-page="settings" onclick="app.navigate('settings')"
+            style="margin-bottom:8px">
+      <span class="nav-icon">⚙️</span>
+      <span class="nav-label">Paramètres</span>
     </button>
 
-    <!-- Liste des conversations -->
-    <div id="conversations-list"></div>
-
-    <!-- Bouton tout supprimer -->
-    <button id="delete-all-btn" onclick="app.deleteAllConversations()">
-      🗑️ Tout supprimer
-    </button>
   </aside>
 
-  <!-- Zone principale -->
+  <!-- ═══ ZONE PRINCIPALE ═══ -->
   <main id="main-area">
 
-    <!-- Header -->
-    <header id="header">
-      <div id="header-left">
-        <span id="conv-title">Nouvelle conversation</span>
+    <!-- Page Accueil -->
+    <div id="page-home" class="page active">
+      <!-- Header -->
+      <div id="home-header">
+        <div id="home-greeting"></div>
+        <div id="home-date"></div>
+        <div id="home-mode-badge" onclick="app.toggleModeMenu()">
+          <span>🔒</span>
+          <span id="home-mode-label">Mode Local</span>
+          <span style="opacity:0.5;font-size:10px">▾</span>
+        </div>
+        <div id="mode-menu" class="hidden">
+          <div onclick="app.setPrivacyMode('local')">🔒 100% Local</div>
+          <div onclick="app.setPrivacyMode('hybrid')">🌐 Hybride (Local + API)</div>
+          <div onclick="app.setPrivacyMode('cloud')">☁️ Cloud uniquement</div>
+        </div>
+        <button id="mic-visual-btn" onclick="app.toggleMic()">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
+            <rect x="9" y="2" width="6" height="13" rx="3" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M5 10a7 7 0 0014 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="12" y1="21" x2="12" y2="17" stroke="currentColor" stroke-width="1.5"/>
+          </svg>
+        </button>
       </div>
-      <div id="header-right">
-        <button id="export-btn" onclick="app.exportConversation()" title="Exporter PDF">📄</button>
-        <button id="settings-btn" onclick="app.toggleSettings()" title="Paramètres">⚙️</button>
-      </div>
-    </header>
 
-    <!-- Zone de messages -->
-    <div id="messages-container">
-      <div id="messages"></div>
+      <!-- Logo animé central -->
+      <div id="home-logo-container">
+        <div id="home-logo" class="logo-idle">
+          <div class="home-logo-rings">
+            <div class="h-ring h-ring-1"></div>
+            <div class="h-ring h-ring-2"></div>
+            <div class="h-ring h-ring-3"></div>
+            <div class="h-ring h-ring-4"></div>
+            <div class="h-scan-line"></div>
+          </div>
+          <img src="../assets/icon-128.png"
+               srcset="../assets/icon-128.png 1x, ../assets/icon-256.png 2x"
+               id="home-logo-img" alt="ARIA">
+          <div id="home-logo-particles"></div>
+        </div>
+        <div id="home-logo-label">
+          <div id="home-hello-text">Bonjour.</div>
+          <div id="home-sub-text">Comment puis-je vous aider aujourd'hui ?</div>
+        </div>
+      </div>
+
+      <!-- Zone messages (visible quand conversation active) -->
+      <div id="home-messages" class="hidden">
+        <div id="messages"></div>
+      </div>
+
+      <!-- Zone de saisie -->
+      <div id="input-area">
+        <div id="input-zone">
+          <label id="attach-btn" title="Joindre un fichier">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"
+                stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <input type="file" id="file-input" multiple style="display:none"
+              onchange="app.handleFiles(this.files)">
+          </label>
+
+          <textarea
+            id="text-input"
+            placeholder="Demandez à ARIA..."
+            rows="1"
+            onkeydown="app.handleInputKeydown(event)"
+            oninput="app.adjustTextarea(this)">
+          </textarea>
+
+          <!-- Sélecteur d'agent dans l'input -->
+          <div id="input-agent-selector" onclick="app.toggleAgentDropdown()">
+            <span id="input-agent-icon">🤖</span>
+            <span id="input-agent-name">Assistant</span>
+            <span style="opacity:0.4;font-size:9px">▾</span>
+          </div>
+
+          <!-- Bouton micro -->
+          <div id="mic-btn-wrap">
+            <div class="mic-ring" id="mic-ring-1"></div>
+            <div class="mic-ring" id="mic-ring-2"></div>
+            <button id="mic-btn" onclick="app.toggleMic()" class="mic-idle">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
+                <rect x="9" y="2" width="6" height="13" rx="3" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M5 10a7 7 0 0014 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <line x1="12" y1="21" x2="12" y2="17" stroke="currentColor" stroke-width="1.5"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <!-- Zone de saisie -->
-    <div id="input-area">
-      <div id="input-zone">
-        <!-- Bouton micro -->
-        <div id="mic-orb-container">
-          <div class="mic-ring" id="mic-ring-1"></div>
-          <div class="mic-ring" id="mic-ring-2"></div>
-          <div class="mic-ring" id="mic-ring-3"></div>
-          <button id="mic-btn" onclick="app.toggleMic()" class="mic-idle" title="Micro (activer/désactiver)">
-            🎤
-          </button>
+    <!-- Page Conversations -->
+    <div id="page-conversations" class="page hidden">
+      <div id="conv-page-header">
+        <div style="font-size:18px;font-weight:700;color:var(--text)">Conversations</div>
+        <button onclick="app.newConversation()" class="page-action-btn">+ Nouvelle</button>
+      </div>
+      <div id="conv-list-full"></div>
+    </div>
+
+    <!-- Page Mémoire -->
+    <div id="page-memory" class="page hidden">
+      <div id="memory-page-header">
+        <div style="font-size:18px;font-weight:700;color:var(--text)">Mémoire ARIA</div>
+        <div style="font-size:12px;color:var(--text3)" id="memory-stats-label"></div>
+      </div>
+      <div id="memory-content"></div>
+    </div>
+
+    <!-- Page Agents -->
+    <div id="page-agents" class="page hidden">
+      <div style="padding:24px">
+        <div style="font-size:18px;font-weight:700;color:var(--text);margin-bottom:16px">
+          Agents IA
         </div>
+        <div id="agents-page-list"></div>
+        <button onclick="app.openAgentEditor(null)" class="page-action-btn" style="margin-top:12px">
+          + Créer un agent
+        </button>
+      </div>
+    </div>
 
-        <!-- Champ texte -->
-        <textarea
-          id="text-input"
-          placeholder="Message..."
-          rows="1"
-          onkeydown="app.handleInputKeydown(event)"
-          oninput="app.adjustTextarea(this)"
-        ></textarea>
+    <!-- Page Routines -->
+    <div id="page-routines" class="page hidden">
+      <div style="padding:24px">
+        <div style="font-size:18px;font-weight:700;color:var(--text);margin-bottom:16px">
+          Routines
+        </div>
+        <div style="color:var(--text3);font-size:13px">Bientôt disponible</div>
+      </div>
+    </div>
 
-        <!-- Bouton fichier -->
-        <label id="file-btn" title="Joindre des fichiers">
-          📎
-          <input
-            type="file"
-            id="file-input"
-            multiple
-            accept="image/*,video/*,.pdf,.txt,.py,.js,.html,.css,.json,.yaml,.md,.csv"
-            style="display:none"
-            onchange="app.handleFiles(this.files)"
-          >
-        </label>
+    <!-- Page Paramètres -->
+    <div id="page-settings" class="page hidden">
+      <div id="settings-page-content">
+        <!-- Contenu des paramètres (accordéons) -->
+        <div id="settings-header-bar">
+          <div style="font-size:18px;font-weight:700;color:var(--text)">Paramètres</div>
+        </div>
+        <div id="settings-accordions">
+          <!-- Apparence -->
+          <div class="settings-accordion open" id="acc-apparence">
+            <div class="acc-header" onclick="app.toggleAccordion('apparence')">
+              🎨 Apparence <span class="acc-chevron">▾</span>
+            </div>
+            <div class="acc-body">
+              <div class="setting-row">
+                <label>Thème</label>
+                <div class="theme-pills">
+                  <button onclick="app.setTheme('slate')" class="theme-pill active" data-theme="slate">Slate</button>
+                  <button onclick="app.setTheme('warm')" class="theme-pill" data-theme="warm">Warm</button>
+                  <button onclick="app.setTheme('forest')" class="theme-pill" data-theme="forest">Forest</button>
+                  <button onclick="app.setTheme('rose')" class="theme-pill" data-theme="rose">Rose</button>
+                </div>
+              </div>
+              <div class="setting-row">
+                <label>Transparence</label>
+                <input type="range" id="set-glass" min="0" max="100" value="60"
+                  oninput="app.setGlassIntensity(this.value)">
+              </div>
+              <div class="setting-label">Fond d'écran</div>
+              <div class="wallpaper-presets">
+                <div class="wp-thumb wp-aurora" onclick="app.setWallpaper('aurora')"></div>
+                <div class="wp-thumb wp-sunset" onclick="app.setWallpaper('sunset')"></div>
+                <div class="wp-thumb wp-midnight" onclick="app.setWallpaper('midnight')"></div>
+                <div class="wp-thumb wp-forest" onclick="app.setWallpaper('forest')"></div>
+                <div class="wp-thumb wp-mesh" onclick="app.setWallpaper('mesh')"></div>
+                <div class="wp-thumb wp-mono" onclick="app.setWallpaper('mono')"></div>
+              </div>
+              <div id="wallpaper-custom-grid"></div>
+              <label class="settings-btn-outline">
+                📷 Importer
+                <input type="file" accept="image/*" style="display:none"
+                  onchange="app.uploadWallpaper(this.files[0]);this.value=''">
+              </label>
+              <button class="settings-validate-btn" onclick="app.validateSection('apparence')">✓ Appliquer</button>
+            </div>
+          </div>
 
-        <!-- Bouton envoyer -->
-        <button id="send-btn" onclick="app.sendMessage()" title="Envoyer">➤</button>
+          <!-- Salutation personnalisable -->
+          <div class="settings-accordion" id="acc-greeting">
+            <div class="acc-header" onclick="app.toggleAccordion('greeting')">
+              👋 Salutation <span class="acc-chevron">▸</span>
+            </div>
+            <div class="acc-body hidden">
+              <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
+                <label>Prénom affiché</label>
+                <input type="text" id="set-firstname" placeholder="Mathis"
+                  class="agent-input" style="width:100%"
+                  onchange="app.saveSetting('user_firstname', this.value)">
+              </div>
+              <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
+                <label>Texte de bienvenue</label>
+                <input type="text" id="set-hello-text" placeholder="Bonjour."
+                  class="agent-input" style="width:100%"
+                  onchange="app.saveSetting('hello_text', this.value)">
+              </div>
+              <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
+                <label>Sous-texte</label>
+                <input type="text" id="set-sub-text"
+                  placeholder="Comment puis-je vous aider aujourd'hui ?"
+                  class="agent-input" style="width:100%"
+                  onchange="app.saveSetting('sub_text', this.value)">
+              </div>
+              <button class="settings-validate-btn" onclick="app.applyGreeting()">✓ Appliquer</button>
+            </div>
+          </div>
+
+          <!-- Voix -->
+          <div class="settings-accordion" id="acc-voix">
+            <div class="acc-header" onclick="app.toggleAccordion('voix')">🎙️ Voix <span class="acc-chevron">▸</span></div>
+            <div class="acc-body hidden">
+              <div class="setting-row">
+                <label>TTS activé</label>
+                <input type="checkbox" id="set-tts" onchange="app.saveSetting('tts_enabled', this.checked)">
+              </div>
+              <div class="setting-row">
+                <label>Vitesse</label>
+                <input type="range" id="set-tts-rate" min="-50" max="50" value="0"
+                  oninput="app.saveSetting('tts_rate', parseInt(this.value))">
+              </div>
+              <button class="settings-validate-btn" onclick="app.validateSection('voix')">✓ Appliquer</button>
+            </div>
+          </div>
+
+          <!-- Modèles IA -->
+          <div class="settings-accordion" id="acc-modeles">
+            <div class="acc-header" onclick="app.toggleAccordion('modeles')">🤖 Modèles IA <span class="acc-chevron">▸</span></div>
+            <div class="acc-body hidden">
+              <div id="model-settings"><div class="loading-text">Cliquer pour charger...</div></div>
+              <button class="settings-btn-outline" onclick="app.loadModelSettings()" style="margin-top:8px">🔄 Rafraîchir</button>
+            </div>
+          </div>
+
+          <!-- Clés API -->
+          <div class="settings-accordion" id="acc-apikeys">
+            <div class="acc-header" onclick="app.toggleAccordion('apikeys')">🔑 Clés API <span class="acc-chevron">▸</span></div>
+            <div class="acc-body hidden">
+              <div style="font-size:11px;color:var(--text3);margin-bottom:10px;line-height:1.5">
+                Connecte des IAs externes en complément des modèles locaux.
+              </div>
+              <div id="api-keys-list"></div>
+            </div>
+          </div>
+
+          <!-- Micro -->
+          <div class="settings-accordion" id="acc-micro">
+            <div class="acc-header" onclick="app.toggleAccordion('micro')">🎤 Micro <span class="acc-chevron">▸</span></div>
+            <div class="acc-body hidden">
+              <div class="setting-row">
+                <label>Device index</label>
+                <input type="number" id="set-device-index" placeholder="auto"
+                  class="agent-input" style="width:70px"
+                  onchange="app.saveSetting('stt.device_index', parseInt(this.value) || null)">
+              </div>
+              <div class="setting-row">
+                <label>Modèle Whisper</label>
+                <select id="set-whisper-model" class="agent-select"
+                  onchange="app.saveSetting('stt.model', this.value)">
+                  <option value="tiny">Tiny</option>
+                  <option value="base">Base</option>
+                  <option value="small" selected>Small ★</option>
+                  <option value="medium">Medium</option>
+                </select>
+              </div>
+              <button class="settings-validate-btn" onclick="app.validateSection('micro')">✓ Appliquer</button>
+            </div>
+          </div>
+
+          <!-- Système -->
+          <div class="settings-accordion" id="acc-systeme">
+            <div class="acc-header" onclick="app.toggleAccordion('systeme')">⚙️ Système <span class="acc-chevron">▸</span></div>
+            <div class="acc-body hidden">
+              <div class="setting-row">
+                <label>Tuer Ollama à la fermeture</label>
+                <input type="checkbox" id="set-kill-ollama" checked
+                  onchange="app.saveSetting('kill_ollama_on_exit', this.checked)">
+              </div>
+            </div>
+          </div>
+
+        </div>
       </div>
     </div>
 
   </main>
 
-  <!-- Panneau paramètres -->
-  <aside id="settings-panel" class="hidden">
-    <div id="settings-header">
-      <span>Paramètres</span>
-      <button type="button" id="settings-close-btn">✕</button>
+  <!-- ═══ WIDGETS DROITE ═══ -->
+  <aside id="widgets-panel">
+
+    <!-- Widget Résumé du jour -->
+    <div class="widget" id="widget-summary">
+      <div class="widget-header">
+        <span class="widget-title">Résumé du jour</span>
+        <button class="widget-collapse" onclick="app.toggleWidget('summary')">∧</button>
+      </div>
+      <div class="widget-body" id="widget-summary-body">
+        <div class="widget-row" id="wrow-tasks">
+          <span class="widget-icon">✅</span>
+          <span class="widget-label" id="wlabel-tasks">Chargement...</span>
+          <span class="widget-value" id="wval-tasks"></span>
+        </div>
+        <div class="widget-row" id="wrow-meteo">
+          <span class="widget-icon" id="wicon-meteo">🌡️</span>
+          <span class="widget-label">Météo</span>
+          <span class="widget-value" id="wval-meteo">...</span>
+        </div>
+        <div class="widget-row" id="wrow-battery">
+          <span class="widget-icon">🔋</span>
+          <span class="widget-label">Batterie</span>
+          <span class="widget-value" id="wval-battery">...</span>
+        </div>
+        <div class="widget-row" id="wrow-time">
+          <span class="widget-icon">🕐</span>
+          <span class="widget-label">Heure</span>
+          <span class="widget-value" id="wval-time">...</span>
+        </div>
+      </div>
     </div>
 
-    <div id="settings-content">
-
-      <!-- Apparence -->
-      <div class="settings-accordion open" id="acc-apparence">
-        <div class="acc-header" onclick="app.toggleAccordion('apparence')">
-          🎨 Apparence <span class="acc-chevron">▾</span>
-        </div>
-        <div class="acc-body">
-          <div class="setting-row">
-            <label>Thème</label>
-            <div class="theme-pills">
-              <button onclick="app.setTheme('slate')" class="theme-pill active" data-theme="slate">Slate</button>
-              <button onclick="app.setTheme('warm')" class="theme-pill" data-theme="warm">Warm</button>
-              <button onclick="app.setTheme('forest')" class="theme-pill" data-theme="forest">Forest</button>
-              <button onclick="app.setTheme('rose')" class="theme-pill" data-theme="rose">Rose</button>
-            </div>
-          </div>
-          <div class="setting-row">
-            <label>Transparence</label>
-            <input type="range" id="set-glass" min="0" max="100" value="60"
-              oninput="app.setGlassIntensity(this.value)">
-          </div>
-          <!-- Wallpapers -->
-          <div class="setting-label">Fond d'écran</div>
-          <div class="wallpaper-presets">
-            <div class="wp-thumb wp-aurora" onclick="app.setWallpaper('aurora')" title="Aurora"></div>
-            <div class="wp-thumb wp-sunset" onclick="app.setWallpaper('sunset')" title="Sunset"></div>
-            <div class="wp-thumb wp-midnight" onclick="app.setWallpaper('midnight')" title="Midnight"></div>
-            <div class="wp-thumb wp-forest" onclick="app.setWallpaper('forest')" title="Forest"></div>
-            <div class="wp-thumb wp-mesh" onclick="app.setWallpaper('mesh')" title="Mesh"></div>
-            <div class="wp-thumb wp-mono" onclick="app.setWallpaper('mono')" title="Mono"></div>
-          </div>
-          <div id="wallpaper-custom-grid"></div>
-          <label class="settings-btn-outline">
-            📷 Importer une image
-            <input type="file" accept="image/*" style="display:none"
-              onchange="app.uploadWallpaper(this.files[0]);this.value=''">
-          </label>
-        </div>
+    <!-- Widget Mémoire ARIA -->
+    <div class="widget" id="widget-memory">
+      <div class="widget-header">
+        <span class="widget-title">Mémoire</span>
+        <button class="widget-collapse" onclick="app.toggleWidget('memory')">∧</button>
       </div>
-
-      <!-- Voix -->
-      <div class="settings-accordion" id="acc-voix">
-        <div class="acc-header" onclick="app.toggleAccordion('voix')">
-          🎙️ Voix <span class="acc-chevron">▸</span>
-        </div>
-        <div class="acc-body hidden">
-          <div class="setting-row">
-            <label>TTS activé</label>
-            <input type="checkbox" id="set-tts" onchange="app.saveSetting('tts_enabled', this.checked)">
-          </div>
-          <div class="setting-row">
-            <label>Vitesse</label>
-            <input type="range" id="set-tts-rate" min="-50" max="50" value="0"
-              oninput="app.saveSetting('tts_rate', parseInt(this.value))">
+      <div class="widget-body" id="widget-memory-body">
+        <div id="memory-donut-container">
+          <canvas id="memory-donut" width="100" height="100"></canvas>
+          <div id="memory-donut-label">
+            <div id="memory-pct">...</div>
+            <div style="font-size:9px;color:var(--text3)">Utilisée</div>
           </div>
         </div>
+        <div id="memory-details">
+          <div class="mem-row">
+            <span>Conversations</span>
+            <span id="mem-convs">...</span>
+          </div>
+          <div class="mem-row">
+            <span>Messages</span>
+            <span id="mem-msgs">...</span>
+          </div>
+          <div class="mem-row">
+            <span>Sessions</span>
+            <span id="mem-sessions">...</span>
+          </div>
+        </div>
+        <button class="widget-action-btn" onclick="app.navigate('memory')">
+          Explorer la mémoire
+        </button>
       </div>
-
-      <!-- Modèles IA -->
-      <div class="settings-accordion" id="acc-modeles">
-        <div class="acc-header" onclick="app.toggleAccordion('modeles')">
-          🤖 Modèles IA <span class="acc-chevron">▸</span>
-        </div>
-        <div class="acc-body hidden">
-          <div id="model-settings">
-            <div class="loading-text">Cliquer pour charger...</div>
-          </div>
-          <button class="settings-btn-outline" onclick="app.loadModelSettings()" style="margin-top:8px">
-            🔄 Rafraîchir
-          </button>
-        </div>
-      </div>
-
-      <!-- Micro -->
-      <div class="settings-accordion" id="acc-micro">
-        <div class="acc-header" onclick="app.toggleAccordion('micro')">
-          🎤 Micro <span class="acc-chevron">▸</span>
-        </div>
-        <div class="acc-body hidden">
-          <div class="setting-row">
-            <label>Device index</label>
-            <input type="number" id="set-device-index" placeholder="auto"
-              onchange="app.saveSetting('stt.device_index', parseInt(this.value) || null)">
-          </div>
-          <div class="setting-row">
-            <label>Modèle Whisper</label>
-            <select id="set-whisper-model" onchange="app.saveSetting('stt.model', this.value)">
-              <option value="tiny">Tiny (rapide)</option>
-              <option value="base">Base</option>
-              <option value="small" selected>Small ★</option>
-              <option value="medium">Medium (précis)</option>
-            </select>
-          </div>
-          <button class="settings-btn-outline" onclick="app.runMicDiagnostic()">
-            🔍 Diagnostiquer le micro
-          </button>
-        </div>
-      </div>
-
-      <!-- Système -->
-      <div class="settings-accordion" id="acc-systeme">
-        <div class="acc-header" onclick="app.toggleAccordion('systeme')">
-          ⚙️ Système <span class="acc-chevron">▸</span>
-        </div>
-        <div class="acc-body hidden">
-          <div class="setting-row">
-            <label>Brief quotidien</label>
-            <input type="checkbox" id="set-daily-brief"
-              onchange="app.saveSetting('daily_brief_enabled', this.checked)">
-          </div>
-          <div class="setting-row">
-            <label>Tuer Ollama à la fermeture</label>
-            <input type="checkbox" id="set-kill-ollama" checked
-              onchange="app.saveSetting('kill_ollama_on_exit', this.checked)">
-          </div>
-          <div class="nexus-status">
-            <span>Nexus (code)</span>
-            <span id="nexus-badge">Non configuré</span>
-          </div>
-        </div>
-      </div>
-
     </div>
+
+    <!-- Widget Raccourcis -->
+    <div class="widget" id="widget-shortcuts">
+      <div class="widget-header">
+        <span class="widget-title">Raccourcis</span>
+        <button class="widget-collapse" onclick="app.toggleWidget('shortcuts')">∧</button>
+      </div>
+      <div class="widget-body" id="widget-shortcuts-body">
+        <div id="shortcuts-grid">
+          <!-- Générés dynamiquement depuis les presets -->
+        </div>
+      </div>
+    </div>
+
   </aside>
 
 </div>
 
-<!-- Modal sélection mode -->
-<div id="mode-select-overlay" class="modal-overlay hidden">
+<!-- Modals -->
+<div id="mode-select-overlay" class="hidden">
   <div id="mode-select-card">
-    <div id="mode-select-logo"><!-- Logo SVG mini --></div>
-    <div id="mode-select-title">Comment veux-tu échanger ?</div>
-    <div id="mode-select-buttons">
-      <button type="button" data-mode="ecrit" class="mode-select-btn">
-        <span>💬</span>
-        <span>Écrit</span>
+    <div id="msc-logo">
+      <img src="../assets/icon-128.png"
+           srcset="../assets/icon-128.png 1x, ../assets/icon-256.png 2x"
+           width="64" height="64" style="border-radius:16px" alt="ARIA">
+    </div>
+    <div id="msc-title">Comment veux-tu échanger ?</div>
+    <div>
+      <button data-mode="ecrit">
+        <span>💬</span><span>Écrit</span>
       </button>
-      <button type="button" data-mode="vocal" class="mode-select-btn">
-        <span>🎙️</span>
-        <span>Vocal</span>
+      <button data-mode="vocal">
+        <span>🎙️</span><span>Vocal</span>
       </button>
     </div>
   </div>
 </div>
+
+<div id="agent-editor-modal" class="modal-overlay hidden"></div>
 
 <!-- Toast container -->
 <div id="toast-container"></div>
