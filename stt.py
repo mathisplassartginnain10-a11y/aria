@@ -253,6 +253,12 @@ def _chunk_rms(flat: np.ndarray) -> float:
     return _float_rms(flat)
 
 
+def _maybe_update_waveform(level: float) -> None:
+    """Émet la waveform UI uniquement en mode debug STT."""
+    if STT_DEBUG:
+        ui.update_waveform(level)
+
+
 def _waveform_level(flat: np.ndarray) -> float:
     """Niveau normalisé 0–1 pour l'UI (orbe / bouton micro)."""
     return _float_rms(flat)
@@ -1047,7 +1053,7 @@ def _record_loop_realtime() -> None:
             with _rms_lock:
                 _current_rms = _waveform_level(flat)
             if frame_count % 4 == 0:
-                ui.update_waveform(_waveform_level(flat))
+                _maybe_update_waveform(_waveform_level(flat))
             frame_count += 1
 
             if rms > threshold:
@@ -1195,7 +1201,7 @@ def _record_loop() -> None:
                 with _rms_lock:
                     _current_rms = 0.0
                 if frame_count % 4 == 0:
-                    ui.update_waveform(0.0)
+                    _maybe_update_waveform(0.0)
                 frame_count += 1
                 continue
 
@@ -1204,8 +1210,8 @@ def _record_loop() -> None:
                 _current_rms = _waveform_level(flat)
 
             if frame_count % 4 == 0:
-                ui.update_waveform(_waveform_level(flat))
-            if frame_count % 20 == 0:
+                _maybe_update_waveform(_waveform_level(flat))
+            if frame_count % 20 == 0 and STT_DEBUG:
                 logger.debug(
                     "RMS courant=%.4f seuil=%.4f speaking=%s",
                     rms, threshold, speaking,

@@ -34,6 +34,27 @@ const state = {
   _generating: false,
 };
 
+/** Logo ARIA — URL file:// exposée par preload.js (Electron) */
+function getIconUrl() {
+  if (window.ARIA_ASSETS?.iconUrl) return window.ARIA_ASSETS.iconUrl;
+  if (window.ARIA_ICON_URL) return window.ARIA_ICON_URL;
+  return '../assets/icon.png';
+}
+
+function applyAriaIconUrls() {
+  const url = getIconUrl();
+  if (!url || url.includes('../assets/')) return;
+  document.querySelectorAll('img[src*="icon.png"], img[src*="assets/icon"]').forEach((img) => {
+    img.src = url;
+  });
+}
+
+function ariaAvatarHtml(size = 28) {
+  const radius = size >= 64 ? 16 : 8;
+  return `<img src="${getIconUrl()}" alt="ARIA"
+    style="width:${size}px;height:${size}px;border-radius:${radius}px;object-fit:cover">`;
+}
+
 const AGENT_COLORS = [
   '#6C8EFF', '#4ADE80', '#F59E0B', '#F87171',
   '#A78BFA', '#34D399', '#FB923C', '#60A5FA',
@@ -510,19 +531,19 @@ function addUserBubble(text, scroll = true) {
   if (scroll) scrollToBottom();
 }
 
-function addAriaBubble(text, scroll = true) {
+function addAriaBubble(text, scroll = true, modelName = '') {
   const messages = document.getElementById('messages');
   const div = document.createElement('div');
-  div.className = 'bubble-wrap aria-wrap';
+  div.className = 'bubble-wrap-outer';
   div.innerHTML = `
-    <div class="bubble-avatar">
-      <svg viewBox="0 0 24 24" width="20" height="20">
-        <circle cx="12" cy="12" r="5" fill="url(#logoGrad)"/>
-        <circle cx="12" cy="12" r="9" fill="none" stroke="rgba(108,142,255,0.4)" stroke-width="1"/>
-      </svg>
-    </div>
-    <div class="bubble bubble-aria">
-      <div class="bubble-text">${renderMarkdown(text)}</div>
+    ${modelName ? `<div class="model-badge">via ${esc(modelName)}</div>` : ''}
+    <div class="bubble-wrap aria-wrap">
+      <div class="bubble-avatar">
+        ${ariaAvatarHtml(28)}
+      </div>
+      <div class="bubble bubble-aria">
+        <div class="bubble-text">${renderMarkdown(text)}</div>
+      </div>
     </div>`;
   messages.appendChild(div);
   if (scroll) scrollToBottom();
@@ -539,10 +560,7 @@ function appendStreamToken(token) {
     div.className = 'bubble-wrap aria-wrap';
     div.innerHTML = `
       <div class="bubble-avatar">
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <circle cx="12" cy="12" r="5" fill="url(#logoGrad)"/>
-          <circle cx="12" cy="12" r="9" fill="none" stroke="rgba(108,142,255,0.4)" stroke-width="1"/>
-        </svg>
+        ${ariaAvatarHtml(28)}
       </div>
       <div class="bubble bubble-aria">
         <div class="bubble-text streaming-text"></div>
@@ -593,10 +611,7 @@ function showThinkingBubble(modelName = '', action = '') {
   div.className = 'bubble-wrap aria-wrap thinking-wrap';
   div.innerHTML = `
     <div class="bubble-avatar">
-      <svg viewBox="0 0 24 24" width="20" height="20">
-        <circle cx="12" cy="12" r="5" fill="url(#logoGrad)"/>
-        <circle cx="12" cy="12" r="9" fill="none" stroke="rgba(108,142,255,0.4)" stroke-width="1"/>
-      </svg>
+      ${ariaAvatarHtml(28)}
     </div>
     <div class="thinking-content">
       ${modelName ? `<div class="model-label">${esc(modelName)}</div>` : ''}
@@ -3055,6 +3070,7 @@ function exposeGlobalApp() {
 }
 
 function boot() {
+  applyAriaIconUrls();
   cleanupBlockingOverlays();
   bindTitleBarButtons();
   bindMainUiButtons();

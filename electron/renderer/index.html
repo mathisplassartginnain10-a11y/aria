@@ -38,9 +38,12 @@
     <!-- Logo + nom -->
     <div id="sidebar-brand">
       <div id="sidebar-logo-wrap" class="sidebar-orbe-wrap">
-        <div class="sidebar-orbe-core"><span>A</span></div>
-        <div class="sidebar-orbe-ring sidebar-orbe-ring-1"></div>
-        <div class="sidebar-orbe-ring sidebar-orbe-ring-2"></div>
+        <img src="../assets/icon.png" id="sidebar-logo-img" alt="ARIA"
+          style="width:40px;height:40px;border-radius:10px;object-fit:cover;
+                 position:relative;z-index:2;
+                 box-shadow:0 0 12px rgba(80,120,255,0.5),0 0 30px rgba(60,100,220,0.3)">
+        <div class="sidebar-logo-ring sidebar-orbe-ring sidebar-orbe-ring-1 lr1"></div>
+        <div class="sidebar-logo-ring sidebar-orbe-ring sidebar-orbe-ring-2 lr2"></div>
       </div>
       <div id="sidebar-brand-text">
         <div id="sidebar-title">ARIA</div>
@@ -145,8 +148,10 @@
             <div class="scan scan-violet sc2"></div>
             <div class="scan scan-blue sc1"></div>
             <div class="crosshair cross"></div>
-            <div class="orbe-core core">
-              <img src="../assets/icon.png" alt="ARIA" class="orbe-logo" width="80" height="80">
+            <div class="orbe-core core" id="orbe-core">
+              <img id="orbe-logo-img" src="../assets/icon.png" alt="ARIA"
+                style="width:100%;height:100%;object-fit:cover;border-radius:50%;
+                       filter:brightness(1.05) contrast(1.05)">
             </div>
           </div>
           <div id="home-logo-label">
@@ -606,9 +611,9 @@
 <div id="mode-select-overlay" class="hidden">
   <div id="mode-select-card">
     <div id="msc-logo">
-      <img src="../assets/icon-128.png"
-           srcset="../assets/icon-128.png 1x, ../assets/icon-256.png 2x"
-           width="64" height="64" style="border-radius:16px" alt="ARIA">
+      <img src="../assets/icon.png" alt="ARIA"
+        style="width:64px;height:64px;border-radius:16px;
+               box-shadow:0 0 20px rgba(80,120,255,0.5)">
     </div>
     <div id="msc-title">Comment veux-tu échanger ?</div>
     <div>
@@ -770,5 +775,20 @@
 
 <script src="settings-animations.js"></script>
 <script src="app.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const fixIcons = () => {
+    const url = window.ARIA_ASSETS?.iconUrl || window.ARIA_ICON_URL;
+    if (!url) {
+      setTimeout(fixIcons, 50);
+      return;
+    }
+    document.querySelectorAll('img[src*="icon.png"], img[src*="assets/icon"]').forEach((img) => {
+      img.src = url;
+    });
+  };
+  fixIcons();
+});
+</script>
 </body>
 </html>

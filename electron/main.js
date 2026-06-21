@@ -5,6 +5,7 @@
 
 const { app, BrowserWindow, Tray, Menu, ipcMain, shell, screen, dialog, nativeImage } = require('electron');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const os = require('os');
 const { spawn } = require('child_process');
 const WebSocket = require('ws');
@@ -18,6 +19,43 @@ const PYTHON_BACKEND = path.join(__dirname, '..', 'python', 'main.py');
 const PYTHON_EXE = process.platform === 'win32'
   ? path.join(__dirname, '..', '.venv', 'Scripts', 'python.exe')
   : path.join(__dirname, '..', '.venv', 'bin', 'python3');
+
+const APP_ICON_PNG = path.join(__dirname, 'assets', 'icon.png');
+const APP_ICON_ICO = path.join(__dirname, 'assets', 'icon.ico');
+const TRAY_ICON_PNG = path.join(__dirname, 'assets', 'tray-icon.png');
+
+function resolveAppIcon() {
+  if (process.platform === 'win32' && fs.existsSync(APP_ICON_ICO)) {
+    return APP_ICON_ICO;
+  }
+  return APP_ICON_PNG;
+}
+
+function resolveTrayIcon() {
+  if (fs.existsSync(TRAY_ICON_PNG)) {
+    return TRAY_ICON_PNG;
+  }
+  if (fs.existsSync(APP_ICON_PNG)) {
+    return APP_ICON_PNG;
+  }
+  return APP_ICON_ICO;
+}
+
+function getIconFileUrl() {
+  return pathToFileURL(APP_ICON_PNG).href;
+}
+
+function injectRendererIconUrls(webContents) {
+  const iconUrl = getIconFileUrl();
+  const assetsPath = pathToFileURL(path.join(__dirname, 'assets')).href;
+  return webContents.executeJavaScript(`
+    window.ARIA_ICON_URL = ${JSON.stringify(iconUrl)};
+    window.ARIA_ASSETS_PATH = ${JSON.stringify(assetsPath)};
+    document.querySelectorAll('img[src*="icon.png"], img[src*="assets/icon"]').forEach(img => {
+      img.src = window.ARIA_ICON_URL;
+    });
+  `);
+}
 
 // ── État global ───────────────────────────────────────────────────────────────
 
@@ -219,6 +257,9 @@ function createSplashWindow() {
     webPreferences: { contextIsolation: true },
   });
   splashWindow.loadFile(path.join(__dirname, 'renderer', 'splash.html'));
+  splashWindow.webContents.on('did-finish-load', () => {
+    injectRendererIconUrls(splashWindow.webContents).catch(() => {});
+  });
   splashWindow.once('ready-to-show', () => splashWindow.show());
 }
 
@@ -249,6 +290,7 @@ function closeSplash() {
 function createWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width, height } = primaryDisplay.workAreaSize;
+  const iconPath = resolveAppIcon();
 
   mainWindow = new BrowserWindow({
     width: width,
@@ -267,11 +309,15 @@ function createWindow() {
       sandbox: false,
       webSecurity: true,
     },
-    icon: path.join(__dirname, 'assets', 'icon.png'),
+    icon: iconPath,
     show: false,
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    injectRendererIconUrls(mainWindow.webContents).catch(() => {});
+  });
 
   mainWindow.once('ready-to-show', () => {
     if (process.env.ARIA_DEV) {
@@ -333,10 +379,13 @@ function showMainWindow() {
 }
 
 function createTray() {
-  const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+  const iconPath = resolveTrayIcon();
   let trayIcon = nativeImage.createFromPath(iconPath);
   if (trayIcon.isEmpty()) {
-    console.warn('[Electron] Tray icon missing:', iconPath);
+    console.warn('[Electron] Tray icon missing or invalid:', iconPath);
+    trayIcon = nativeImage.createFromPath(APP_ICON_PNG);
+  }
+  if (trayIcon.isEmpty()) {
     trayIcon = nativeImage.createEmpty();
   }
   tray = new Tray(trayIcon);
@@ -373,6 +422,9 @@ function sendToPython(action, args = [], kwargs = {}) {
 // ── Cycle de vie de l'application ─────────────────────────────────────────────
 
 app.whenReady().then(() => {
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.aria.assistant');
+  }
   try { fs.unlinkSync(PORT_FILE); } catch (e) {}
   createSplashWindow();
   createWindow();

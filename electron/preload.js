@@ -4,6 +4,20 @@
  */
 
 const { contextBridge, ipcRenderer } = require('electron');
+const path = require('path');
+const { pathToFileURL } = require('url');
+
+const assetsDir = path.join(__dirname, 'assets');
+const iconPath = path.join(assetsDir, 'icon.png');
+const iconUrl = pathToFileURL(iconPath).href;
+const assetsDirUrl = pathToFileURL(assetsDir).href;
+
+contextBridge.exposeInMainWorld('ARIA_ASSETS', {
+  iconUrl,
+  assetsDir: assetsDirUrl,
+});
+
+contextBridge.exposeInMainWorld('ARIA_ICON_URL', iconUrl);
 
 // Compteur pour générer des IDs de requête uniques
 let reqCounter = 0;

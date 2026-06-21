@@ -244,86 +244,118 @@ body {
   padding: 8px 8px 16px;
 }
 
-/* Sidebar orbe (42px) */
+/* Sidebar orbe (40px) */
 .sidebar-orbe-wrap,
 #sidebar-logo-wrap {
   position: relative;
-  width: 42px; height: 42px;
+  width: 40px;
+  height: 40px;
   flex-shrink: 0;
 }
 
-.sidebar-orbe-core {
-  width: 42px; height: 42px;
-  border-radius: 50%;
-  border: 1.5px solid var(--border-logo);
-  background: radial-gradient(circle, #3040c0 0%, #1020a0 100%);
-  display: flex; align-items: center; justify-content: center;
-  position: relative; z-index: 2;
-  box-shadow: var(--glow-logo);
+#sidebar-logo-img {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  object-fit: cover;
+  position: relative;
+  z-index: 2;
+  box-shadow: 0 0 12px rgba(80, 120, 255, 0.5), 0 0 30px rgba(60, 100, 220, 0.3);
   transition: box-shadow 0.4s, transform 0.4s;
+  display: block;
 }
 
-.sidebar-orbe-core span {
-  font-size: 16px; font-weight: 900; color: white;
-  text-shadow: 0 0 8px rgba(255,255,255,0.6);
-}
-
+.sidebar-logo-ring,
 .sidebar-orbe-ring {
   position: absolute;
   border-radius: 50%;
-  border: 1px solid rgba(108,142,255,0.3);
+  border: 1px solid rgba(108, 142, 255, 0.3);
   pointer-events: none;
+  z-index: 1;
   opacity: 0;
   transition: opacity 0.4s;
 }
 
-.sidebar-orbe-ring-1 { inset: -4px; animation: orbRotate 8s linear infinite; }
-.sidebar-orbe-ring-2 { inset: -9px; animation: orbRotate 12s linear infinite reverse; }
+.lr1,
+.sidebar-orbe-ring-1 {
+  inset: -5px;
+  animation: lrot 8s linear infinite;
+}
+
+.lr2,
+.sidebar-orbe-ring-2 {
+  inset: -10px;
+  border-color: rgba(167, 139, 250, 0.2);
+  animation: lrot 14s linear infinite reverse;
+}
+
+@keyframes lrot {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
 
 /* États sidebar orbe (logo-* pour app.js, orbe-* pour settings-animations) */
 #sidebar-logo-wrap.logo-idle .sidebar-orbe-ring-1,
-#sidebar-logo-wrap.orbe-idle .sidebar-orbe-ring-1 { opacity: 0.35; }
+#sidebar-logo-wrap.logo-idle .lr1,
+#sidebar-logo-wrap.orbe-idle .sidebar-orbe-ring-1,
+#sidebar-logo-wrap.orbe-idle .lr1 { opacity: 0.35; }
 
 #sidebar-logo-wrap.logo-idle .sidebar-orbe-ring-2,
-#sidebar-logo-wrap.orbe-idle .sidebar-orbe-ring-2 { opacity: 0.2; }
+#sidebar-logo-wrap.logo-idle .lr2,
+#sidebar-logo-wrap.orbe-idle .sidebar-orbe-ring-2,
+#sidebar-logo-wrap.orbe-idle .lr2 { opacity: 0.2; }
 
 #sidebar-logo-wrap.logo-listening .sidebar-orbe-ring-1,
 #sidebar-logo-wrap.logo-listening .sidebar-orbe-ring-2,
+#sidebar-logo-wrap.logo-listening .lr1,
+#sidebar-logo-wrap.logo-listening .lr2,
 #sidebar-logo-wrap.orbe-listening .sidebar-orbe-ring-1,
-#sidebar-logo-wrap.orbe-listening .sidebar-orbe-ring-2 { opacity: 1; }
+#sidebar-logo-wrap.orbe-listening .sidebar-orbe-ring-2,
+#sidebar-logo-wrap.orbe-listening .lr1,
+#sidebar-logo-wrap.orbe-listening .lr2 { opacity: 1; }
 
-#sidebar-logo-wrap.logo-listening .sidebar-orbe-core,
-#sidebar-logo-wrap.orbe-listening .sidebar-orbe-core {
-  box-shadow: 0 0 12px rgba(74,222,128,0.6);
+#sidebar-logo-wrap.logo-listening #sidebar-logo-img,
+#sidebar-logo-wrap.orbe-listening #sidebar-logo-img {
+  box-shadow: 0 0 12px rgba(74, 222, 128, 0.6);
   animation: coreListenPulse 1.2s ease-in-out infinite;
 }
 
 #sidebar-logo-wrap.logo-thinking .sidebar-orbe-ring-1,
 #sidebar-logo-wrap.logo-thinking .sidebar-orbe-ring-2,
+#sidebar-logo-wrap.logo-thinking .lr1,
+#sidebar-logo-wrap.logo-thinking .lr2,
 #sidebar-logo-wrap.orbe-thinking .sidebar-orbe-ring-1,
-#sidebar-logo-wrap.orbe-thinking .sidebar-orbe-ring-2 { opacity: 1; }
+#sidebar-logo-wrap.orbe-thinking .sidebar-orbe-ring-2,
+#sidebar-logo-wrap.orbe-thinking .lr1,
+#sidebar-logo-wrap.orbe-thinking .lr2 { opacity: 1; }
 
 #sidebar-logo-wrap.logo-thinking .sidebar-orbe-ring-1,
-#sidebar-logo-wrap.orbe-thinking .sidebar-orbe-ring-1 { animation-duration: 2s; }
+#sidebar-logo-wrap.logo-thinking .lr1,
+#sidebar-logo-wrap.orbe-thinking .sidebar-orbe-ring-1,
+#sidebar-logo-wrap.orbe-thinking .lr1 { animation-duration: 2s; }
 
 #sidebar-logo-wrap.logo-thinking .sidebar-orbe-ring-2,
-#sidebar-logo-wrap.orbe-thinking .sidebar-orbe-ring-2 { animation-duration: 3s; }
+#sidebar-logo-wrap.logo-thinking .lr2,
+#sidebar-logo-wrap.orbe-thinking .sidebar-orbe-ring-2,
+#sidebar-logo-wrap.orbe-thinking .lr2 { animation-duration: 3s; }
 
-#sidebar-logo-wrap.logo-thinking .sidebar-orbe-core,
-#sidebar-logo-wrap.orbe-thinking .sidebar-orbe-core {
-  box-shadow: 0 0 14px rgba(167,139,250,0.8);
+#sidebar-logo-wrap.logo-thinking #sidebar-logo-img,
+#sidebar-logo-wrap.orbe-thinking #sidebar-logo-img {
+  box-shadow: 0 0 14px rgba(167, 139, 250, 0.8);
   animation: coreThink 0.6s ease-in-out infinite;
 }
 
 #sidebar-logo-wrap.logo-speaking .sidebar-orbe-ring-1,
-#sidebar-logo-wrap.orbe-speaking .sidebar-orbe-ring-1 {
+#sidebar-logo-wrap.logo-speaking .lr1,
+#sidebar-logo-wrap.orbe-speaking .sidebar-orbe-ring-1,
+#sidebar-logo-wrap.orbe-speaking .lr1 {
   opacity: 1;
-  border-color: rgba(74,222,128,0.6);
+  border-color: rgba(74, 222, 128, 0.6);
 }
 
-#sidebar-logo-wrap.logo-speaking .sidebar-orbe-core,
-#sidebar-logo-wrap.orbe-speaking .sidebar-orbe-core {
-  box-shadow: 0 0 14px rgba(74,222,128,0.9);
+#sidebar-logo-wrap.logo-speaking #sidebar-logo-img,
+#sidebar-logo-wrap.orbe-speaking #sidebar-logo-img {
+  box-shadow: 0 0 14px rgba(74, 222, 128, 0.9);
   animation: coreListenPulse 0.5s ease-in-out infinite;
 }
 
@@ -828,28 +860,24 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(circle,
-    rgba(230,240,255,0.92) 0%,
-    rgba(150,200,255,0.80) 22%,
-    rgba(70,140,255,0.68) 50%,
-    rgba(25,75,225,0.82) 78%,
-    rgba(8,38,190,0.90) 100%);
-  box-shadow:
-    0 0 22px rgba(100,170,255,1.0),
-    0 0 50px rgba(80,150,255,0.72),
-    0 0 90px rgba(55,120,240,0.42),
-    0 0 140px rgba(35,90,220,0.20),
-    inset 0 0 22px rgba(200,220,255,0.28);
-  animation: corePulse 3.2s ease-in-out infinite;
   overflow: hidden;
+  box-shadow:
+    0 0 22px rgba(100, 170, 255, 1.0),
+    0 0 50px rgba(80, 150, 255, 0.72),
+    0 0 90px rgba(55, 120, 240, 0.42),
+    0 0 140px rgba(35, 90, 220, 0.20),
+    inset 0 0 22px rgba(200, 220, 255, 0.28);
+  animation: corePulse 3.2s ease-in-out infinite;
 }
 
-#page-home .orbe-logo {
-  width: 80px;
-  height: 80px;
+#page-home .orbe-core img,
+#page-home .core img {
+  width: 100%;
+  height: 100%;
   object-fit: cover;
   border-radius: 50%;
   filter: brightness(1.05) contrast(1.05);
+  display: block;
 }
 
 @keyframes orbR {
@@ -1443,14 +1471,24 @@ body {
 }
 
 .bubble-avatar {
-  width: 28px; height: 28px;
+  width: 28px;
+  height: 28px;
   border-radius: 8px;
-  background: rgba(108,142,255,0.1);
-  border: 1px solid rgba(108,142,255,0.2);
+  background: rgba(108, 142, 255, 0.1);
+  border: 1px solid rgba(108, 142, 255, 0.2);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+.bubble-avatar img {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  object-fit: cover;
+  display: block;
 }
 
 .cursor-blink {

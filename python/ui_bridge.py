@@ -55,6 +55,24 @@ def expose(func: Callable) -> Callable:
 
 # ── Emission d'événements vers le renderer ───────────────────────────────────
 
+_stt_debug: bool | None = None
+
+
+def _is_stt_debug() -> bool:
+    global _stt_debug
+    if _stt_debug is not None:
+        return _stt_debug
+    try:
+        import yaml
+        import app_paths
+        with app_paths.config_path().open("r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        _stt_debug = bool(cfg.get("stt_debug", False))
+    except Exception:
+        _stt_debug = False
+    return _stt_debug
+
+
 def emit(event_name: str, data: Any = None) -> None:
     """Envoie un événement unilatéral à tous les renderers connectés."""
     if not _connections:
@@ -121,7 +139,9 @@ def show_toast(message: str, toast_type: str = "info") -> None:
 
 
 def update_waveform(rms: float) -> None:
-    """Met à jour l'animation du micro."""
+    """Met à jour l'animation du micro (debug STT uniquement)."""
+    if not _is_stt_debug():
+        return
     emit("waveform", rms)
 
 
