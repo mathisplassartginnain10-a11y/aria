@@ -44,6 +44,7 @@ assistant-vocal.log
 data/aria_lora/
 *.gguf
 *.bin
+voix ia/
 
 # Fichiers système
 .DS_Store
