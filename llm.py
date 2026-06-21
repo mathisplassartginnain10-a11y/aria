@@ -37,6 +37,7 @@ from actions import (
     system,
     timer,
     translator,
+    type_anywhere,
     weather,
     web_search,
 )
@@ -76,7 +77,20 @@ KNOWN_INTENTS = [
     'recherche_web', 'recherche_actualites', 'recherche_wikipedia',
     'recherche_youtube', 'recherche_multi', 'gdoc_create', 'gdoc_write_search',
     'gdoc_open', 'gdoc_status',
+    'gcal_get_events', 'gcal_create_event', 'gmail_read', 'gmail_send',
+    'gdrive_search', 'gdrive_recent', 'gsheets_create', 'gsheets_read',
+    'gdoc_list', 'gdoc_delete', 'gdoc_clear', 'gdoc_rename', 'gdoc_write_text',
+    'gsheets_list', 'gsheets_write', 'gsheets_delete',
+    'gcal_today', 'gcal_delete_event',
+    'gdrive_download', 'gdrive_delete', 'gdrive_create_folder',
+    'gmail_send_quick',
+    'recherche_et_doc', 'recherche_et_sheet', 'cal_add_smart',
+    'gmail_draft', 'gdoc_append_active', 'google_confirm',
 ]
+
+GOOGLE_LLM_MODEL = MODELS["fast"]
+GOOGLE_LLM_MAX_TOKENS = 200
+_pending_action: dict | None = None
 
 MODEL: str = _config.get("model", MODELS["heavy"])
 MODEL_FAST: str = _config.get("model_fast", MODELS["fast"])
@@ -354,6 +368,21 @@ HEAVY_REQUIRED = frozenset({
 })
 SENTENCE_END_RE = re.compile(r"[.!?…]+\s*$")
 _stop_stream = threading.Event()
+
+
+def request_stop() -> None:
+    """Signale l'arrêt de la génération en cours."""
+    _stop_stream.set()
+    logger.info("Génération arrêtée par l'utilisateur")
+
+
+def clear_stop() -> None:
+    """Réinitialise le signal d'arrêt avant une nouvelle génération."""
+    _stop_stream.clear()
+
+
+def is_stop_requested() -> bool:
+    return _stop_stream.is_set()
 _REASONING_RE = re.compile(
     r"\b(explique|expliques?|pourquoi|analyse[rz]?|compare[rz]?|d[ée]montre[rz]?|raisonne|"
     r"r[ée]fl[ée]chi[ts]?|[ée]tape par [ée]tape|r[ée]sou[ds]|r[ée]soudre|calcule[rz]?|prouve|"
@@ -443,7 +472,7 @@ INTENTS = [
     # Existants v2
     "lancer_app", "fermer_app", "volume", "luminosite", "veille", "reboot", "shutdown",
     "actu", "meteo", "minuteur", "alarme", "recherche_web", "git", "calcul",
-    "traduction", "preset", "clipboard_copy", "clipboard_paste", "ouvrir_fichier",
+    "traduction", "preset", "clipboard_copy", "clipboard_paste", "type_text", "ouvrir_fichier",
     "rappel", "question_libre", "blague", "heure_date", "historique", "memoire",
 ]
 
@@ -560,6 +589,183 @@ V20_STREAMING_INTENTS = frozenset({
     "recherche_multi",
 })
 
+GOOGLE_WORKSPACE_INTENTS = frozenset({
+    "gcal_get_events",
+    "gcal_create_event",
+    "gcal_today",
+    "gcal_delete_event",
+    "gmail_read",
+    "gmail_send",
+    "gmail_send_quick",
+    "gdrive_search",
+    "gdrive_recent",
+    "gdrive_download",
+    "gdrive_delete",
+    "gdrive_create_folder",
+    "gsheets_create",
+    "gsheets_read",
+    "gsheets_list",
+    "gsheets_write",
+    "gsheets_delete",
+    "gdoc_list",
+    "gdoc_delete",
+    "gdoc_clear",
+    "gdoc_rename",
+    "gdoc_write_text",
+})
+
+GOOGLE_SMART_INTENTS = frozenset({
+    "recherche_et_doc",
+    "recherche_et_sheet",
+    "cal_add_smart",
+    "gmail_draft",
+    "gdoc_append_active",
+    "google_confirm",
+})
+
+ALL_GOOGLE_INTENTS = GOOGLE_WORKSPACE_INTENTS | frozenset({
+    "gdoc_create",
+    "gdoc_write_search",
+    "gdoc_open",
+    "gdoc_status",
+}) | GOOGLE_SMART_INTENTS
+
+GOOGLE_SMART_PATTERNS: list[tuple[str, str]] = [
+    (
+        r"(?:fais|fait|lance)\s+(?:une\s+)?recherche\s+sur\s+.+\s+(?:et\s+)?"
+        r"(?:écris|ecris|note|mets).*(?:doc|document)",
+        "recherche_et_doc",
+    ),
+    (
+        r"(?:crée|créer|cree)\s+(?:un\s+)?(?:doc\s+(?:de\s+)?)?"
+        r"(?:veille|rapport|synthèse|synthese)\s+(?:sur\s+)?",
+        "recherche_et_doc",
+    ),
+    (r"veille\s+(?:sur|concernant)\s+", "recherche_et_doc"),
+    (r"rapport\s+(?:sur|concernant|de)\s+", "recherche_et_doc"),
+    (
+        r"(?:comparatif|comparaison)\s+(?:de\s+)?.+\s+(?:dans\s+)?(?:un\s+)?(?:tableau|sheet)",
+        "recherche_et_sheet",
+    ),
+    (r"(?:tableau|sheet)\s+(?:des|de|avec)\s+", "recherche_et_sheet"),
+    (
+        r"crée\s+(?:un\s+)?(?:tableau|sheet)\s+(?:avec|de|des)\s+",
+        "recherche_et_sheet",
+    ),
+    (
+        r"(?:ajoute|ajouter|cale|planifie|programme)\s+.+\s+(?:à|a)\s+(?:mon\s+)?(?:calendrier|agenda)",
+        "cal_add_smart",
+    ),
+    (
+        r"(?:rédige|redige|écris|ecris)\s+(?:un\s+)?(?:email|mail)\s+(?:à|a)\s+",
+        "gmail_draft",
+    ),
+    (
+        r"^(?:note|ajoute|écris|ecris|mets)\s+(?:ça|cela|ca)\s+(?:dans|au|sur)\s+(?:le\s+)?(?:doc|document)\s*$",
+        "gdoc_append_active",
+    ),
+    (
+        r"^(?:note|ajoute)\s+(?:dans|au|sur)\s+(?:le\s+)?doc\s*$",
+        "gdoc_append_active",
+    ),
+]
+
+GOOGLE_WORKSPACE_PATTERNS: list[tuple[str, str]] = [
+    (
+        r"(?:mes|mon)\s+(?:événements|evenements|rendez-?vous|rdv|cr[ée]neaux?)|"
+        r"mon\s+(?:agenda|calendrier)|(?:quels?\s+sont|affiche|montre|liste)\s+"
+        r"(?:mes\s+)?(?:événements|evenements|rendez-?vous)",
+        "gcal_get_events",
+    ),
+    (
+        r"(?:crée|créer|cree|ajoute|programme|planifie)\s+(?:un\s+)?(?:événement|evenement|"
+        r"rendez-?vous|rdv|cr[ée]neau)\b",
+        "gcal_create_event",
+    ),
+    (
+        r"(?:mes|mon)\s+(?:emails?|mails?)|(?:bo[îi]te\s+mail|nouveaux?\s+emails?|"
+        r"j['']ai\s+des?\s+emails?|lis\s+mes\s+(?:emails?|mails?))",
+        "gmail_read",
+    ),
+    (
+        r"(?:envoie|envoyer)\s+(?:un\s+)?(?:email|mail)\s+(?:à|a)\s+",
+        "gmail_send",
+    ),
+    (
+        r"(?:cherche|trouve|recherche)\s+.+\s+(?:dans|sur)\s+(?:mon\s+)?(?:google\s+)?drive\b",
+        "gdrive_search",
+    ),
+    (
+        r"(?:mes|mon)\s+fichiers?\s+r[ée]cents?\s+(?:sur\s+)?(?:mon\s+)?(?:google\s+)?drive|"
+        r"liste.*(?:fichiers|r[ée]cents).*(?:drive|google drive)",
+        "gdrive_recent",
+    ),
+    (
+        r"(?:crée|créer|cree)\s+(?:un\s+)?(?:tableau|sheet|feuille|google\s+sheet)",
+        "gsheets_create",
+    ),
+    (
+        r"(?:lis|lire|ouvre|affiche|montre)\s+(?:le\s+)?(?:tableau|sheet|feuille)",
+        "gsheets_read",
+    ),
+    (
+        r"(?:liste|montre|affiche)\s+(?:mes\s+)?(?:google\s+)?docs?\b",
+        "gdoc_list",
+    ),
+    (
+        r"supprime\s+(?:le\s+)?(?:google\s+)?doc\s+(.+)",
+        "gdoc_delete",
+    ),
+    (
+        r"(?:vide|efface)\s+(?:le\s+)?(?:google\s+)?doc\s*(.*)$",
+        "gdoc_clear",
+    ),
+    (
+        r"renomme\s+(?:le\s+)?doc\s+(?:en\s+)?(.+)",
+        "gdoc_rename",
+    ),
+    (
+        r"(?:écris|ecris|ajoute|note|mets)\s+['\"]?(.+?)['\"]?\s+(?:dans|sur)\s+(?:le\s+)?(?:google\s+)?doc\b",
+        "gdoc_write_text",
+    ),
+    (
+        r"(?:liste|montre|affiche)\s+(?:mes\s+)?(?:google\s+)?sheets?\b",
+        "gsheets_list",
+    ),
+    (
+        r"(?:écris|ecris|ajoute|mets)\s+(.+?)\s+(?:dans|sur)\s+(?:le\s+)?(?:tableau|sheet)\b",
+        "gsheets_write",
+    ),
+    (
+        r"supprime\s+(?:le\s+)?(?:tableau|sheet|feuille)\s+(.+)",
+        "gsheets_delete",
+    ),
+    (
+        r"(?:mon\s+)?programme\s+(?:du\s+)?jour|(?:événements|evenements)\s+(?:d[''])?aujourd",
+        "gcal_today",
+    ),
+    (
+        r"supprime\s+(?:l[''])?(?:événement|evenement|rdv|rendez-?vous)\s+(.+)",
+        "gcal_delete_event",
+    ),
+    (
+        r"(?:télécharge|telecharge|download)\s+(.+?)\s+(?:depuis|de|sur)\s+(?:mon\s+)?(?:google\s+)?drive",
+        "gdrive_download",
+    ),
+    (
+        r"supprime\s+(.+?)\s+(?:de|sur|dans)\s+(?:mon\s+)?(?:google\s+)?drive",
+        "gdrive_delete",
+    ),
+    (
+        r"(?:crée|créer|cree)\s+(?:un\s+)?dossier\s+(.+?)\s+(?:sur|dans)\s+(?:mon\s+)?(?:google\s+)?drive",
+        "gdrive_create_folder",
+    ),
+    (
+        r"envoie\s+(?:vite|rapidement)\s+(?:un\s+)?(?:email|mail)\s+(?:à|a)\s+(.+?)\s+(?:pour|sur|objet)\s+(.+)",
+        "gmail_send_quick",
+    ),
+]
+
 INTENT_CATEGORY_MAP: dict[str, str] = {
     "lancer_app": "lancer_app",
     "fermer_app": "fermer_app",
@@ -588,7 +794,7 @@ PURE_ACTIONS = frozenset({
     "nexus_prompt", "daily_brief", "export_pdf", "focus_mode_on", "focus_mode_off",
     "calendar_today", "calendar_upcoming", "calendar_create", "revision_plan",
     "german_mode_on", "german_mode_off", "run_macro", "smarthome", "social_discord",
-})
+}) | ALL_GOOGLE_INTENTS
 
 # Actions that use an external API then summarize with LLM
 API_THEN_LLM = frozenset({
@@ -701,6 +907,31 @@ def _fast_intent(text: str) -> tuple[str, dict] | None:
     for pattern, intent in RECHERCHE_PATTERNS:
         if re.search(pattern, text_lower, re.IGNORECASE):
             return intent, {}
+
+    # PRIORITY 1.51: confirmation Google en attente
+    if _pending_action and re.match(
+        r"^(?:oui|confirme|ok(?:\s+envoie)?|vas-y|go)\s*\.?$",
+        text_lower,
+    ):
+        return "google_confirm", {}
+
+    # PRIORITY 1.515: Google smart flows (recherche → services)
+    for pattern, intent in GOOGLE_SMART_PATTERNS:
+        if re.search(pattern, text_lower, re.IGNORECASE):
+            return intent, {}
+
+    # PRIORITY 1.52: Google Workspace (Calendar, Gmail, Drive, Sheets)
+    for pattern, intent in GOOGLE_WORKSPACE_PATTERNS:
+        if re.search(pattern, text_lower, re.IGNORECASE):
+            gw_params: dict = {}
+            if intent == "gmail_send":
+                m = re.search(
+                    r"envoie\s+(?:un\s+)?(?:email|mail)\s+(?:à|a)\s+(.+?)\s+(?:pour|sur|objet)\s+(.+)",
+                    text_lower,
+                )
+                if m:
+                    gw_params = {"to": m.group(1).strip(), "subject": m.group(2).strip()}
+            return intent, gw_params
 
     # PRIORITY 2: « cherche [query] sur/dans [site] »
     m = re.search(r"(?:cherche|recherche|trouve)\s+(.+?)\s+(?:sur|dans)\s+(.+)", text_lower)
@@ -1099,10 +1330,17 @@ def generate(
     server_url: str | None = None
     local_models = llamacpp_manager.list_available_models()
 
+    if llamacpp_manager.should_use_ollama_gpu():
+        logger.info("Inférence Ollama GPU pour '%s' (llama.cpp sans CUDA)", model)
+        return _generate_ollama(
+            prompt, model, system, stream, max_tokens, temperature, on_token
+        )
+
     if local_models:
         matched = _match_local_model(model, local_models)
         server_url = llamacpp_manager.get_server_url(matched)
         if not server_url and Path(llamacpp_manager.LLAMA_SERVER_EXE).exists():
+            ui.update_thinking_action(f"Chargement · {_short_model_label(matched)}...")
             info = llamacpp_manager.start_model_server(matched)
             server_url = info.get("url") if info else None
 
@@ -1149,6 +1387,9 @@ def _generate_llamacpp(
     }
 
     endpoint = f"{server_url}/v1/chat/completions"
+    label = _short_model_label(matched)
+    ui.set_response_model(label)
+    ui.update_thinking_action(f"Génération · {label}")
     logger.warning(
         "═══ llama.cpp POST %s → model=%s stream=%s tokens=%d ═══",
         endpoint,
@@ -1164,13 +1405,19 @@ def _generate_llamacpp(
             with requests.post(endpoint, json=payload, stream=True, timeout=120) as resp:
                 resp.raise_for_status()
                 for line in resp.iter_lines():
-                    if not line:
-                        continue
-                    token, done = _parse_stream_chunk(line)
-                    if token:
-                        parts.append(token)
-                        on_token(token)
-                    if done:
+                    if not line or _stop_stream.is_set():
+                        if _stop_stream.is_set():
+                            logger.info("Stream llama.cpp interrompu")
+                        break
+                    try:
+                        token, done = _parse_stream_chunk(line)
+                        if token:
+                            parts.append(token)
+                            on_token(token)
+                        if done:
+                            break
+                    except StopIteration:
+                        logger.info("Stream llama.cpp interrompu — StopIteration")
                         break
             result = "".join(parts)
         else:
@@ -1240,6 +1487,10 @@ def _generate_ollama(
     if not matched:
         return "Erreur : aucun modèle Ollama disponible."
 
+    label = _short_model_label(matched)
+    ui.set_response_model(label)
+    ui.update_thinking_action(f"Génération · {label}")
+
     full_prompt = f"{system}\n\n{prompt}" if system else prompt
     payload = {
         "model": matched,
@@ -1249,10 +1500,15 @@ def _generate_ollama(
             "temperature": temperature,
             "num_predict": max_tokens,
             "num_ctx": 4096,
+            **llamacpp_manager.ollama_gpu_options(),
         },
     }
 
-    logger.info("Ollama fallback POST /api/generate → model=%s", matched)
+    logger.info(
+        "Ollama POST /api/generate → model=%s num_gpu=%s",
+        matched,
+        llamacpp_manager.ollama_gpu_options().get("num_gpu"),
+    )
 
     try:
         if stream and on_token:
@@ -1262,8 +1518,10 @@ def _generate_ollama(
             ) as resp:
                 resp.raise_for_status()
                 for line in resp.iter_lines():
-                    if not line:
-                        continue
+                    if not line or _stop_stream.is_set():
+                        if _stop_stream.is_set():
+                            logger.info("Stream Ollama interrompu")
+                        break
                     try:
                         data = json.loads(line)
                         token = data.get("response", "")
@@ -1272,6 +1530,9 @@ def _generate_ollama(
                             on_token(token)
                         if data.get("done"):
                             break
+                    except StopIteration:
+                        logger.info("Stream interrompu — StopIteration")
+                        break
                     except json.JSONDecodeError:
                         continue
             return "".join(parts)
@@ -1380,16 +1641,23 @@ def _llamacpp_chat_request(
         logger.error("Cloud chat request failed: %s", exc)
         return None
 
+    import llamacpp_manager
+
+    if llamacpp_manager.should_use_ollama_gpu():
+        return _ollama_chat_fallback(messages, model, stream, num_predict, intent, conv_mode)
+
     try:
         chosen = _ensure_llamacpp(model or MODEL)
     except RuntimeError:
+        if llamacpp_manager.should_use_ollama_gpu():
+            return _ollama_chat_fallback(messages, model, stream, num_predict, intent, conv_mode)
         logger.error("llama.cpp indisponible pour la requête chat")
         return None
 
-    import llamacpp_manager
-
     server_url = llamacpp_manager.get_server_url(chosen)
     if not server_url:
+        if llamacpp_manager.should_use_ollama_gpu():
+            return _ollama_chat_fallback(messages, model, stream, num_predict, intent, conv_mode)
         logger.error("URL serveur introuvable pour %s", chosen)
         return None
 
@@ -1437,6 +1705,60 @@ def _llamacpp_chat_request(
 
 # Alias legacy
 _ollama_request = _llamacpp_chat_request
+
+
+def _ollama_chat_fallback(
+    messages: list,
+    model: str | None,
+    stream: bool,
+    num_predict: int | None,
+    intent: str,
+    conv_mode: str | None,
+) -> requests.Response | None:
+    """Chat via Ollama /api/chat avec offload GPU."""
+    import llamacpp_manager
+
+    if not llamacpp_manager.is_ollama_available():
+        return None
+
+    chosen = model or MODEL
+    if conv_mode is None:
+        conv_mode = _get_conversation_mode()
+    options = _get_options(intent, conv_mode)
+    if num_predict is not None:
+        options["num_predict"] = num_predict
+
+    payload = {
+        "model": chosen,
+        "messages": _openai_messages_from_ollama(messages),
+        "stream": False,
+        "options": {
+            "temperature": options.get("temperature", 0.7),
+            "num_predict": options.get("num_predict", 400),
+            **llamacpp_manager.ollama_gpu_options(),
+        },
+    }
+
+    try:
+        resp = requests.post(
+            f"{llamacpp_manager.OLLAMA_URL}/api/chat",
+            json=payload,
+            timeout=120,
+        )
+        resp.raise_for_status()
+        text = resp.json().get("message", {}).get("content", "").strip()
+
+        class _FakeResp:
+            status_code = 200
+
+            def json(self):
+                return {"choices": [{"message": {"content": text}}]}
+
+        logger.info("Ollama GPU chat fallback → model=%s", chosen)
+        return _FakeResp()
+    except Exception as exc:
+        logger.error("Ollama chat GPU fallback failed: %s", exc)
+        return None
 
 
 def _detect_intent(text: str) -> dict:
@@ -1580,6 +1902,634 @@ Execute the appropriate operation and return the result in French."""
         if intent == "drive_create_folder":
             return browser.open_url("https://drive.google.com/drive/u/0/my-drive")
         return browser.open_url("https://drive.google.com")
+
+
+def _google_not_configured_msg() -> str:
+    return (
+        "Google Workspace non configuré. Place credentials.json à la racine du projet "
+        "(ou dans data/google_credentials.json) puis lance : python setup_google.py"
+    )
+
+
+def _google_ready() -> bool:
+    from actions.google_auth import is_authenticated, is_configured
+
+    return is_configured() and is_authenticated()
+
+
+def _create_calendar_event_from_text(text: str) -> str:
+    start, end = google_calendar.parse_when(text)
+    title = google_calendar.extract_title(text)
+    if start is None:
+        return f"À quelle date et heure veux-tu caler « {title} » ?"
+    if not _google_ready():
+        return google_calendar.create_event(title, start, end)
+    try:
+        from actions.gcalendar import create_event_api
+
+        created = create_event_api(title, start, end)
+        link = created.get("htmlLink", "")
+        msg = f"C'est calé : « {title} » {google_calendar._fmt_dt(start)}."
+        return f"{msg} {link}".strip()
+    except Exception:
+        logger.exception("gcal_create_event API")
+        return google_calendar.create_event(title, start, end)
+
+
+def _compose_and_send_email(text: str, to: str, subject: str) -> str:
+    from actions import ggmail
+
+    if not _google_ready():
+        return _google_not_configured_msg()
+    if not to or not subject:
+        return "Précise le destinataire et l'objet. Exemple : envoie un email à jean@mail.com pour Réunion demain"
+    body = text
+    for pat in (
+        r"^.*?(?:envoie|envoyer)\s+(?:un\s+)?(?:email|mail)\s+(?:à|a)\s+.+?\s+(?:pour|sur|objet)\s+.+?\s*:?\s*",
+        r"^(?:dis|écris|ecris|message|contenu)\s*:?\s*",
+    ):
+        body = re.sub(pat, "", body, flags=re.I | re.S).strip()
+    if not body.strip():
+        body = f"(Message envoyé via ARIA — sujet : {subject})"
+    try:
+        ggmail.send_email(to, subject, body)
+        return f"Email envoyé à {to} — objet : « {subject} »."
+    except Exception as exc:
+        logger.exception("gmail_send")
+        return f"Impossible d'envoyer l'email : {exc}"
+
+
+def _extract_drive_query(text: str) -> str:
+    q = re.sub(
+        r".*?(?:cherche|trouve|recherche)\s+",
+        "",
+        text,
+        count=1,
+        flags=re.I,
+    )
+    q = re.sub(r"\s+(?:dans|sur)\s+(?:mon\s+)?(?:google\s+)?drive\s*$", "", q, flags=re.I)
+    return q.strip(" :'\"") or text.strip()
+
+
+def _format_google_file_list(items: list[dict], header: str) -> str:
+    if not items:
+        return header.replace(" :", "").rstrip(" :") if ":" in header else "Aucun élément trouvé."
+    lines = [header.rstrip(":")]
+    for item in items:
+        name = item.get("name", "?")
+        link = item.get("webViewLink", "")
+        if link:
+            lines.append(f"• [{name}]({link})")
+        else:
+            lines.append(f"• {name}")
+    return "\n".join(lines)
+
+
+def _google_llm(prompt: str, *, max_tokens: int = GOOGLE_LLM_MAX_TOKENS, temperature: float = 0.2) -> str:
+    """Génération LLM réservée aux actions Google — FAST uniquement."""
+    return generate(
+        prompt,
+        model=GOOGLE_LLM_MODEL,
+        stream=False,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+
+
+def _is_google_cancellation(text: str) -> bool:
+    return bool(re.match(r"^(?:non|annule|cancel|stop)\s*\.?$", text.strip(), re.I))
+
+
+def _set_pending_google_action(action_type: str, label: str, params: dict) -> str:
+    global _pending_action
+    _pending_action = {"type": action_type, "label": label, "params": params}
+    if action_type == "gmail_send":
+        return params.get("preview") or (
+            f"Brouillon prêt pour « {label} ». Réponds « oui envoie » pour confirmer."
+        )
+    return (
+        f"Tu veux vraiment {params.get('verb', 'supprimer')} « {label} » ? "
+        "Réponds « oui » pour confirmer."
+    )
+
+
+def _execute_pending_google_action() -> str:
+    global _pending_action
+    if not _pending_action:
+        return "Rien en attente de confirmation."
+    action = _pending_action
+    _pending_action = None
+    action_type = action["type"]
+    params = action.get("params", {})
+    label = action.get("label", "")
+
+    from actions import gcalendar, gdocs, gdrive, ggmail, gsheets
+
+    try:
+        if action_type == "gdoc_delete":
+            gdocs.delete_doc(params["id"])
+            if gdocs.get_active_doc() and gdocs.get_active_doc()["id"] == params["id"]:
+                gdocs.clear_active_doc()
+            return f"Doc « {label} » supprimé ✓"
+
+        if action_type == "gsheets_delete":
+            gsheets.delete_spreadsheet(params["id"])
+            return f"Tableau « {label} » supprimé ✓"
+
+        if action_type == "gcal_delete_event":
+            gcalendar.delete_event(params["id"])
+            return f"Événement « {label} » supprimé ✓"
+
+        if action_type == "gdrive_delete":
+            gdrive.delete_file(params["id"])
+            return f"« {label} » supprimé de Drive ✓"
+
+        if action_type == "gmail_send":
+            ggmail.send_email(params["to"], params["subject"], params["body"])
+            return f"Email envoyé à {params['to']} — objet : « {params['subject']} » ✓"
+    except Exception as exc:
+        logger.exception("Pending action %s failed", action_type)
+        return f"Erreur : {exc}"
+
+    return "Action inconnue."
+
+
+def _run_google_research(topic: str) -> tuple[dict, str]:
+    """Recherche multi-sources pour flux Google smart."""
+    from actions.web_research import (
+        ResearchRequest,
+        format_results_for_llm,
+        multi_search_for_request,
+    )
+
+    req = ResearchRequest(
+        original_text=topic,
+        query=topic,
+        sources=["web", "wikipedia", "news"],
+        output="doc",
+        query_type="general",
+        synthesis_mode="detailed",
+        user_goal=topic,
+    )
+    results = multi_search_for_request(req)
+    llm_input = format_results_for_llm(results, topic) if results else ""
+    return results, llm_input
+
+
+def _flow_recherche_et_doc(text: str) -> str:
+    """Recherche web → synthèse FAST → nouveau Google Doc structuré."""
+    from actions import gdocs
+    from actions.web_research import (
+        build_doc_structure_prompt,
+        extract_recherche_et_doc_topic,
+    )
+
+    if not _google_ready():
+        return _google_not_configured_msg()
+
+    topic = extract_recherche_et_doc_topic(text) or _extract_research_query(text)
+    if not topic:
+        return "Précise le sujet de la recherche et du doc."
+
+    ui.update_thinking_action(f"Recherche : {topic}...")
+    results, llm_input = _run_google_research(topic)
+    if not results:
+        return f"Aucun résultat pour « {topic} »."
+
+    ui.update_thinking_action("Structuration du doc...")
+    structured = _google_llm(
+        build_doc_structure_prompt(topic, llm_input),
+        max_tokens=350,
+        temperature=0.25,
+    )
+    if structured.startswith("Erreur"):
+        return structured
+
+    title = f"Veille ARIA — {topic[:50]}"
+    if re.search(r"rapport", text, re.I):
+        title = f"Rapport — {topic[:50]}"
+    elif re.search(r"veille", text, re.I):
+        title = f"Veille — {topic[:50]}"
+
+    doc_info = gdocs.create_doc(
+        title=title,
+        initial_content=f"Document généré par ARIA le {datetime.now().strftime('%d/%m/%Y à %H:%M')}\n\n",
+    )
+    gdocs.write_markdown_to_doc(doc_info["id"], structured)
+    gdocs.set_active_doc(doc_info["id"], doc_info["title"], doc_info["url"])
+    try:
+        ui.show_gdoc_link(doc_info["title"], doc_info["url"])
+    except Exception:
+        pass
+    return (
+        f"Doc « {title} » créé avec la veille sur « {topic} » ✓\n"
+        f"{doc_info['url']}"
+    )
+
+
+def _flow_recherche_et_sheet(text: str) -> str:
+    """Recherche web → tableau FAST → Google Sheet formaté."""
+    from actions import gsheets
+    from actions.web_research import (
+        build_sheet_table_prompt,
+        extract_recherche_et_sheet_topic,
+        extract_sheet_title_from_topic,
+        parse_pipe_csv_table,
+    )
+
+    if not _google_ready():
+        return _google_not_configured_msg()
+
+    topic = extract_recherche_et_sheet_topic(text) or _extract_research_query(text)
+    if not topic:
+        return "Précise le sujet du tableau."
+
+    ui.update_thinking_action(f"Recherche : {topic}...")
+    results, llm_input = _run_google_research(topic)
+    if not results:
+        return f"Aucun résultat pour « {topic} »."
+
+    ui.update_thinking_action("Formatage du tableau...")
+    table_raw = _google_llm(
+        build_sheet_table_prompt(llm_input),
+        max_tokens=300,
+        temperature=0.2,
+    )
+    if table_raw.startswith("Erreur"):
+        return table_raw
+
+    rows = parse_pipe_csv_table(table_raw)
+    if not rows:
+        return "Impossible de formater les données en tableau."
+
+    title = extract_sheet_title_from_topic(topic)
+    info = gsheets.create_spreadsheet_with_data(title, rows)
+    return f"Tableau « {title} » créé ✓ — {info.get('url', '')}"
+
+
+def _flow_cal_add_smart(text: str) -> str:
+    """Extraction FAST JSON → création événement Calendar."""
+    from actions import gcalendar
+
+    if not _google_ready():
+        return _google_not_configured_msg()
+
+    prompt = (
+        "Extrait de ce texte : titre, date ISO, heure, lieu. "
+        'Réponds UNIQUEMENT en JSON : {"title":...,"date":...,"time":...,"location":...}. '
+        f"Texte: {text}"
+    )
+    raw = _google_llm(prompt, max_tokens=80, temperature=0.1)
+    if raw.startswith("Erreur"):
+        return raw
+
+    parsed = gcalendar.parse_event_json(raw)
+    title = parsed.get("title") or text.strip()[:80]
+    return gcalendar.create_event_from_fields(
+        title,
+        str(parsed.get("date") or ""),
+        str(parsed.get("time") or ""),
+        str(parsed.get("location") or ""),
+    )
+
+
+def _flow_gmail_draft(text: str) -> str:
+    """Recherche optionnelle → brouillon FAST → confirmation."""
+    from actions import ggmail
+    from actions.web_research import build_email_draft_prompt
+
+    if not _google_ready():
+        return _google_not_configured_msg()
+
+    m = re.search(
+        r"(?:rédige|redige|écris|ecris)\s+(?:un\s+)?(?:email|mail)\s+(?:à|a)\s+"
+        r"(.+?)\s+(?:pour|sur|objet|concernant)\s+(.+)",
+        text,
+        re.I,
+    )
+    to = m.group(1).strip() if m else ""
+    subject_hint = m.group(2).strip() if m else ""
+    if not to:
+        return "Précise le destinataire et le sujet de l'email."
+
+    context = subject_hint
+    if len(subject_hint.split()) <= 3:
+        _, llm_input = _run_google_research(subject_hint)
+        if llm_input:
+            context = llm_input[:800]
+
+    draft_raw = _google_llm(
+        build_email_draft_prompt(subject_hint, to, context),
+        max_tokens=200,
+        temperature=0.3,
+    )
+    if draft_raw.startswith("Erreur"):
+        return draft_raw
+
+    subject, body = ggmail.parse_email_draft(draft_raw)
+    if not subject:
+        subject = subject_hint
+    preview = ggmail.format_draft_preview(to, subject, body)
+    return _set_pending_google_action(
+        "gmail_send",
+        to,
+        {
+            "to": to,
+            "subject": subject,
+            "body": body,
+            "preview": preview,
+            "verb": "envoyer",
+        },
+    )
+
+
+def _flow_gdoc_append_active(text: str) -> str:
+    """Ajoute le dernier contenu assistant ou une recherche au doc actif."""
+    from actions import gdocs
+    from actions.web_research import build_doc_structure_prompt
+
+    if not _google_ready():
+        return _google_not_configured_msg()
+
+    active = gdocs.get_active_doc()
+    if not active:
+        return "Aucun doc actif. Dis « crée un doc [titre] » ou lance une veille d'abord."
+
+    content = ""
+    for msg in reversed(_history):
+        if msg.get("role") == "assistant" and msg.get("content", "").strip():
+            content = msg["content"].strip()
+            break
+    if not content or len(content) < 20:
+        topic = _extract_research_query(text) or "notes"
+        _, llm_input = _run_google_research(topic)
+        if llm_input:
+            content = _google_llm(
+                build_doc_structure_prompt(topic, llm_input),
+                max_tokens=350,
+                temperature=0.25,
+            )
+
+    if not content or content.startswith("Erreur"):
+        return "Je n'ai rien à ajouter. Fais d'abord une recherche ou pose une question."
+
+    gdocs.write_markdown_to_doc(
+        active["id"],
+        f"## Notes — {datetime.now().strftime('%d/%m %H:%M')}\n{content}",
+    )
+    return f"Ajouté au doc « {active['title']} » ✓ — {active['url']}"
+
+
+def _handle_google_smart_intent(intent: str, params: dict, text: str) -> str:
+    if intent == "google_confirm":
+        return _execute_pending_google_action()
+    if intent == "recherche_et_doc":
+        return _flow_recherche_et_doc(text)
+    if intent == "recherche_et_sheet":
+        return _flow_recherche_et_sheet(text)
+    if intent == "cal_add_smart":
+        return _flow_cal_add_smart(text)
+    if intent == "gmail_draft":
+        return _flow_gmail_draft(text)
+    if intent == "gdoc_append_active":
+        return _flow_gdoc_append_active(text)
+    return ""
+
+
+def _handle_google_workspace_intent(intent: str, params: dict, text: str) -> str:
+    if intent in GOOGLE_SMART_INTENTS:
+        return _handle_google_smart_intent(intent, params, text)
+
+    from actions import gcalendar, gdocs, gdrive, ggmail, gsheets
+
+    if intent in ("gdoc_create", "gdoc_write_search", "gdoc_open", "gdoc_status"):
+        if intent == "gdoc_create":
+            return _create_gdoc(text)
+        if intent == "gdoc_write_search":
+            return _write_search_to_gdoc(text, stream_to_ui=False)
+        if intent == "gdoc_open":
+            return _open_gdoc()
+        if intent == "gdoc_status":
+            return _gdoc_status()
+
+    if intent == "gcal_create_event":
+        return _create_calendar_event_from_text(text)
+
+    if not _google_ready():
+        return _google_not_configured_msg()
+
+    try:
+        if intent == "gcal_get_events":
+            events = gcalendar.get_upcoming_events(10)
+            return gcalendar.format_events_for_aria(events)
+
+        if intent == "gcal_today":
+            events = gcalendar.get_events_today()
+            if not events:
+                return "Aucun événement aujourd'hui. Journée libre !"
+            return gcalendar.format_events_for_aria(events)
+
+        if intent == "gcal_delete_event":
+            m = re.search(
+                r"supprime\s+(?:l[''])?(?:événement|evenement|rdv|rendez-?vous)\s+(.+)",
+                text,
+                re.I,
+            )
+            title = (params.get("title") or (m.group(1) if m else "") or text).strip()
+            ev = gcalendar.find_event_by_title(title)
+            if not ev:
+                return f"Aucun événement « {title} » trouvé."
+            return _set_pending_google_action(
+                "gcal_delete_event",
+                ev.get("summary", title),
+                {"id": ev["id"], "verb": "supprimer"},
+            )
+
+        if intent == "gmail_read":
+            return ggmail.format_emails_for_aria(ggmail.get_unread_emails(5))
+
+        if intent in ("gmail_send", "gmail_send_quick"):
+            to = params.get("to", "")
+            subject = params.get("subject", "")
+            if not to or not subject:
+                m = re.search(
+                    r"envoie\s+(?:vite\s+|rapidement\s+)?(?:un\s+)?(?:email|mail)\s+(?:à|a)\s+"
+                    r"(.+?)\s+(?:pour|sur|objet)\s+(.+)",
+                    text,
+                    re.I,
+                )
+                if m:
+                    to, subject = m.group(1).strip(), m.group(2).strip()
+            return _compose_and_send_email(text, to, subject)
+
+        if intent == "gdrive_search":
+            query = _extract_drive_query(text)
+            files = gdrive.search_files(query, 5)
+            if not files:
+                return f"Aucun fichier « {query} » trouvé dans ton Drive."
+            return gdrive.format_files_for_aria(
+                files, header=f"Fichiers trouvés pour « {query} » :"
+            )
+
+        if intent == "gdrive_recent":
+            files = gdrive.list_recent_files(10)
+            if not files:
+                return "Aucun fichier récent dans ton Drive."
+            return gdrive.format_files_for_aria(files, header="Tes fichiers récents sur Drive :")
+
+        if intent == "gdrive_create_folder":
+            m = re.search(
+                r"(?:crée|créer|cree)\s+(?:un\s+)?dossier\s+(.+?)\s+(?:sur|dans)\s+(?:mon\s+)?(?:google\s+)?drive",
+                text,
+                re.I,
+            )
+            name = (params.get("name") or (m.group(1) if m else "") or "").strip(" :'\"")
+            if not name:
+                return "Quel nom pour le dossier ?"
+            folder = gdrive.create_folder(name)
+            return f"Dossier « {name} » créé sur Drive ✓ — {folder.get('webViewLink', '')}"
+
+        if intent == "gdrive_download":
+            m = re.search(
+                r"(?:télécharge|telecharge|download)\s+(.+?)\s+(?:depuis|de|sur)\s+(?:mon\s+)?(?:google\s+)?drive",
+                text,
+                re.I,
+            )
+            name = (params.get("name") or (m.group(1) if m else "") or "").strip()
+            found = gdrive.find_file_by_name(name)
+            if not found:
+                return f"Fichier « {name} » introuvable sur Drive."
+            dest = app_paths.data_dir() / "downloads" / found.get("name", "fichier")
+            path = gdrive.download_file(found["id"], str(dest))
+            return f"Fichier téléchargé : {path}"
+
+        if intent == "gdrive_delete":
+            m = re.search(
+                r"supprime\s+(.+?)\s+(?:de|sur|dans)\s+(?:mon\s+)?(?:google\s+)?drive",
+                text,
+                re.I,
+            )
+            name = (params.get("name") or (m.group(1) if m else "") or "").strip()
+            found = gdrive.find_file_by_name(name)
+            if not found:
+                return f"Fichier « {name} » introuvable sur Drive."
+            return _set_pending_google_action(
+                "gdrive_delete",
+                found.get("name", name),
+                {"id": found["id"], "verb": "supprimer"},
+            )
+
+        if intent == "gdoc_list":
+            docs = gdocs.list_docs(8)
+            if not docs:
+                return "Aucun Google Doc trouvé."
+            return _format_google_file_list(docs, "Tes Google Docs récents :")
+
+        if intent == "gdoc_write_text":
+            active = gdocs.get_active_doc()
+            if not active:
+                return "Aucun doc actif. Dis « crée un doc [titre] » d'abord."
+            text_to_write = params.get("text", "")
+            if not text_to_write:
+                m = re.search(
+                    r"(?:écris|ecris|ajoute|note|mets)\s+['\"]?(.+?)['\"]?\s+(?:dans|sur)\s+(?:le\s+)?(?:google\s+)?doc",
+                    text,
+                    re.I,
+                )
+                text_to_write = m.group(1).strip() if m else text
+            gdocs.append_to_doc(active["id"], text_to_write)
+            return f"Écrit dans « {active['title']} » ✓"
+
+        if intent == "gdoc_clear":
+            active = gdocs.get_active_doc()
+            if not active:
+                m = re.search(r"(?:vide|efface)\s+(?:le\s+)?(?:google\s+)?doc\s+(.+)", text, re.I)
+                if m:
+                    active = gdocs.resolve_doc(m.group(1).strip())
+            if not active:
+                return "Aucun doc actif."
+            gdocs.clear_doc(active["id"])
+            return f"Doc « {active.get('title', active['id'])} » vidé ✓"
+
+        if intent == "gdoc_delete":
+            m = re.search(r"supprime\s+(?:le\s+)?(?:google\s+)?doc\s+(.+)", text, re.I)
+            name = (params.get("name") or (m.group(1) if m else "") or "").strip()
+            doc = gdocs.resolve_doc(name) if name else gdocs.get_active_doc()
+            if not doc:
+                return f"Doc « {name} » introuvable."
+            return _set_pending_google_action(
+                "gdoc_delete",
+                doc.get("title", doc["id"]),
+                {"id": doc["id"], "verb": "supprimer"},
+            )
+
+        if intent == "gdoc_rename":
+            m = re.search(r"renomme\s+(?:le\s+)?doc\s+(?:en\s+)?(.+)", text, re.I)
+            new_title = (params.get("title") or (m.group(1) if m else "") or "").strip(" :'\"")
+            active = gdocs.get_active_doc()
+            if not active:
+                return "Aucun doc actif à renommer."
+            gdocs.rename_doc(active["id"], new_title)
+            active["title"] = new_title
+            gdocs.set_active_doc(active["id"], new_title, active["url"])
+            return f"Doc renommé en « {new_title} » ✓"
+
+        if intent == "gsheets_create":
+            title = gsheets.extract_sheet_title(text)
+            info = gsheets.create_spreadsheet(title)
+            return f"Tableau « {info['title']} » créé : {info['url']}"
+
+        if intent == "gsheets_list":
+            sheets = gsheets.list_spreadsheets(8)
+            if not sheets:
+                return "Aucun Google Sheet trouvé."
+            return _format_google_file_list(sheets, "Tes Google Sheets récents :")
+
+        if intent == "gsheets_read":
+            sheet_id = gsheets.resolve_spreadsheet_id(text)
+            if not sheet_id:
+                return "Quel tableau veux-tu lire ? Donne le titre ou l'URL Google Sheets."
+            values = gsheets.read_range(sheet_id)
+            return gsheets.format_sheet_data_for_aria(values, title=sheet_id[:12])
+
+        if intent == "gsheets_write":
+            m = re.search(
+                r"(?:écris|ecris|ajoute|mets)\s+(.+?)\s+(?:dans|sur)\s+(?:le\s+)?(?:tableau|sheet)\b",
+                text,
+                re.I,
+            )
+            data = params.get("data") or (m.group(1).strip() if m else "")
+            sheet_id = gsheets.resolve_spreadsheet_id(text)
+            if not sheet_id:
+                active = gsheets.get_active_spreadsheet()
+                sheet_id = active["id"] if active else None
+            if not sheet_id:
+                return "Aucun tableau actif. Crée ou ouvre un sheet d'abord."
+            row = gsheets.parse_sheet_write_data(data)
+            gsheets.append_rows(sheet_id, row)
+            return f"Ligne ajoutée au tableau ✓"
+
+        if intent == "gsheets_delete":
+            m = re.search(
+                r"supprime\s+(?:le\s+)?(?:tableau|sheet|feuille)\s+(.+)",
+                text,
+                re.I,
+            )
+            name = (params.get("name") or (m.group(1) if m else "") or "").strip()
+            found = gsheets.find_spreadsheet_by_title(name)
+            if not found:
+                return f"Tableau « {name} » introuvable."
+            return _set_pending_google_action(
+                "gsheets_delete",
+                found.get("title", name),
+                {"id": found["id"], "verb": "supprimer"},
+            )
+
+    except Exception as exc:
+        logger.exception("Google intent %s failed", intent)
+        return f"Erreur Google ({intent}) : {exc}"
+
+    return ""
 
 
 def _rule_based_intent(text: str) -> dict:
@@ -1740,6 +2690,7 @@ def _rule_based_intent(text: str) -> dict:
         (r"convertis|traduis", "traduction", {"text": text}),
         (r"mode ", "preset", {"name": text}),
         (r"presse.papier|clipboard", "clipboard_paste", {}),
+        (r"écris dans|ecris dans|tape dans|colle dans|écris sur|ecris sur", "type_text", {"text": text}),
         (r"rappel|agenda|[ée]v[ée]nement", "rappel", {"text": text}),
         (r"quelle heure|quelle date|heure", "heure_date", {}),
         (r"blague", "blague", {}),
@@ -1906,6 +2857,7 @@ def _do_web_research(
         format_results_for_llm,
         format_results_for_ui,
         multi_search_for_request,
+        normalize_structured_markdown,
     )
 
     req = _understand_research_request(text, intent_hint=intent_hint, output=output)
@@ -1926,7 +2878,10 @@ def _do_web_research(
     ui.set_status("thinking")
     ui.show_toast(f"Recherche : {query}...", toast_type="info")
     ui.update_thinking_action(f"Recherche ({req.query_type})...")
-    ui.set_response_model(_short_model_label(MODELS["heavy"]))
+    use_google_llm = intent_hint in ALL_GOOGLE_INTENTS
+    synth_model = GOOGLE_LLM_MODEL if use_google_llm else MODELS["heavy"]
+    synth_max_tokens = GOOGLE_LLM_MAX_TOKENS if use_google_llm else 600
+    ui.set_response_model(_short_model_label(synth_model))
 
     results = multi_search_for_request(req)
 
@@ -1942,21 +2897,28 @@ def _do_web_research(
 
     if req.output == "doc":
         from actions import gdocs
+        from actions.web_research import build_doc_structure_prompt
 
         active_doc = gdocs.get_active_doc()
         if not active_doc:
             ui.set_status("idle")
             return (
                 "Aucun Google Doc actif. Dis-moi d'abord 'crée un Google Doc [titre]' "
-                "ou 'ouvre le doc [titre]'."
+                "ou 'veille sur [sujet]'."
             )
-        doc_content = format_results_for_doc(results, query)
+        llm_input = format_results_for_llm(results, query)
+        ui.update_thinking_action("Structuration pour le doc...")
+        structured = _google_llm(
+            build_doc_structure_prompt(query, llm_input),
+            max_tokens=350,
+            temperature=0.25,
+        )
+        if structured.startswith("Erreur"):
+            structured = format_results_for_doc(results, query)
         try:
-            gdocs.write_section_to_doc(
+            gdocs.write_markdown_to_doc(
                 active_doc["id"],
-                title=f"Recherche : {query}",
-                content=doc_content,
-                heading_level=2,
+                f"## Recherche : {query}\n{structured}",
             )
             ui.set_status("idle")
             try:
@@ -1976,13 +2938,15 @@ def _do_web_research(
 
     if stream_to_ui:
         def on_token(token: str) -> None:
+            if _stop_stream.is_set():
+                return
             ui.append_assistant_text(token)
 
         synthesis = generate(
             synthesis_prompt,
-            model=MODELS["heavy"],
+            model=synth_model,
             stream=True,
-            max_tokens=600,
+            max_tokens=synth_max_tokens,
             temperature=0.3,
             on_token=on_token,
         )
@@ -1991,13 +2955,14 @@ def _do_web_research(
     else:
         synthesis = generate(
             synthesis_prompt,
-            model=MODELS["heavy"],
+            model=synth_model,
             stream=False,
-            max_tokens=600,
+            max_tokens=synth_max_tokens,
             temperature=0.3,
         )
         ui.set_status("idle")
 
+    synthesis = normalize_structured_markdown(synthesis, req.synthesis_mode)
     return synthesis
 
 
@@ -2073,6 +3038,7 @@ def _write_search_to_gdoc(text: str, *, stream_to_ui: bool = True) -> str:
         sources=["web", "wikipedia", "news"],
         output="doc",
         stream_to_ui=stream_to_ui,
+        intent_hint="gdoc_write_search",
     )
 
 
@@ -2146,16 +3112,16 @@ def _handle_v20_intent(
         )
 
     if intent == "gdoc_create":
-        return _create_gdoc(text)
+        return _handle_google_workspace_intent(intent, params, text)
 
     if intent == "gdoc_write_search":
         return _write_search_to_gdoc(text, stream_to_ui=stream_to_ui)
 
     if intent == "gdoc_open":
-        return _open_gdoc()
+        return _handle_google_workspace_intent(intent, params, text)
 
     if intent == "gdoc_status":
-        return _gdoc_status()
+        return _handle_google_workspace_intent(intent, params, text)
 
     return ""
 
@@ -2537,6 +3503,8 @@ def _conversation_via_generate(
             tts_thread.start()
 
         def on_token(token: str) -> None:
+            if _stop_stream.is_set():
+                return
             nonlocal sentence_buffer
             ui.append_assistant_text(token)
             sentence_buffer += token
@@ -2702,6 +3670,15 @@ def _execute_action(intent: str, params: dict, text: str) -> str | None:
         if intent == "clipboard_paste":
             clip = clipboard.get_text()
             return clip if clip.strip() else "Le presse-papier est vide."
+        if intent == "type_text":
+            payload = params.get("text") or text
+            payload = re.sub(
+                r"^(?:écris|ecris|tape|colle)\s+(?:dans|sur|à|a)\s+(?:l['']application\s+active\s+)?",
+                "",
+                payload,
+                flags=re.I,
+            ).strip(" :")
+            return type_anywhere.type_to_active_window(payload)
 
         if intent == "nexus_prompt":
             from actions import nexus
@@ -2723,6 +3700,9 @@ def _execute_action(intent: str, params: dict, text: str) -> str | None:
             if nexus_m:
                 payload = nexus_m.group(1).strip()
             return nexus.send_prompt(payload or query)
+
+        if intent in ALL_GOOGLE_INTENTS:
+            return _handle_google_workspace_intent(intent, params, text)
 
         if intent in V20_RESEARCH_INTENTS:
             return _handle_v20_intent(intent, params, text, stream_to_ui=False)
@@ -2752,6 +3732,14 @@ def _route_with_intelligence(
                 _present_action_result(result)
         logger.warning("═══ LLM→UI: '%s' ═══", str(result)[:200])
         return result
+
+    if intent in ALL_GOOGLE_INTENTS:
+        result = _handle_google_workspace_intent(intent, params, text)
+        if result and stream_to_ui:
+            _speak_response(result)
+        if result:
+            logger.warning("═══ LLM→UI: '%s' ═══", str(result)[:200])
+        return result or ""
 
     if intent in PURE_ACTIONS or intent in API_ONLY:
         result = _execute_action(intent, params, text)
@@ -2798,6 +3786,8 @@ def _route_with_intelligence(
 def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
     if intent in V20_RESEARCH_INTENTS:
         return _handle_v20_intent(intent, params, original_text, stream_to_ui=False)
+    if intent in ALL_GOOGLE_INTENTS:
+        return _handle_google_workspace_intent(intent, params, original_text)
     if intent == "lancer_app":
         app_param = params.get("app", original_text)
         clean = _extract_app_name(app_param)
@@ -3141,7 +4131,7 @@ def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
 
         if not gcalendar.is_configured():
             return "Google Calendar non configuré."
-        events = gcalendar.get_upcoming_events(7)
+        events = gcalendar.get_upcoming_events_days(7)
         if events:
             lines = [f"{e['title']} ({e['start'][:10]})" for e in events[:5]]
             return "Dans les 7 prochains jours : " + ", ".join(lines) + "."
@@ -3255,6 +4245,8 @@ def _stream_and_speak(response: requests.Response, stream_to_ui: bool = True) ->
     try:
         for line in response.iter_lines():
             if not line or _stop_stream.is_set():
+                if _stop_stream.is_set():
+                    logger.info("Stream interrompu — arrêt utilisateur")
                 break
             content, done = _parse_stream_chunk(line)
             if content:
@@ -3413,7 +4405,7 @@ def analyze_homework_image(image_b64: str, user_prompt: str = "") -> str:
     return description
 
 
-def _build_history_text(max_turns: int = 6) -> str:
+def _build_history_text(max_turns: int = 5) -> str:
     """Construit un historique textuel compact pour le prompt actions."""
     lines: list[str] = []
     for msg in _history:
@@ -3580,10 +4572,32 @@ def generate_daily_brief() -> str:
 
 def ask(text: str, *, show_user: bool = True) -> None:
     """Point d'entrée principal — route vers le bon handler selon l'intent."""
+    global _pending_action
     if not text or not text.strip():
         return
 
     logger.warning("═══ STT→LLM: '%s' ═══", text)
+
+    if _pending_action:
+        if _is_google_cancellation(text):
+            _pending_action = None
+            if show_user:
+                ui.show_user_text(text)
+            ui.append_assistant_text("Action annulée.")
+            ui.finalize_assistant_message()
+            ui.set_status("idle")
+            return
+        if re.match(r"^(?:oui|confirme|ok(?:\s+envoie)?|vas-y|go)\s*\.?$", text.strip(), re.I):
+            if show_user:
+                ui.show_user_text(text)
+            ui.show_thinking(model_name=_short_model_label(GOOGLE_LLM_MODEL), action="Confirmation...")
+            result = _execute_pending_google_action()
+            ui.hide_thinking()
+            ui.append_assistant_text(result)
+            ui.finalize_assistant_message()
+            _speak_already_displayed(result)
+            ui.set_status("idle")
+            return
 
     memory_engine.get_engine().update_active_hours()
 

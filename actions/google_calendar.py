@@ -40,7 +40,12 @@ _service = None
 # --------------------------------------------------------------------------- #
 def is_configured() -> bool:
     """True si des identifiants OAuth sont présents (API utilisable)."""
-    return CREDENTIALS_PATH.exists()
+    try:
+        from actions.google_auth import is_configured as _auth_configured
+
+        return _auth_configured()
+    except Exception:
+        return CREDENTIALS_PATH.exists()
 
 
 def _get_service():
@@ -48,25 +53,12 @@ def _get_service():
     global _service
     if _service is not None:
         return _service
-    if not CREDENTIALS_PATH.exists():
-        return None
     try:
-        from google.auth.transport.requests import Request
-        from google.oauth2.credentials import Credentials
-        from google_auth_oauthlib.flow import InstalledAppFlow
-        from googleapiclient.discovery import build
+        from actions.google_auth import build_service, is_authenticated, is_configured
 
-        creds = None
-        if TOKEN_PATH.exists():
-            creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_PATH), SCOPES)
-                creds = flow.run_local_server(port=0, prompt="consent")
-            TOKEN_PATH.write_text(creds.to_json(), encoding="utf-8")
-        _service = build("calendar", "v3", credentials=creds, cache_discovery=False)
+        if not is_configured() or not is_authenticated():
+            return None
+        _service = build_service("calendar", "v3", cache_discovery=False)
         logger.info("Google Calendar API prête")
         return _service
     except Exception:

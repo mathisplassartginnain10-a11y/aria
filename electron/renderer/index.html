@@ -66,6 +66,7 @@
       <button class="nav-item" data-page="agents" onclick="app.navigate('agents')">
         <span class="nav-icon">🤖</span>
         <span class="nav-label">Agents</span>
+        <span class="nav-badge" id="agents-badge"></span>
       </button>
       <button class="nav-item" data-page="routines" onclick="app.navigate('routines')">
         <span class="nav-icon">⚡</span>
@@ -96,114 +97,144 @@
   <!-- ═══ ZONE PRINCIPALE ═══ -->
   <main id="main-area">
 
-    <!-- Page Accueil -->
+    <!-- Page Accueil — zone centrale (spec aria-main-zone-final.html) -->
     <div id="page-home" class="page active">
-      <!-- Header -->
-      <div id="home-header">
-        <div class="home-header-side home-header-left">
-          <div id="home-greeting"></div>
-          <div id="home-date"></div>
-        </div>
-        <div class="home-header-center">
-          <div id="home-mode-badge" onclick="app.toggleModeMenu()">
-            <span>🔒</span>
-            <span id="home-mode-label">Mode Privé</span>
-            <span class="badge-chevron">▾</span>
+      <div id="home-glass-card" class="home-glass-card home-card main-card">
+        <div id="home-header" class="home-card-hdr">
+          <div class="home-hdr-left">
+            <div id="home-agent-chip" class="mode-pill home-agent-chip" onclick="app.toggleAgentDropdown()" title="Changer d'agent">
+              <span id="home-agent-icon">🤖</span>
+              <span id="home-agent-name">ARIA</span>
+              <span class="badge-chevron">▾</span>
+            </div>
           </div>
-          <div id="mode-menu" class="hidden">
-            <div onclick="app.setPrivacyMode('local')">🔒 100% Local</div>
-            <div onclick="app.setPrivacyMode('hybrid')">🌐 Hybride (Local + API)</div>
-            <div onclick="app.setPrivacyMode('cloud')">☁️ Cloud uniquement</div>
+          <div class="home-hdr-center">
+            <div id="home-mode-badge" class="mode-pill" onclick="app.toggleModeMenu()">
+              <span>🔒</span>
+              <span id="home-mode-label">Mode Privé</span>
+              <span class="badge-chevron">▾</span>
+            </div>
+            <div id="mode-menu" class="hidden">
+              <div onclick="app.setPrivacyMode('local')">🔒 100% Local</div>
+              <div onclick="app.setPrivacyMode('hybrid')">🌐 Hybride (Local + API)</div>
+              <div onclick="app.setPrivacyMode('cloud')">☁️ Cloud uniquement</div>
+            </div>
           </div>
-        </div>
-        <div class="home-header-side home-header-right">
-          <button id="mic-visual-btn" class="mic-round-header" onclick="app.toggleMic()" title="Micro">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
-              <rect x="9" y="2" width="6" height="13" rx="3" stroke="currentColor" stroke-width="1.5"/>
-              <path d="M5 10a7 7 0 0014 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-              <line x1="12" y1="21" x2="12" y2="17" stroke="currentColor" stroke-width="1.5"/>
+          <button id="mic-visual-btn" class="mic-hdr-btn" onclick="app.toggleMic()" title="Micro" type="button">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6">
+              <rect x="9" y="2" width="6" height="12" rx="3"/>
+              <path d="M5 10a7 7 0 0014 0"/>
+              <line x1="12" y1="21" x2="12" y2="17"/>
+              <line x1="8" y1="21" x2="16" y2="21"/>
             </svg>
           </button>
+        </div>
+
+        <div id="home-logo-container" class="home-orbe-zone">
+          <div id="home-orbe" class="orbe-container home-orbe-wrap orbe-idle">
+            <div class="halo halo-far"></div>
+            <div class="halo halo-mid"></div>
+            <div class="halo halo-near"></div>
+            <div class="ticks-outer"></div>
+            <div class="ticks-inner"></div>
+            <div class="ring ring-4 r4"></div>
+            <div class="ring ring-5 r5"></div>
+            <div class="ring ring-3 r3"></div>
+            <div class="ring ring-2 r2"></div>
+            <div class="ring ring-1 r1"></div>
+            <div class="scan scan-violet sc2"></div>
+            <div class="scan scan-blue sc1"></div>
+            <div class="crosshair cross"></div>
+            <div class="orbe-core core">
+              <img src="../assets/icon.png" alt="ARIA" class="orbe-logo" width="80" height="80">
+            </div>
+          </div>
+          <div id="home-logo-label">
+            <div id="home-hello-text" class="hello">Bonjour.</div>
+            <div id="home-sub-text" class="sub">Comment puis-je vous aider aujourd'hui ?</div>
+          </div>
+        </div>
+
+        <div id="home-messages" class="hidden">
+          <div id="messages"></div>
+        </div>
+
+        <div id="input-area" class="home-inp-area inp-area-wrapper">
+          <button id="stop-btn" type="button" onclick="app.stopGeneration()"
+            style="display:none;position:absolute;bottom:calc(100% + 8px);left:50%;
+                   transform:translateX(-50%);
+                   align-items:center;gap:6px;
+                   padding:7px 18px;
+                   background:rgba(239,68,68,0.12);
+                   border:1px solid rgba(239,68,68,0.3);
+                   border-radius:999px;
+                   color:#F87171;font-family:inherit;font-size:12px;
+                   cursor:pointer;backdrop-filter:blur(20px);
+                   box-shadow:0 4px 20px rgba(239,68,68,0.15);
+                   transition:all 0.2s;white-space:nowrap;
+                   z-index:100">
+            ⏹ Arrêter la génération
+          </button>
+          <div id="input-zone" class="home-inp-zone">
+            <div class="input-row input-row-main inp-r1">
+              <textarea
+                id="text-input"
+                class="inp-field"
+                placeholder="Demandez à ARIA..."
+                rows="1"
+                onkeydown="app.handleInputKeydown(event)"
+                oninput="app.adjustTextarea(this)"></textarea>
+            </div>
+            <div class="input-row input-row-tools inp-r2">
+              <label id="attach-btn" class="plus-btn" title="Joindre un fichier">+
+                <input type="file" id="file-input" multiple style="display:none"
+                  onchange="app.handleFiles(this.files)">
+              </label>
+              <div id="input-agent-selector" class="agent-sel" onclick="app.toggleAgentDropdown()">
+                <div class="agent-dot"><span id="input-agent-icon">🤖</span></div>
+                <span id="input-agent-name">Assistant Avancé</span>
+                <span class="selector-chevron">▾</span>
+              </div>
+              <div id="mic-btn-wrap">
+                <div class="mic-ring" id="mic-ring-1"></div>
+                <div class="mic-ring" id="mic-ring-2"></div>
+                <button id="mic-btn" onclick="app.toggleMic()" class="mic-inp mic-idle" type="button">
+                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8">
+                    <rect x="9" y="2" width="6" height="12" rx="3"/>
+                    <path d="M5 10a7 7 0 0014 0"/>
+                    <line x1="12" y1="21" x2="12" y2="17"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="home-privacy-footer" class="home-card-footer">
+          Toutes les données restent sur cet appareil.
         </div>
       </div>
 
       <div id="focus-indicator">🎯 Mode focus</div>
-
-      <!-- Logo animé central -->
-      <div id="home-logo-container">
-        <div id="home-orbe" class="orbe-container orbe-idle">
-          <div class="halo halo-outer"></div>
-          <div class="halo halo-inner"></div>
-          <div class="ring ring-5"></div>
-          <div class="ring ring-4"></div>
-          <div class="ring ring-3"></div>
-          <div class="ring ring-2"></div>
-          <div class="ring ring-1"></div>
-          <div class="scan scan-blue"></div>
-          <div class="scan scan-violet"></div>
-          <div class="crosshair"></div>
-          <div class="ticks"></div>
-          <div class="orbe-core"><span class="orbe-letter">A</span></div>
-        </div>
-        <div id="home-logo-label">
-          <div id="home-hello-text" class="hello-text">Bonjour.</div>
-          <div id="home-sub-text" class="sub-text">Comment puis-je vous aider aujourd'hui ?</div>
-        </div>
-      </div>
-
-      <!-- Zone messages (visible quand conversation active) -->
-      <div id="home-messages" class="hidden">
-        <div id="messages"></div>
-      </div>
-
-      <!-- Zone de saisie (2 lignes — UI Bible) -->
-      <div id="input-area">
-        <div id="input-zone">
-          <div class="input-row input-row-main">
-            <textarea
-              id="text-input"
-              placeholder="Demandez à ARIA..."
-              rows="1"
-              onkeydown="app.handleInputKeydown(event)"
-              oninput="app.adjustTextarea(this)">
-            </textarea>
-          </div>
-          <div class="input-row input-row-tools">
-            <label id="attach-btn" title="Joindre un fichier">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
-                <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"
-                  stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-              </svg>
-              <input type="file" id="file-input" multiple style="display:none"
-                onchange="app.handleFiles(this.files)">
-            </label>
-            <div id="input-agent-selector" onclick="app.toggleAgentDropdown()">
-              <span id="input-agent-icon">🤖</span>
-              <span id="input-agent-name">Assistant Avancé</span>
-              <span class="selector-chevron">▾</span>
-            </div>
-            <div class="input-tools-spacer"></div>
-            <div id="mic-btn-wrap">
-              <div class="mic-ring" id="mic-ring-1"></div>
-              <div class="mic-ring" id="mic-ring-2"></div>
-              <button id="mic-btn" onclick="app.toggleMic()" class="mic-idle mic-round" type="button">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
-                  <rect x="9" y="2" width="6" height="13" rx="3" stroke="currentColor" stroke-width="1.5"/>
-                  <path d="M5 10a7 7 0 0014 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                  <line x1="12" y1="21" x2="12" y2="17" stroke="currentColor" stroke-width="1.5"/>
-                </svg>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <span id="home-greeting" hidden aria-hidden="true"></span>
+      <span id="home-date" hidden aria-hidden="true"></span>
     </div>
 
     <!-- Page Conversations -->
     <div id="page-conversations" class="page hidden">
       <div id="conv-page-header">
         <div style="font-size:18px;font-weight:700;color:var(--text)">Conversations</div>
-        <button onclick="app.newConversation()" class="page-action-btn">+ Nouvelle</button>
+        <div style="display:flex;gap:8px">
+          <button onclick="app.newConversation()" class="page-action-btn">+ Nouvelle</button>
+          <button onclick="app.deleteAllConversations()"
+            style="padding:8px 14px;background:rgba(239,68,68,0.08);
+                   border:1px solid rgba(239,68,68,0.2);border-radius:8px;
+                   color:#F87171;font-family:inherit;font-size:12px;cursor:pointer;
+                   transition:background 0.15s"
+            onmouseenter="this.style.background='rgba(239,68,68,0.15)'"
+            onmouseleave="this.style.background='rgba(239,68,68,0.08)'"
+          >🗑️ Tout supprimer</button>
+        </div>
       </div>
       <div id="conv-list-full"></div>
     </div>
@@ -316,7 +347,7 @@
                   class="agent-input" style="width:100%"
                   onchange="app.saveSetting('sub_text', this.value)">
               </div>
-              <button class="settings-validate-btn" onclick="app.applyGreeting()">✓ Appliquer</button>
+              <button class="settings-validate-btn" onclick="app.validateSection('greeting')">✓ Appliquer</button>
             </div>
           </div>
 
@@ -339,11 +370,11 @@
                   onchange="app.saveSetting('sounds_enabled', this.checked)">
               </div>
               <div class="setting-row">
-                <label>Activation vocale (« Hey Jarvis »)</label>
+                <label>Activation vocale (« Hey ARIA »)</label>
                 <input type="checkbox" id="set-wake-word">
               </div>
               <div style="font-size:11px;color:var(--text3);margin:-6px 0 10px 0">
-                Dis « Hey Jarvis » pour activer le micro sans clavier
+                Dis « Hey ARIA » (ou le modèle openWakeWord configuré) pour activer le micro
               </div>
               <div class="setting-row">
                 <label>Transcription temps réel</label>
@@ -362,9 +393,22 @@
 
           <!-- Modèles IA -->
           <div class="settings-accordion" id="acc-modeles">
-            <div class="acc-header" onclick="app.toggleAccordion('modeles')">🤖 Modèles IA <span class="acc-chevron">▸</span></div>
+            <div class="acc-header" onclick="app.toggleAccordion('modeles')">
+              <span>🤖 Modèles IA</span>
+              <span style="display:flex;align-items:center;gap:8px">
+                <span id="agents-settings-badge" style="font-size:10px;color:var(--text3);font-weight:400"></span>
+                <span class="acc-chevron">▸</span>
+              </span>
+            </div>
             <div class="acc-body hidden">
               <div id="model-settings"><div class="loading-text">Cliquer pour charger...</div></div>
+              <button type="button" class="settings-btn-outline" style="margin-top:8px"
+                onclick="app.pickAndRegisterLocalModel()">📦 Importer modèle GGUF</button>
+              <label class="settings-btn-outline" style="margin-top:8px;display:inline-block;margin-left:8px">
+                ou glisser fichier
+                <input type="file" accept=".gguf" style="display:none"
+                  onchange="app.registerLocalModel(this.files[0]);this.value=''">
+              </label>
               <button class="settings-btn-outline" onclick="app.loadModelSettings()" style="margin-top:8px">🔄 Rafraîchir</button>
             </div>
           </div>
@@ -377,6 +421,31 @@
                 Connecte des IAs externes en complément des modèles locaux.
               </div>
               <div id="api-keys-list"></div>
+            </div>
+          </div>
+
+          <!-- Google Workspace -->
+          <div class="settings-accordion" id="acc-google">
+            <div class="acc-header" onclick="app.toggleAccordion('google')">
+              <span>📅 Google Workspace</span>
+              <span style="display:flex;align-items:center;gap:8px">
+                <span id="google-status-badge" style="font-size:10px;color:var(--text3);font-weight:400">—</span>
+                <span class="acc-chevron">▸</span>
+              </span>
+            </div>
+            <div class="acc-body hidden">
+              <div style="font-size:11px;color:var(--text3);margin-bottom:10px;line-height:1.5">
+                Calendar, Gmail, Drive, Sheets et Docs via OAuth2.
+                Place <code>credentials.json</code> à la racine du projet, puis connecte ton compte.
+              </div>
+              <div id="google-status-detail" style="font-size:12px;margin-bottom:12px;color:var(--text2)">—</div>
+              <button type="button" class="settings-btn-outline" onclick="app.connectGoogle()">
+                🔗 Connecter Google
+              </button>
+              <div style="font-size:11px;color:var(--text3);margin-top:10px">
+                Commandes vocales : « mes événements », « lis mes emails », « cherche X dans mon drive »,
+                « crée un tableau Google Sheets Budget »…
+              </div>
             </div>
           </div>
 
@@ -418,6 +487,18 @@
                 <input type="checkbox" id="set-kill-ollama" checked
                   onchange="app.saveSetting('kill_ollama_on_exit', this.checked)">
               </div>
+              <div class="setting-row">
+                <label>Mode économie VRAM (intent + fast uniquement)</label>
+                <input type="checkbox" id="set-light-vram"
+                  onchange="app.saveSetting('light_vram_mode', this.checked)">
+              </div>
+              <div class="setting-row">
+                <label>Index applications</label>
+                <span id="apps-index-label" style="font-size:12px;color:var(--text3)">—</span>
+                <button type="button" class="settings-btn-outline" style="margin-left:8px;padding:4px 10px"
+                  onclick="app.refreshAppsIndex()">🔄 Scanner</button>
+              </div>
+              <button class="settings-validate-btn" onclick="app.validateSection('systeme')">✓ Appliquer</button>
             </div>
           </div>
 
@@ -446,6 +527,11 @@
           <span class="widget-icon">🔔</span>
           <span class="widget-label">Rappels</span>
           <span class="widget-value" id="wval-rappels">—</span>
+        </div>
+        <div class="widget-row" id="wrow-gdoc">
+          <span class="widget-icon">📄</span>
+          <span class="widget-label">Doc actif</span>
+          <span class="widget-value" id="wval-gdoc">—</span>
         </div>
         <div class="widget-row" id="wrow-meteo">
           <span class="widget-icon" id="wicon-meteo">🌡️</span>
@@ -493,8 +579,8 @@
             <span id="mem-sessions">...</span>
           </div>
         </div>
-        <button class="widget-action-btn" onclick="app.optimizeMemory()">
-          Optimiser
+        <button class="widget-action-btn" onclick="app.exploreMemory()" style="width:100%">
+          Explorer la mémoire
         </button>
       </div>
     </div>
@@ -640,8 +726,11 @@
     <div class="preset-editor-body">
       <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
         <label class="agent-label">Icône</label>
-        <input type="text" id="preset-icon-input" class="agent-input" maxlength="4" value="⚡"
-          oninput="app.updatePresetPreview()">
+        <div style="position:relative">
+          <button type="button" class="emoji-btn" id="preset-icon-btn" onclick="app.togglePresetEmojiPicker()">⚡</button>
+          <div class="emoji-picker" id="preset-emoji-picker" style="display:none"></div>
+          <input type="hidden" id="preset-icon-input" value="⚡">
+        </div>
       </div>
       <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
         <label class="agent-label">Nom</label>
@@ -652,14 +741,17 @@
         <label class="agent-label">Volume (%)</label>
         <input type="range" id="preset-volume" min="0" max="100" value="50" class="agent-input">
       </div>
-      <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
-        <label class="agent-label">Apps à ouvrir (virgules)</label>
-        <input type="text" id="preset-apps-open" class="agent-input" placeholder="vscode, chrome">
-      </div>
-      <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
-        <label class="agent-label">Apps à fermer (virgules)</label>
-        <input type="text" id="preset-apps-close" class="agent-input" placeholder="discord, steam">
-      </div>
+              <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
+                <label class="agent-label">Apps à ouvrir (virgules)</label>
+                <input type="text" id="preset-apps-open" class="agent-input" placeholder="vscode, chrome"
+                  list="installed-apps-list">
+              </div>
+              <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
+                <label class="agent-label">Apps à fermer (virgules)</label>
+                <input type="text" id="preset-apps-close" class="agent-input" placeholder="discord, steam"
+                  list="installed-apps-list">
+              </div>
+              <datalist id="installed-apps-list"></datalist>
       <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
         <label class="agent-label">Message de confirmation</label>
         <input type="text" id="preset-message" class="agent-input" placeholder="Mode activé !">

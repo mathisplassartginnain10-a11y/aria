@@ -727,6 +727,45 @@ def _search_everywhere(app_name: str) -> str | None:
     return None
 
 
+def _load_uwp_index() -> dict[str, str]:
+    """Charge la map nom→AppID depuis apps_index.json."""
+    import json
+
+    try:
+        path = app_paths.data_dir() / "apps_index.json"
+        if not path.exists():
+            return {}
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        uwp = data.get("uwp") or {}
+        return {str(k).lower(): str(v) for k, v in uwp.items() if v}
+    except Exception:
+        return {}
+
+
+def _search_apps_index(app_name: str) -> str | None:
+    """Trouve une app UWP via l'index persisté (Get-StartApps)."""
+    name_lower = app_name.lower().strip()
+    uwp = _load_uwp_index()
+    if not uwp:
+        return None
+
+    if name_lower in uwp:
+        return f"shell:AppsFolder\\{uwp[name_lower]}"
+
+    best_id = None
+    best_len = 0
+    for display, app_id in uwp.items():
+        if name_lower in display or display in name_lower:
+            overlap = min(len(name_lower), len(display))
+            if overlap > best_len:
+                best_len = overlap
+                best_id = app_id
+    if best_id:
+        return f"shell:AppsFolder\\{best_id}"
+    return None
+
+
 def _target_is_launchable(target: str) -> bool:
     if target.startswith("shell:") or target.endswith(":"):
         return True
@@ -799,6 +838,7 @@ def _resolve_launch_target_uncached(name_lower: str) -> str | None:
             _find_in_registry(name_lower.replace(" ", ""))
             or _search_start_menu(name_lower)
             or _search_everywhere(name_lower)
+            or _search_apps_index(name_lower)
         )
 
     if path and _target_is_launchable(path):

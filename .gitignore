@@ -31,6 +31,8 @@ data/site_aliases_prefixes.txt
 config.yaml
 google_token.json
 google_credentials.json
+credentials.json
+python/credentials.json
 data/google_token.json
 data/google_credentials.json
 

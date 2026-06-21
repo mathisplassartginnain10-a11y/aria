@@ -38,9 +38,15 @@ DEFAULT_PARAMS = {
     "batch_size": 512,
 }
 
+OLLAMA_GPU_LAYERS = 99
+PREFER_OLLAMA_WHEN_NO_CUDA = True
+
 _servers: dict[str, dict] = {}
 _port_counter = 8080
 _lock = threading.Lock()
+_cuda_probe: bool | None = None
+_llama_dir: Path | None = None
+_cuda_bin_dirs: list[Path] = []
 
 
 def _resolve_server_exe(configured: str | None = None) -> str:
@@ -73,10 +79,116 @@ def _resolve_server_exe(configured: str | None = None) -> str:
     return str(candidates[0]) if candidates else LLAMA_SERVER_EXE
 
 
+def _discover_cuda_bin_dirs(extra: str | None = None) -> list[Path]:
+    """Répertoires contenant cudart/cublas (requis par ggml-cuda.dll)."""
+    found: list[Path] = []
+    seen: set[str] = set()
+
+    def _add(path: Path) -> None:
+        key = str(path).lower()
+        if key in seen:
+            return
+        seen.add(key)
+        if path.is_dir():
+            found.append(path)
+
+    if extra:
+        _add(Path(extra))
+    cuda_home = os.environ.get("CUDA_PATH") or os.environ.get("CUDA_HOME")
+    if cuda_home:
+        _add(Path(cuda_home) / "bin")
+
+    toolkit = Path(r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA")
+    if toolkit.is_dir():
+        for sub in sorted(toolkit.iterdir(), reverse=True):
+            if sub.is_dir():
+                _add(sub / "bin")
+
+    if _llama_dir:
+        _add(_llama_dir)
+
+    for part in os.environ.get("PATH", "").split(os.pathsep):
+        if part and ("cuda" in part.lower() or "nvidia" in part.lower()):
+            _add(Path(part))
+
+    return found
+
+
+def _cuda_runtime_on_path() -> bool:
+    """True si les DLL CUDA runtime sont trouvables."""
+    names = (
+        "cudart64_12.dll",
+        "cudart64_11.dll",
+        "cublas64_12.dll",
+        "cublasLt64_12.dll",
+    )
+    for directory in _cuda_bin_dirs:
+        if any((directory / name).is_file() for name in names):
+            return True
+    for name in names:
+        if shutil.which(name):
+            return True
+    return False
+
+
+def probe_llamacpp_cuda(force: bool = False) -> bool:
+    """
+    Vérifie si llama.cpp peut utiliser le GPU (ggml-cuda + runtime CUDA).
+    Sans cudart/cublas, llama-server charge tout en RAM système.
+    """
+    global _cuda_probe
+    if _cuda_probe is not None and not force:
+        return _cuda_probe
+
+    llama_dir = Path(LLAMA_SERVER_EXE).parent if Path(LLAMA_SERVER_EXE).exists() else None
+    has_cuda_dll = bool(llama_dir and (llama_dir / "ggml-cuda.dll").is_file())
+    if not has_cuda_dll:
+        logger.warning("ggml-cuda.dll absent — llama.cpp sera CPU-only")
+        _cuda_probe = False
+        return False
+
+    if not _cuda_runtime_on_path():
+        logger.warning(
+            "Runtime CUDA introuvable (cudart/cublas) — llama.cpp reste CPU-only. "
+            "Installe CUDA 12.x ou laisse ARIA utiliser Ollama GPU."
+        )
+        _cuda_probe = False
+        return False
+
+    _cuda_probe = True
+    logger.info("CUDA détecté pour llama.cpp — offload GPU activé")
+    return True
+
+
+def should_use_ollama_gpu() -> bool:
+    """True si Ollama GPU doit être préféré à llama-server CPU."""
+    if not PREFER_OLLAMA_WHEN_NO_CUDA:
+        return False
+    if probe_llamacpp_cuda():
+        return False
+    return is_ollama_available()
+
+
+def ollama_gpu_options() -> dict:
+    """Options Ollama pour forcer l'offload VRAM."""
+    return {"num_gpu": OLLAMA_GPU_LAYERS}
+
+
+def _build_server_env() -> dict[str, str]:
+    env = os.environ.copy()
+    if _cuda_bin_dirs:
+        extra = os.pathsep.join(str(p) for p in _cuda_bin_dirs)
+        env["PATH"] = extra + os.pathsep + env.get("PATH", "")
+        env.setdefault("CUDA_VISIBLE_DEVICES", "0")
+    return env
+
+
 def configure(cfg: dict | None = None) -> None:
     """Applique la section llamacpp de config.yaml."""
     global LLAMA_SERVER_EXE, OLLAMA_BLOBS_DIR, OLLAMA_MANIFESTS_DIR
     global CUSTOM_MODELS_DIR, DEFAULT_PARAMS, _port_counter
+    global OLLAMA_GPU_LAYERS, PREFER_OLLAMA_WHEN_NO_CUDA
+    global _llama_dir, _cuda_bin_dirs, _cuda_probe
 
     if not cfg:
         return
@@ -84,6 +196,7 @@ def configure(cfg: dict | None = None) -> None:
     llamacpp = cfg.get("llamacpp") or {}
     configured_path = llamacpp.get("server_path") if llamacpp.get("server_path") else None
     LLAMA_SERVER_EXE = _resolve_server_exe(str(configured_path) if configured_path else None)
+    _llama_dir = Path(LLAMA_SERVER_EXE).parent if Path(LLAMA_SERVER_EXE).exists() else None
     if Path(LLAMA_SERVER_EXE).exists():
         logger.info("llama-server: %s", LLAMA_SERVER_EXE)
     else:
@@ -91,6 +204,13 @@ def configure(cfg: dict | None = None) -> None:
             "llama-server introuvable (%s) — modèles locaux indisponibles, IA cloud OK",
             LLAMA_SERVER_EXE,
         )
+    _cuda_bin_dirs = _discover_cuda_bin_dirs(str(llamacpp.get("cuda_path") or "") or None)
+    _cuda_probe = None
+    if llamacpp.get("ollama_gpu_layers") is not None:
+        OLLAMA_GPU_LAYERS = int(llamacpp["ollama_gpu_layers"])
+    if "prefer_ollama_when_no_cuda" in llamacpp:
+        PREFER_OLLAMA_WHEN_NO_CUDA = bool(llamacpp["prefer_ollama_when_no_cuda"])
+    probe_llamacpp_cuda(force=True)
     if llamacpp.get("blobs_dir"):
         OLLAMA_BLOBS_DIR = Path(str(llamacpp["blobs_dir"]))
     if llamacpp.get("manifests_dir"):
@@ -226,6 +346,14 @@ def start_model_server(model_name: str, params: dict | None = None) -> dict | No
     Démarre un serveur llama-server.exe pour un modèle donné.
     Retourne {process, port, url, model_path, model_name} ou None si échec.
     """
+    if should_use_ollama_gpu():
+        logger.info(
+            "CUDA indisponible pour llama.cpp — serveur local non démarré "
+            "(modèle=%s, inférence via Ollama GPU)",
+            model_name,
+        )
+        return None
+
     if model_name in _servers:
         info = _servers[model_name]
         if info["process"].poll() is None:
@@ -265,21 +393,32 @@ def start_model_server(model_name: str, params: dict | None = None) -> dict | No
         str(p.get("threads", DEFAULT_PARAMS["threads"])),
         "--batch-size",
         str(p.get("batch_size", DEFAULT_PARAMS["batch_size"])),
-        "--no-mmap",
-        "--log-disable",
     ]
 
+    if probe_llamacpp_cuda():
+        cmd.append("--no-mmap")
+
+    log_dir = Path(os.environ.get("TEMP", ".")) / "aria_llama_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stderr_log = log_dir / f"llama_{model_name.replace(':', '_')}_{port}.log"
+
     logger.info(
-        "Démarrage llama-server: modèle=%s, port=%d, n_gpu_layers=%d",
-        model_name, port, p.get("n_gpu_layers", DEFAULT_PARAMS["n_gpu_layers"]),
+        "Démarrage llama-server: modèle=%s, port=%d, n_gpu_layers=%d, cuda=%s",
+        model_name,
+        port,
+        p.get("n_gpu_layers", DEFAULT_PARAMS["n_gpu_layers"]),
+        probe_llamacpp_cuda(),
     )
     logger.debug("Commande: %s", " ".join(cmd))
 
     try:
+        stderr_file = open(stderr_log, "w", encoding="utf-8", errors="replace")
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=stderr_file,
+            cwd=str(_llama_dir) if _llama_dir else None,
+            env=_build_server_env(),
             creationflags=CREATE_NO_WINDOW,
         )
 
@@ -287,7 +426,18 @@ def start_model_server(model_name: str, params: dict | None = None) -> dict | No
         for _ in range(60):
             time.sleep(0.5)
             if process.poll() is not None:
-                logger.error("llama-server a planté immédiatement (modèle=%s)", model_name)
+                stderr_file.close()
+                tail = ""
+                try:
+                    tail = stderr_log.read_text(encoding="utf-8", errors="replace")[-1500:]
+                except OSError:
+                    pass
+                logger.error(
+                    "llama-server a planté immédiatement (modèle=%s). Log: %s\n%s",
+                    model_name,
+                    stderr_log,
+                    tail,
+                )
                 return None
             try:
                 resp = requests.get(f"{url}/health", timeout=1)
@@ -297,9 +447,25 @@ def start_model_server(model_name: str, params: dict | None = None) -> dict | No
             except Exception:
                 pass
         else:
-            logger.error("Timeout démarrage serveur '%s'", model_name)
+            stderr_file.close()
+            logger.error("Timeout démarrage serveur '%s' (voir %s)", model_name, stderr_log)
             process.kill()
             return None
+
+        stderr_file.close()
+        try:
+            log_text = stderr_log.read_text(encoding="utf-8", errors="replace")
+            if "CUDA" in log_text.upper() and "CPU" in log_text:
+                logger.info("Backend GPU llama.cpp actif pour '%s'", model_name)
+            elif "host memory" in log_text.lower() and "device_info" in log_text.lower():
+                if "CUDA" not in log_text and "Vulkan" not in log_text:
+                    logger.warning(
+                        "llama-server '%s' semble CPU-only (RAM) — voir %s",
+                        model_name,
+                        stderr_log,
+                    )
+        except OSError:
+            pass
 
         info = {
             "process": process,
@@ -371,3 +537,11 @@ def stop_server(model_name: str) -> None:
         except Exception:
             pass
         logger.info("Serveur '%s' arrêté", model_name)
+
+
+def stop_servers_except(keep_models: set[str | None]) -> None:
+    """Arrête tous les serveurs sauf ceux dont le nom est dans keep_models."""
+    keep = {m for m in keep_models if m}
+    for model_name in list(_servers.keys()):
+        if model_name not in keep and not any(k in model_name for k in keep):
+            stop_server(model_name)

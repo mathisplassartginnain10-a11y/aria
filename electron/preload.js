@@ -101,6 +101,8 @@ contextBridge.exposeInMainWorld('ARIA', {
     ipcRenderer.send('open-external', url);
   },
 
+  pickGgufFile: () => ipcRenderer.invoke('pick-gguf-file'),
+
   /**
    * Contrôles de la fenêtre.
    */

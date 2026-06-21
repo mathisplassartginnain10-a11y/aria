@@ -100,6 +100,23 @@ def _load_config() -> dict:
     return config
 
 
+def _stop_ollama_processes() -> None:
+    log = _logger or logging.getLogger(__name__)
+    try:
+        import psutil
+
+        for proc in psutil.process_iter(["name", "pid"]):
+            try:
+                name = (proc.info.get("name") or "").lower()
+                if name in ("ollama.exe", "ollama", "ollama app.exe"):
+                    proc.terminate()
+                    log.info("Ollama arrêté (PID %s)", proc.info.get("pid"))
+            except Exception:
+                pass
+    except ImportError:
+        log.warning("psutil absent — arrêt Ollama ignoré")
+
+
 def _on_aria_closing() -> None:
     global _shutdown_done, _mic_active, _listen_thread
     if _shutdown_done:
@@ -127,6 +144,12 @@ def _on_aria_closing() -> None:
         llamacpp_manager.stop_all_servers()
     except Exception as exc:
         log.error("Erreur arrêt llama.cpp: %s", exc)
+    try:
+        cfg = _config if _config else _load_config()
+        if cfg.get("kill_ollama_on_exit", True):
+            _stop_ollama_processes()
+    except Exception as exc:
+        log.error("Erreur arrêt Ollama: %s", exc)
     with _mic_lock:
         _mic_active = False
         _listen_thread = None
@@ -178,6 +201,13 @@ def _on_hotkey(_event=None) -> None:
 
 def _start_llamacpp() -> None:
     log = _logger or logging.getLogger(__name__)
+    if llamacpp_manager.should_use_ollama_gpu():
+        ui_bridge.show_toast(
+            "Inférence via Ollama GPU (CUDA manquant pour llama.cpp)",
+            "info",
+        )
+        log.info("CUDA absent pour llama.cpp — inférence déléguée à Ollama GPU")
+        return
     if not Path(llamacpp_manager.LLAMA_SERVER_EXE).exists():
         ui_bridge.show_toast("llama-server.exe introuvable — mode cloud API possible", "warning")
         log.warning("llama-server.exe non trouvé: %s", llamacpp_manager.LLAMA_SERVER_EXE)
@@ -327,6 +357,22 @@ def main() -> None:
 
     ui_bridge.set_status("idle")
     _logger.info("=== ARIA Backend prêt ===")
+
+    try:
+        ui_bridge.apply_wake_word(_config.get("wake_word_enabled", False))
+    except Exception:
+        _logger.exception("Wake word init failed")
+
+    try:
+        ui_bridge.refresh_apps_index()
+    except Exception:
+        _logger.debug("Apps index scan skipped", exc_info=True)
+
+    if _config.get("light_vram_mode"):
+        try:
+            ui_bridge.set_light_vram_mode(True)
+        except Exception:
+            _logger.debug("Light VRAM mode init skipped", exc_info=True)
 
     try:
         while True:

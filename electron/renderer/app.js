@@ -18,6 +18,8 @@ const state = {
   _originalTranscription: '',
   _staticPort: 9998,
   _streamingMessage: null,
+  _streamingContent: '',
+  _lastOptimisticUserText: null,
   _clockInterval: null,
   _pendingTheme: null,
   _pendingWallpaper: null,
@@ -29,6 +31,7 @@ const state = {
   _activeAgentId: 'default',
   _activeAgentIcon: '🤖',
   _activeAgentName: 'ARIA',
+  _generating: false,
 };
 
 const AGENT_COLORS = [
@@ -42,6 +45,7 @@ const AGENT_EMOJIS = [
   '🏆', '⚡', '🔥', '❄️', '🌊', '🎸', '🎧', '📷',
   '✈️', '🚁', '🏎️', '⚽', '🎮', '🎲', '♟️', '🃏',
   '👨‍💻', '👩‍💻', '🧑‍🔬', '🧑‍🎨', '👨‍✈️', '🦁', '🐉', '🦊',
+  '🧙', '🌟', '🎭', '📝', '🔮', '🌍', '🧠', '🎪',
 ];
 
 const SoundFX = {
@@ -49,9 +53,10 @@ const SoundFX = {
   _ctx: null,
   _buffers: {},
   _fileMap: {
-    start: 'activate.mp3',
-    listening: 'listening.mp3',
-    done: 'response.mp3',
+    start: 'activate.wav',
+    listening: 'listening.wav',
+    done: 'response.wav',
+    error: 'error.wav',
   },
 
   _getCtx() {
@@ -172,6 +177,7 @@ async function init() {
   setupEventListeners();
   await loadActiveAgent();
   await loadAgentDropdown();
+  await updateAgentsBadge();
   setStatus('idle');
   navigate('home');
   updateClock();
@@ -235,13 +241,15 @@ function setupEventListeners() {
   // Statut ARIA
   api.on('status_change', (status) => setStatus(status));
 
-  api.on('thinking_start', () => setStatus('thinking'));
-  api.on('thinking_action', (action) => {
-    const subtitle = document.getElementById('sidebar-subtitle');
-    if (subtitle && action) subtitle.textContent = action;
+  api.on('thinking_start', (payload) => {
+    const data = payload && typeof payload === 'object' ? payload : {};
+    showThinkingBubble(data.model || '', data.action || 'Réflexion...');
     setStatus('thinking');
   });
+  api.on('thinking_action', (action) => updateThinkingAction(action));
+  api.on('response_model', (modelName) => setThinkingModel(modelName));
   api.on('thinking_hide', () => {
+    hideThinkingBubble();
     if (state.micActive) setStatus('listening');
     else setStatus('idle');
   });
@@ -255,6 +263,10 @@ function setupEventListeners() {
   // Message utilisateur depuis le backend
   api.on('user_message', (text) => {
     showHomeConversation();
+    if (state._lastOptimisticUserText === text) {
+      state._lastOptimisticUserText = null;
+      return;
+    }
     addUserBubble(text);
   });
 
@@ -262,8 +274,17 @@ function setupEventListeners() {
   api.on('assistant_token', (token) => appendStreamToken(token));
 
   // Fin du message ARIA
-  api.on('assistant_done', () => {
-    finalizeAssistantMessage();
+  api.on('assistant_done', (modelName) => {
+    state._generating = false;
+    hideStopButton();
+    hideThinkingBubble();
+    finalizeAssistantMessage(modelName || state._pendingModel || '');
+    setStatus('idle');
+    const input = document.getElementById('text-input');
+    if (input) {
+      input.disabled = false;
+      input.focus();
+    }
     SoundFX.play('done');
   });
 
@@ -273,6 +294,7 @@ function setupEventListeners() {
   });
 
   api.on('gdoc_link', ({ title, url }) => showGdocLinkCard(title, url));
+  api.on('active_gdoc', () => { loadDaySummary(); });
 
   api.on('search_results', (html) => showSearchResultsCard(html));
 
@@ -299,35 +321,46 @@ function renderConversationList(conversations) {
   const badge = document.getElementById('conv-badge');
   if (badge) badge.textContent = conversations.length ? String(conversations.length) : '';
 
-  const html = !conversations.length
-    ? '<div class="empty-conv-list">Aucune conversation</div>'
-    : conversations.map(conv => {
-        const isActive = conv.id === state.currentConvId;
-        const title = esc(conv.title || 'Nouvelle conversation');
-        const date = conv.updated_at
-          ? new Date(conv.updated_at).toLocaleDateString('fr-FR')
-          : '';
+  const list = document.getElementById('conv-list-full');
+  if (!list) return;
 
-        return `
-          <div class="conv-item ${isActive ? 'active' : ''}" id="conv-${conv.id}"
-               onmouseenter="this.querySelector('.conv-delete')?.style && (this.querySelector('.conv-delete').style.opacity='1')"
-               onmouseleave="this.querySelector('.conv-delete')?.style && (this.querySelector('.conv-delete').style.opacity='0')">
-            <div class="conv-content" onclick="loadConversation('${conv.id}')">
-              <div class="conv-title">${title}</div>
-              <div class="conv-date">${date}</div>
-            </div>
-            <button class="conv-delete"
-              onclick="event.stopPropagation();deleteConversation('${conv.id}','${title.replace(/'/g, "\\'")}')">
-              ✕
-            </button>
-          </div>`;
-      }).join('');
+  if (!conversations || conversations.length === 0) {
+    list.innerHTML = `
+      <div style="text-align:center;padding:40px 20px;color:rgba(255,255,255,0.3);font-size:13px">
+        Aucune conversation.
+      </div>`;
+    const listLegacy = document.getElementById('conversations-list');
+    if (listLegacy) listLegacy.innerHTML = '<div class="empty-conv-list">Aucune conversation</div>';
+    return;
+  }
 
-  const listFull = document.getElementById('conv-list-full');
-  if (listFull) listFull.innerHTML = html;
+  list.innerHTML = conversations.map(conv => {
+    const isActive = conv.id === state.currentConvId;
+    const title = esc(conv.title || 'Nouvelle conversation');
+    const titleJs = JSON.stringify(conv.title || 'Nouvelle conversation');
+    const date = conv.updated_at
+      ? new Date(conv.updated_at).toLocaleDateString('fr-FR')
+      : '';
+    return `
+      <div class="conv-item ${isActive ? 'active' : ''}"
+           id="conv-item-${conv.id}"
+           onmouseenter="this.querySelector('.conv-del')?.style && (this.querySelector('.conv-del').style.opacity='1')"
+           onmouseleave="this.querySelector('.conv-del')?.style && (this.querySelector('.conv-del').style.opacity='0')">
+        <div class="conv-content" onclick="app.loadConversation('${conv.id}')">
+          <div class="conv-title">${title}</div>
+          <div class="conv-date">${date}</div>
+        </div>
+        <button class="conv-del conv-delete"
+          onclick="event.stopPropagation();app.deleteConversation('${conv.id}',${titleJs})"
+          style="opacity:0;flex-shrink:0;background:rgba(239,68,68,0.12);
+                 border:none;border-radius:6px;width:26px;height:26px;
+                 color:#F87171;cursor:pointer;font-size:11px;
+                 transition:opacity 0.15s,background 0.15s">✕</button>
+      </div>`;
+  }).join('');
 
   const listLegacy = document.getElementById('conversations-list');
-  if (listLegacy) listLegacy.innerHTML = html;
+  if (listLegacy) listLegacy.innerHTML = list.innerHTML;
 }
 
 function loadFullConversationList() {
@@ -338,6 +371,7 @@ async function newConversation() {
   try {
     const result = await api.call('new_conversation');
     state.currentConvId = result.id;
+    await saveSetting('last_conversation_id', result.id);
     showHomeIdle();
     await refreshConversationList();
     navigate('home');
@@ -351,6 +385,7 @@ async function loadConversation(convId) {
   try {
     const result = await api.call('load_conversation', convId);
     state.currentConvId = result.id;
+    await saveSetting('last_conversation_id', result.id);
 
     const messagesEl = document.getElementById('messages');
     if (messagesEl) messagesEl.innerHTML = '';
@@ -379,32 +414,83 @@ async function loadConversation(convId) {
 
 async function deleteConversation(convId, title) {
   if (!confirm(`Supprimer "${title}" ?\nCette action est irréversible.`)) return;
+
   try {
     const result = await api.call('delete_conversation', convId);
+
     if (result.success) {
-      document.getElementById(`conv-${convId}`)?.remove();
+      document.getElementById(`conv-item-${convId}`)?.remove();
       showToast('Conversation supprimée', 'success');
+
       if (convId === state.currentConvId) {
-        await newConversation();
+        state.currentConvId = null;
+        const messages = document.getElementById('messages');
+        if (messages) messages.innerHTML = '';
+        showHomeIdle();
       }
+
+      await refreshConversationList();
+
+      const remaining = document.querySelectorAll('#conv-list-full .conv-item');
+      if (remaining.length === 0) {
+        const list = document.getElementById('conv-list-full');
+        if (list) {
+          list.innerHTML = `
+            <div style="text-align:center;padding:40px 20px;color:rgba(255,255,255,0.3);font-size:13px">
+              Aucune conversation.
+            </div>`;
+        }
+      }
+    } else {
+      showToast('Erreur lors de la suppression', 'error');
     }
-  } catch(e) {
-    showToast('Erreur suppression', 'error');
+  } catch (e) {
+    showToast('Erreur: ' + e.message, 'error');
   }
 }
 
 async function deleteAllConversations() {
-  const count = document.querySelectorAll('.conv-item').length;
-  if (!count) { showToast('Aucune conversation', 'info'); return; }
-  if (!confirm(`Supprimer les ${count} conversation(s) ?`)) return;
+  const items = document.querySelectorAll('#conv-list-full .conv-item');
+  const count = items.length;
+
+  if (count === 0) {
+    showToast('Aucune conversation à supprimer', 'info');
+    return;
+  }
+
+  if (!confirm(`Supprimer les ${count} conversation(s) ?\nCette action est irréversible.`)) return;
+
   try {
     const result = await api.call('delete_all_conversations');
+
     if (result.success) {
-      showToast(`${result.count} supprimée(s)`, 'success');
-      await newConversation();
+      showToast(`${result.count} conversation(s) supprimée(s)`, 'success');
+
+      const list = document.getElementById('conv-list-full');
+      if (list) {
+        list.innerHTML = `
+          <div style="text-align:center;padding:40px 20px;color:rgba(255,255,255,0.3);font-size:13px">
+            Aucune conversation.<br>
+            <button onclick="app.newConversation()" style="margin-top:12px;padding:8px 16px;
+              background:rgba(108,142,255,0.12);border:1px solid rgba(108,142,255,0.25);
+              border-radius:8px;color:#6C8EFF;font-family:inherit;font-size:12px;cursor:pointer">
+              + Nouvelle conversation
+            </button>
+          </div>`;
+      }
+
+      const badge = document.getElementById('conv-badge');
+      if (badge) badge.textContent = '';
+
+      state.currentConvId = null;
+      const messages = document.getElementById('messages');
+      if (messages) messages.innerHTML = '';
+      showHomeIdle();
+    } else {
+      showToast('Erreur suppression', 'error');
     }
-  } catch(e) {
-    showToast('Erreur', 'error');
+  } catch (e) {
+    showToast('Erreur: ' + e.message, 'error');
   }
 }
 
@@ -443,9 +529,12 @@ function addAriaBubble(text, scroll = true) {
 }
 
 function appendStreamToken(token) {
+  hideThinkingBubble();
   if (!state._streamingMessage) {
-    // Créer une nouvelle bulle ARIA
     const messages = document.getElementById('messages');
+    if (!messages) return;
+    const outer = document.createElement('div');
+    outer.className = 'bubble-wrap-outer aria-wrap';
     const div = document.createElement('div');
     div.className = 'bubble-wrap aria-wrap';
     div.innerHTML = `
@@ -458,22 +547,117 @@ function appendStreamToken(token) {
       <div class="bubble bubble-aria">
         <div class="bubble-text streaming-text"></div>
       </div>`;
-    messages.appendChild(div);
+    outer.appendChild(div);
+    messages.appendChild(outer);
+    state._streamingOuter = outer;
     state._streamingMessage = div.querySelector('.streaming-text');
     state._streamingContent = '';
   }
 
   state._streamingContent += token;
-  state._streamingMessage.innerHTML = renderMarkdown(state._streamingContent) + '<span class="cursor-blink">▋</span>';
+  state._streamingMessage.innerHTML =
+    renderMarkdown(state._streamingContent) + '<span class="cursor-blink">▋</span>';
   scrollToBottom();
 }
 
-function finalizeAssistantMessage() {
+function finalizeAssistantMessage(modelName = '') {
+  const label = modelName || state._pendingModel || '';
   if (state._streamingMessage) {
+    const cursor = state._streamingMessage.querySelector('.cursor-blink');
+    if (cursor) cursor.remove();
     state._streamingMessage.innerHTML = renderMarkdown(state._streamingContent);
+    if (label && state._streamingOuter) {
+      const badge = document.createElement('div');
+      badge.className = 'model-badge';
+      badge.textContent = `via ${label}`;
+      state._streamingOuter.insertBefore(badge, state._streamingOuter.firstChild);
+    }
     state._streamingMessage = null;
-    state._streamingContent = '';
+    state._streamingOuter = null;
   }
+  state._streamingContent = '';
+  state._pendingModel = '';
+}
+
+function showThinkingBubble(modelName = '', action = '') {
+  hideThinkingBubble();
+  showHomeConversation();
+  const messages = document.getElementById('messages');
+  if (!messages) return;
+
+  state._pendingModel = modelName || '';
+  state._thinkingLog = action ? [action] : [];
+
+  const div = document.createElement('div');
+  div.id = 'thinking-bubble';
+  div.className = 'bubble-wrap aria-wrap thinking-wrap';
+  div.innerHTML = `
+    <div class="bubble-avatar">
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <circle cx="12" cy="12" r="5" fill="url(#logoGrad)"/>
+        <circle cx="12" cy="12" r="9" fill="none" stroke="rgba(108,142,255,0.4)" stroke-width="1"/>
+      </svg>
+    </div>
+    <div class="thinking-content">
+      ${modelName ? `<div class="model-label">${esc(modelName)}</div>` : ''}
+      <div class="action-log" id="thinking-action">${esc(action || 'Réflexion...')}</div>
+      <ul class="thinking-log" id="thinking-log"></ul>
+      <div class="thinking-dots"><span></span><span></span><span></span></div>
+    </div>`;
+  messages.appendChild(div);
+  renderThinkingLog();
+  scrollToBottom();
+}
+
+function setThinkingModel(modelName = '') {
+  if (!modelName) return;
+  state._pendingModel = modelName;
+  const bubble = document.getElementById('thinking-bubble');
+  if (!bubble) return;
+  let label = bubble.querySelector('.model-label');
+  if (!label) {
+    label = document.createElement('div');
+    label.className = 'model-label';
+    bubble.querySelector('.thinking-content')?.prepend(label);
+  }
+  label.textContent = modelName;
+}
+
+function updateThinkingAction(action) {
+  if (!action) return;
+  const el = document.getElementById('thinking-action');
+  if (el) {
+    el.textContent = action;
+    el.classList.add('action-flash');
+    setTimeout(() => el.classList.remove('action-flash'), 400);
+  }
+  if (!state._thinkingLog) state._thinkingLog = [];
+  const last = state._thinkingLog[state._thinkingLog.length - 1];
+  if (action !== last) {
+    state._thinkingLog.push(action);
+    renderThinkingLog();
+  }
+  const subtitle = document.getElementById('sidebar-subtitle');
+  if (subtitle) {
+    const model = state._pendingModel;
+    subtitle.textContent = model ? `${action} · ${model}` : action;
+  }
+  setStatus('thinking');
+  scrollToBottom();
+}
+
+function renderThinkingLog() {
+  const log = document.getElementById('thinking-log');
+  if (!log || !state._thinkingLog?.length) return;
+  log.innerHTML = state._thinkingLog.map((item, i) => {
+    const isLast = i === state._thinkingLog.length - 1;
+    return `<li class="thinking-log-item${isLast ? ' active' : ''}">${esc(item)}</li>`;
+  }).join('');
+}
+
+function hideThinkingBubble() {
+  document.getElementById('thinking-bubble')?.remove();
+  state._thinkingLog = [];
 }
 
 function showSearchResultsCard(sourcesHtml) {
@@ -657,32 +841,87 @@ async function handleFiles(files) {
 
 // ── Envoi de messages ─────────────────────────────────────────────────────────
 
+function showStopButton() {
+  const btn = document.getElementById('stop-btn');
+  if (btn) {
+    btn.style.display = 'flex';
+    btn.style.animation = 'fadeInUp 0.2s ease';
+  }
+}
+
+function hideStopButton() {
+  const btn = document.getElementById('stop-btn');
+  if (btn) btn.style.display = 'none';
+}
+
+async function stopGeneration() {
+  if (!state._generating) return;
+
+  try {
+    await api.call('stop_generation');
+  } catch (e) {
+    console.error('stop_generation error:', e);
+  }
+
+  state._generating = false;
+  hideStopButton();
+  hideThinkingBubble();
+  finalizeAssistantMessage();
+  setStatus('idle');
+
+  const input = document.getElementById('text-input');
+  if (input) {
+    input.disabled = false;
+    input.focus();
+  }
+
+  showToast('Génération arrêtée', 'info');
+}
+
 async function sendMessage() {
   const input = document.getElementById('text-input');
-  const text = input.value.trim();
-  if (!text) return;
+  const text = input?.value?.trim();
+  if (!text || state._generating) return;
 
   input.value = '';
   input.style.height = 'auto';
+  input.dispatchEvent(new Event('input'));
 
   cancelVocalCountdown();
-  navigate('home');
   showHomeConversation();
+
+  state._lastOptimisticUserText = text;
+  addUserBubble(text);
+
+  state._generating = true;
   setStatus('thinking');
+  input.disabled = true;
+  showStopButton();
 
   try {
     await api.call('ask', text, state.conversationMode);
-  } catch(e) {
-    showToast('Erreur: ' + e.message, 'error');
+  } catch (e) {
+    if (!e.message?.includes('stopped')) {
+      console.error('Erreur sendMessage:', e);
+      showToast('Erreur: ' + e.message, 'error');
+    }
     finalizeAssistantMessage();
     setStatus('idle');
+  } finally {
+    state._generating = false;
+    hideStopButton();
+    input.disabled = false;
+    input.focus();
   }
 }
 
 function handleInputKeydown(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
-    sendMessage();
+    const input = document.getElementById('text-input');
+    if (input && !input.disabled) {
+      sendMessage();
+    }
   }
 }
 
@@ -815,8 +1054,6 @@ function setMicState(s) {
   const btn = document.getElementById('mic-btn');
   if (!btn) return;
   btn.classList.remove('mic-idle', 'mic-listening', 'mic-speaking-detected');
-  const icons = { idle: '🎤', listening: '🎤', transcribing: '⏳' };
-  btn.textContent = icons[s] || '🎤';
   btn.classList.add(`mic-${s}`);
 }
 
@@ -834,10 +1071,8 @@ function updateWaveform(rms) {
     state._wasSpeaking = isSpeaking;
     if (isSpeaking) {
       btn.classList.add('mic-speaking-detected');
-      btn.textContent = '🎙️';
     } else {
       btn.classList.remove('mic-speaking-detected');
-      btn.textContent = '🎤';
     }
   }
 
@@ -952,12 +1187,14 @@ async function loadSettings() {
 }
 
 async function saveSetting(key, value) {
+  if (!state.settings) state.settings = {};
   state.settings[key] = value;
   try {
     await api.call('save_settings', state.settings);
     if (['user_firstname', 'hello_text', 'sub_text'].includes(key)) updateClock();
   } catch (e) {
-    console.error('Erreur sauvegarde setting:', e);
+    console.error('Erreur saveSetting:', key, e);
+    showToast('Erreur sauvegarde paramètre', 'error');
   }
 }
 
@@ -968,12 +1205,20 @@ function toggleSettings() {
 function toggleAccordion(id) {
   const body = document.querySelector(`#acc-${id} .acc-body`);
   const chevron = document.querySelector(`#acc-${id} .acc-chevron`);
-  const isHidden = body?.classList.contains('hidden');
-  body?.classList.toggle('hidden', !isHidden);
+  if (!body) {
+    console.error(`Accordéon #acc-${id} .acc-body introuvable`);
+    return;
+  }
+  const isHidden = body.classList.contains('hidden');
+  body.classList.toggle('hidden', !isHidden);
   if (chevron) chevron.textContent = isHidden ? '▾' : '▸';
 
-  if (id === 'modeles' && isHidden) {
-    loadModelSettings();
+  const accordion = document.getElementById(`acc-${id}`);
+  if (accordion) accordion.classList.toggle('open', isHidden);
+
+  if (isHidden) {
+    if (id === 'modeles') loadModelSettings();
+    if (id === 'apikeys') loadApiKeys();
   }
 }
 
@@ -1003,7 +1248,7 @@ async function loadModelSettings() {
     container.innerHTML = roles.map(r => `
       <div class="model-row">
         <label>${r.label}</label>
-        <select onchange="setModel('${r.key}', this.value)">
+        <select onchange="app.setModel('${r.key}', this.value)">
           ${data.local_models.map(m => `
             <option value="${m}" ${m === data.configured[r.key] ? 'selected' : ''}>${m}</option>
           `).join('')}
@@ -1142,8 +1387,8 @@ async function loadCustomWallpapers() {
     grid.innerHTML = files.map(f => `
       <div class="wp-custom-item">
         <img src="http://127.0.0.1:${state._staticPort}/wallpapers/${f.filename}"
-             onclick="setWallpaper('custom','http://127.0.0.1:${state._staticPort}/wallpapers/${f.filename}')">
-        <button onclick="deleteWallpaper('${f.filename}')">✕</button>
+             onclick="app.setWallpaper('custom','http://127.0.0.1:${state._staticPort}/wallpapers/${f.filename}')">
+        <button onclick="app.deleteWallpaper('${f.filename}')">✕</button>
       </div>
     `).join('');
   } catch(e) {}
@@ -1186,6 +1431,31 @@ async function loadDaySummary() {
     if (tasksLabel) tasksLabel.textContent = data.tasks_label || 'Aucune tâche';
     if (tasksVal) tasksVal.textContent = data.tasks_detail || (data.tasks_count ? String(data.tasks_count) : '');
     if (rappelsVal) rappelsVal.textContent = data.rappels_label || '—';
+
+    const gdocVal = document.getElementById('wval-gdoc');
+    if (gdocVal) {
+      const gdoc = data.active_gdoc;
+      if (gdoc?.title && gdoc?.url) {
+        gdocVal.innerHTML = `<a href="#" class="widget-gdoc-link" data-url="${gdoc.url}">${gdoc.title}</a>`;
+        const link = gdocVal.querySelector('.widget-gdoc-link');
+        if (link) {
+          link.addEventListener('click', (e) => {
+            e.preventDefault();
+            api.openExternal(gdoc.url);
+          });
+        }
+      } else {
+        gdocVal.textContent = '—';
+      }
+    }
+
+    try {
+      const cal = await api.call('get_calendar_widget') || {};
+      if (cal.success && cal.events?.length && rappelsVal) {
+        const preview = cal.events.slice(0, 3).map(e => `${e.time} ${e.title}`).join(' · ');
+        rappelsVal.textContent = preview;
+      }
+    } catch (_) {}
   } catch (_) {
     const tasksLabel = document.getElementById('wlabel-tasks');
     if (tasksLabel?.textContent === 'Chargement...') {
@@ -1329,26 +1599,26 @@ async function loadShortcutsWidget() {
   const grid = document.getElementById('shortcuts-grid');
   if (!grid) return;
 
-  const fixed = [
-    { icon: '✉️', label: 'Rédiger un email', action: 'rédige un email professionnel', color: '#6C8EFF' },
-    { icon: '🎯', label: 'Démarrer focus', action: 'active le mode focus', color: '#A78BFA' },
-    { icon: '📊', label: 'Analyse système', action: 'analyse le système', color: '#4ADE80' },
-  ];
-
-  let presetShortcuts = [];
+  let shortcuts = [];
   try {
     const presets = await api.call('get_presets') || [];
-    presetShortcuts = presets.slice(0, 1).map(p => ({
+    shortcuts = presets.slice(0, 4).map(p => ({
       icon: p.icon || '⚡',
-      label: `Mode ${p.name || p.id}`,
-      action: `active le mode ${p.name || p.id}`,
-      color: '#F59E0B',
+      label: p.name || p.label || p.id,
+      action: `active le mode ${p.name || p.label || p.id}`,
+      color: '#6C8EFF',
     }));
   } catch (_) {}
 
-  const all = [...fixed, ...presetShortcuts].slice(0, 4);
+  if (!shortcuts.length) {
+    grid.innerHTML = `
+      <div style="grid-column:1/-1;text-align:center;padding:12px;color:var(--text3);font-size:11px">
+        Aucune routine configurée
+      </div>`;
+    return;
+  }
 
-  grid.innerHTML = all.map(s => `
+  grid.innerHTML = shortcuts.map(s => `
     <button class="shortcut-btn" onclick="app.quickAction(${JSON.stringify(s.action)})"
             style="--shortcut-color: ${s.color}">
       <span class="shortcut-icon">${s.icon}</span>
@@ -1391,32 +1661,37 @@ function navigate(page) {
   if (pageEl) {
     pageEl.classList.remove('hidden');
     pageEl.classList.add('active');
+  } else {
+    console.error(`Page #page-${page} introuvable dans le DOM`);
   }
 
   document.querySelectorAll(`[data-page="${page}"]`).forEach(btn => btn.classList.add('active'));
 
   state.currentPage = page;
 
+  if (page === 'settings') {
+    loadSettingsPage();
+    updateAgentsBadge();
+  }
   if (page === 'conversations') loadFullConversationList();
-  if (page === 'agents') loadAgentsPage();
+  if (page === 'agents') {
+    loadAgentsPage();
+    updateAgentsBadge();
+  }
   if (page === 'memory') loadMemoryPage();
   if (page === 'routines') loadPresetsPage();
-  if (page === 'settings') {
-    loadModelSettings();
-    loadApiKeys();
-    applySettingsForm();
-    loadCustomWallpapers();
-  }
 }
 
 function showHomeConversation() {
   document.getElementById('home-logo-container')?.classList.add('shrunk');
   document.getElementById('home-messages')?.classList.remove('hidden');
+  document.getElementById('home-glass-card')?.classList.add('has-conversation');
 }
 
 function showHomeIdle() {
   document.getElementById('home-logo-container')?.classList.remove('shrunk');
   document.getElementById('home-messages')?.classList.add('hidden');
+  document.getElementById('home-glass-card')?.classList.remove('has-conversation');
   const messages = document.getElementById('messages');
   if (messages) messages.innerHTML = '';
 }
@@ -1436,23 +1711,29 @@ function applyGreeting() {
   }
 }
 
-function applySettingsForm() {
-  const s = state.settings;
-  const firstnameEl = document.getElementById('set-firstname');
-  const helloEl = document.getElementById('set-hello-text');
-  const subEl = document.getElementById('set-sub-text');
-  const glassEl = document.getElementById('set-glass');
+function loadSettingsPage() {
+  const s = state.settings || {};
 
-  if (firstnameEl && s.user_firstname) firstnameEl.value = s.user_firstname;
-  if (helloEl && s.hello_text) helloEl.value = s.hello_text;
-  if (subEl && s.sub_text) subEl.value = s.sub_text;
-  if (glassEl && s.glass_intensity != null) glassEl.value = s.glass_intensity;
+  const fn = document.getElementById('set-firstname');
+  if (fn) fn.value = s.user_firstname || '';
+  const ht = document.getElementById('set-hello-text');
+  if (ht) ht.value = s.hello_text || '';
+  const st = document.getElementById('set-sub-text');
+  if (st) st.value = s.sub_text || '';
 
-  const ttsEl = document.getElementById('set-tts');
-  if (ttsEl) ttsEl.checked = s.tts_enabled !== false;
+  const tts = document.getElementById('set-tts');
+  if (tts) tts.checked = s.tts_enabled !== false;
 
-  const ttsRateEl = document.getElementById('set-tts-rate');
-  if (ttsRateEl && s.tts_rate != null) ttsRateEl.value = s.tts_rate;
+  const rate = document.getElementById('set-tts-rate');
+  if (rate) {
+    const rateVal = s.tts_rate;
+    if (typeof rateVal === 'string') {
+      const m = rateVal.match(/(-?\d+)/);
+      rate.value = m ? m[1] : 0;
+    } else {
+      rate.value = rateVal ?? 0;
+    }
+  }
 
   const soundsEl = document.getElementById('set-sounds');
   if (soundsEl) soundsEl.checked = s.sounds_enabled !== false;
@@ -1472,13 +1753,40 @@ function applySettingsForm() {
   const killOllamaEl = document.getElementById('set-kill-ollama');
   if (killOllamaEl) killOllamaEl.checked = s.kill_ollama_on_exit !== false;
 
-  const deviceEl = document.getElementById('set-device-index');
-  const deviceIdx = s.stt?.device_index ?? s['stt.device_index'];
-  if (deviceEl && deviceIdx != null) deviceEl.value = deviceIdx;
+  const lightVramEl = document.getElementById('set-light-vram');
+  if (lightVramEl) lightVramEl.checked = !!s.light_vram_mode;
 
-  const whisperEl = document.getElementById('set-whisper-model');
-  const whisperModel = s.stt?.model || s.whisper_model;
-  if (whisperEl && whisperModel) whisperEl.value = whisperModel;
+  loadAppsIndexLabel();
+  loadGoogleStatus();
+
+  const di = document.getElementById('set-device-index');
+  const deviceIdx = s.stt?.device_index ?? s['stt.device_index'];
+  if (di) di.value = deviceIdx != null ? deviceIdx : '';
+
+  const wm = document.getElementById('set-whisper-model');
+  if (wm) wm.value = s.stt?.model || s['stt.model'] || s.whisper_model || 'small';
+
+  const theme = s.theme || 'slate';
+  document.querySelectorAll('.theme-pill').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.theme === theme);
+  });
+  state._pendingTheme = theme;
+
+  const glass = document.getElementById('set-glass');
+  if (glass) glass.value = s.glass_intensity ?? 60;
+
+  if (document.getElementById('acc-modeles')?.classList.contains('open')) {
+    loadModelSettings();
+  }
+  if (document.getElementById('acc-apikeys')?.classList.contains('open')) {
+    loadApiKeys();
+  }
+
+  loadCustomWallpapers();
+}
+
+function applySettingsForm() {
+  loadSettingsPage();
 }
 
 function styledSettingToast(message, color) {
@@ -1499,11 +1807,16 @@ async function validateSection(section) {
   try {
     switch (section) {
       case 'apparence': {
-        const theme = state._pendingTheme || state.settings.theme || 'slate';
+        const theme = document.querySelector('.theme-pill.active')?.dataset.theme
+          || state._pendingTheme
+          || state.settings.theme
+          || 'slate';
         const glassVal = parseInt(document.getElementById('set-glass')?.value ?? '60', 10);
         await saveSetting('theme', theme);
         await saveSetting('glass_intensity', glassVal);
         state._pendingTheme = null;
+        setTheme(theme);
+        setGlassIntensity(glassVal);
 
         const wp = state._pendingWallpaper;
         if (wp?.type) {
@@ -1513,50 +1826,67 @@ async function validateSection(section) {
           }
         }
 
-        AnimationController.play(SettingsAnimations.animThemeChange, {
-          newTheme: theme,
-          accentColor: SettingsAnimations.themeColors[theme]
-            || getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),
-        });
-        setTimeout(() => {
-          AnimationController.play(SettingsAnimations.animGlassIntensity, { value: glassVal });
-        }, 900);
-        if (wp?.type) {
+        if (typeof SettingsAnimations !== 'undefined' && typeof AnimationController !== 'undefined') {
+          AnimationController.play(SettingsAnimations.animThemeChange, {
+            newTheme: theme,
+            accentColor: SettingsAnimations.themeColors[theme]
+              || getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),
+          });
           setTimeout(() => {
-            AnimationController.play(SettingsAnimations.animWallpaperChange, {
-              type: wp.type,
-              url: wp.url,
-              label: SettingsAnimations.wallpaperLabels[wp.type] || wp.type,
-            });
-          }, 1800);
+            AnimationController.play(SettingsAnimations.animGlassIntensity, { value: glassVal });
+          }, 900);
+          if (wp?.type) {
+            setTimeout(() => {
+              AnimationController.play(SettingsAnimations.animWallpaperChange, {
+                type: wp.type,
+                url: wp.url,
+                label: SettingsAnimations.wallpaperLabels[wp.type] || wp.type,
+              });
+            }, 1800);
+          }
         }
+        showToast('Apparence appliquée ✓', 'success');
         break;
       }
-      case 'greeting':
-        applyGreeting();
+      case 'greeting': {
+        const fn = document.getElementById('set-firstname')?.value?.trim() || 'Mathis';
+        const ht = document.getElementById('set-hello-text')?.value?.trim() || '';
+        const st = document.getElementById('set-sub-text')?.value?.trim() || '';
+        await saveSetting('user_firstname', fn);
+        await saveSetting('hello_text', ht);
+        await saveSetting('sub_text', st);
+        updateClock();
+        showToast('Salutation mise à jour ✓', 'success');
         break;
+      }
       case 'voix': {
         const ttsEnabled = document.getElementById('set-tts')?.checked;
-        const ttsRate = parseInt(document.getElementById('set-tts-rate')?.value || '0', 10);
+        const ttsRateNum = parseInt(document.getElementById('set-tts-rate')?.value || '0', 10);
+        const ttsRate = `${ttsRateNum >= 0 ? '+' : ''}${ttsRateNum}%`;
         const soundsEnabled = document.getElementById('set-sounds')?.checked;
         const briefEnabled = document.getElementById('set-daily-brief')?.checked;
         const wakeEnabled = document.getElementById('set-wake-word')?.checked;
         const realtimeEnabled = document.getElementById('set-realtime-stt')?.checked;
+        try { await api.call('set_tts_enabled', !!ttsEnabled); } catch (_) {}
+        try { await api.call('set_tts_rate', ttsRate); } catch (_) {}
         await saveSetting('tts_enabled', !!ttsEnabled);
         await saveSetting('tts_rate', ttsRate);
         await saveSetting('sounds_enabled', !!soundsEnabled);
         try { await api.call('set_daily_brief', !!briefEnabled); } catch (_) {}
         try { await api.call('set_wake_word', !!wakeEnabled); } catch (_) {}
         try { await api.call('set_realtime_stt', !!realtimeEnabled); } catch (_) {}
-        AnimationController.play(SettingsAnimations.animTTSToggle, { enabled: !!ttsEnabled });
-        setTimeout(() => {
-          AnimationController.play(SettingsAnimations.animTTSRate, { rate: ttsRate });
-        }, ttsEnabled ? 1100 : 400);
-        if (document.getElementById('set-daily-brief')) {
+        if (typeof SettingsAnimations !== 'undefined' && typeof AnimationController !== 'undefined') {
+          AnimationController.play(SettingsAnimations.animTTSToggle, { enabled: !!ttsEnabled });
           setTimeout(() => {
-            AnimationController.play(SettingsAnimations.animDailyBriefToggle, { enabled: !!briefEnabled });
-          }, 1600);
+            AnimationController.play(SettingsAnimations.animTTSRate, { rate: ttsRateNum });
+          }, ttsEnabled ? 1100 : 400);
+          if (document.getElementById('set-daily-brief')) {
+            setTimeout(() => {
+              AnimationController.play(SettingsAnimations.animDailyBriefToggle, { enabled: !!briefEnabled });
+            }, 1600);
+          }
         }
+        showToast('Voix sauvegardée ✓', 'success');
         break;
       }
       case 'micro': {
@@ -1567,25 +1897,31 @@ async function validateSection(section) {
         try { await api.call('set_whisper_model', whisperModel); } catch (_) {}
         await saveSetting('stt.device_index', deviceIdx);
         await saveSetting('stt.model', whisperModel);
-        AnimationController.play(SettingsAnimations.animDeviceChange, { deviceIndex: deviceIdx });
-        if (whisperModel) {
-          setTimeout(() => {
-            AnimationController.play(SettingsAnimations.animWhisperModelChange, { modelName: whisperModel });
-          }, 1200);
+        if (typeof SettingsAnimations !== 'undefined' && typeof AnimationController !== 'undefined') {
+          AnimationController.play(SettingsAnimations.animDeviceChange, { deviceIndex: deviceIdx });
+          if (whisperModel) {
+            setTimeout(() => {
+              AnimationController.play(SettingsAnimations.animWhisperModelChange, { modelName: whisperModel });
+            }, 1200);
+          }
         }
+        showToast('Micro sauvegardé ✓', 'success');
         break;
       }
       case 'systeme': {
         const focusEnabled = document.getElementById('set-focus')?.checked;
         const killOllama = document.getElementById('set-kill-ollama')?.checked;
+        const lightVram = document.getElementById('set-light-vram')?.checked;
         try { await api.call('set_focus_mode', !!focusEnabled); } catch (_) {}
         if (focusEnabled != null) await saveSetting('focus_mode', !!focusEnabled);
         if (killOllama != null) await saveSetting('kill_ollama_on_exit', !!killOllama);
-        if (document.getElementById('set-focus')) {
+        try { await api.call('set_light_vram_mode', !!lightVram); } catch (_) {}
+        if (lightVram != null) await saveSetting('light_vram_mode', !!lightVram);
+        if (typeof SettingsAnimations !== 'undefined' && typeof AnimationController !== 'undefined'
+            && document.getElementById('set-focus')) {
           AnimationController.play(SettingsAnimations.animFocusMode, { enabled: !!focusEnabled });
-        } else {
-          styledSettingToast('✓ Paramètres système appliqués', '#4ADE80');
         }
+        showToast('Paramètres système appliqués ✓', 'success');
         break;
       }
       default:
@@ -1593,7 +1929,7 @@ async function validateSection(section) {
     }
   } catch (e) {
     console.warn('validateSection', e);
-    styledSettingToast('Erreur lors de l\'application', '#F87171');
+    showToast('Erreur: ' + e.message, 'error');
   }
 
   setTimeout(() => {
@@ -1601,7 +1937,7 @@ async function validateSection(section) {
       btn.textContent = '✓ Appliquer';
       btn.disabled = false;
     }
-  }, 2200);
+  }, 600);
 }
 
 async function optimizeMemory() {
@@ -1618,6 +1954,21 @@ async function optimizeMemory() {
   } catch (_) {
     showToast('Optimisation non disponible pour le moment', 'info');
   }
+}
+
+function exploreMemory() {
+  navigate('memory');
+}
+
+async function updateAgentsBadge() {
+  try {
+    const agents = await api.call('get_agents') || [];
+    const count = agents.length;
+    const navBadge = document.getElementById('agents-badge');
+    if (navBadge) navBadge.textContent = count ? String(count) : '';
+    const settingsBadge = document.getElementById('agents-settings-badge');
+    if (settingsBadge) settingsBadge.textContent = count ? `${count} agent${count > 1 ? 's' : ''}` : '';
+  } catch (_) {}
 }
 
 async function loadPresetsPage() {
@@ -1667,7 +2018,9 @@ async function openPresetEditorImpl(presetId) {
     const presets = await api.call('get_presets_full') || [];
     const preset = presets.find(p => p.id === presetId);
     if (preset) {
-      document.getElementById('preset-icon-input').value = preset.icon || '⚡';
+      const icon = preset.icon || '⚡';
+      document.getElementById('preset-icon-btn').textContent = icon;
+      document.getElementById('preset-icon-input').value = icon;
       document.getElementById('preset-name-input').value = preset.name || preset.label || presetId;
       document.getElementById('preset-volume').value = preset.volume ?? 50;
       document.getElementById('preset-apps-open').value = (preset.apps_open || []).join(', ');
@@ -1675,6 +2028,7 @@ async function openPresetEditorImpl(presetId) {
       document.getElementById('preset-message').value = preset.message || '';
     }
   } else {
+    document.getElementById('preset-icon-btn').textContent = '⚡';
     document.getElementById('preset-icon-input').value = '⚡';
     document.getElementById('preset-name-input').value = '';
     document.getElementById('preset-volume').value = 50;
@@ -1684,6 +2038,8 @@ async function openPresetEditorImpl(presetId) {
   }
 
   updatePresetPreview();
+  initPresetEmojiPicker();
+  refreshInstalledAppsDatalist();
   const modal = document.getElementById('preset-editor-modal');
   modal?.classList.remove('hidden');
   requestAnimationFrame(() => modal?.classList.add('modal-open'));
@@ -1697,11 +2053,160 @@ function closePresetEditor() {
 
 function updatePresetPreview() {
   const name = document.getElementById('preset-name-input')?.value || 'Nouvelle routine';
-  const icon = document.getElementById('preset-icon-input')?.value || '⚡';
+  const icon = document.getElementById('preset-icon-btn')?.textContent
+    || document.getElementById('preset-icon-input')?.value
+    || '⚡';
   const previewName = document.getElementById('preset-preview-name');
   const previewIcon = document.getElementById('preset-preview-icon');
   if (previewName) previewName.textContent = name;
   if (previewIcon) previewIcon.textContent = icon;
+}
+
+function initPresetEmojiPicker() {
+  const picker = document.getElementById('preset-emoji-picker');
+  if (!picker || picker._ready) return;
+  picker._ready = true;
+  picker.innerHTML = AGENT_EMOJIS.map(e =>
+    `<button type="button" class="emoji-option" onclick="app.selectPresetEmoji('${e}')">${e}</button>`
+  ).join('');
+}
+
+function togglePresetEmojiPicker() {
+  const picker = document.getElementById('preset-emoji-picker');
+  if (!picker) return;
+  initPresetEmojiPicker();
+  document.querySelectorAll('.emoji-picker').forEach(p => {
+    if (p.id !== 'preset-emoji-picker') p.style.display = 'none';
+  });
+  picker.style.display = picker.style.display === 'none' ? 'grid' : 'none';
+}
+
+function selectPresetEmoji(emoji) {
+  document.getElementById('preset-icon-btn').textContent = emoji;
+  document.getElementById('preset-icon-input').value = emoji;
+  document.getElementById('preset-emoji-picker').style.display = 'none';
+  updatePresetPreview();
+}
+
+async function refreshInstalledAppsDatalist() {
+  const list = document.getElementById('installed-apps-list');
+  if (!list) return;
+  try {
+    const apps = await api.call('get_installed_apps') || [];
+    list.innerHTML = apps.slice(0, 500).map(a =>
+      `<option value="${esc(a)}"></option>`
+    ).join('');
+  } catch (_) {}
+}
+
+async function refreshAppsIndex() {
+  try {
+    const result = await api.call('refresh_apps_index');
+    if (result.success) {
+      showToast(`${result.count} applications indexées`, 'success');
+      loadAppsIndexLabel();
+      refreshInstalledAppsDatalist();
+    } else {
+      showToast('Erreur scan applications', 'error');
+    }
+  } catch (e) {
+    showToast('Erreur: ' + e.message, 'error');
+  }
+}
+
+async function loadGoogleStatus() {
+  const badge = document.getElementById('google-status-badge');
+  const detail = document.getElementById('google-status-detail');
+  if (!badge && !detail) return;
+  try {
+    const st = await api.call('get_google_status') || {};
+    if (st.authenticated) {
+      if (badge) badge.textContent = 'Connecté ✓';
+      if (detail) detail.textContent = 'Compte Google authentifié — Calendar, Gmail, Drive, Sheets actifs.';
+    } else if (st.configured) {
+      if (badge) badge.textContent = 'À connecter';
+      if (detail) detail.textContent = 'credentials.json détecté — clique « Connecter Google » pour autoriser ARIA.';
+    } else {
+      if (badge) badge.textContent = 'Non configuré';
+      if (detail) detail.textContent = 'Place credentials.json à la racine du projet (OAuth Desktop Google Cloud).';
+    }
+  } catch (_) {
+    if (badge) badge.textContent = '—';
+    if (detail) detail.textContent = 'Impossible de lire le statut Google.';
+  }
+}
+
+async function connectGoogle() {
+  showToast('Ouverture OAuth Google…', 'info');
+  try {
+    const result = await api.call('run_google_setup');
+    if (result.success) {
+      showToast('Google connecté ✓', 'success');
+      loadGoogleStatus();
+    } else {
+      showToast('Erreur : ' + (result.error || '?'), 'error');
+    }
+  } catch (e) {
+    showToast('Erreur connexion Google', 'error');
+  }
+}
+
+async function loadAppsIndexLabel() {
+  const el = document.getElementById('apps-index-label');
+  if (!el) return;
+  try {
+    const stats = await api.call('get_apps_index_stats') || {};
+    el.textContent = stats.count
+      ? `${stats.count} apps indexées`
+      : 'Non scanné';
+  } catch (_) {
+    el.textContent = '—';
+  }
+}
+
+async function pickAndRegisterLocalModel() {
+  if (!window.ARIA?.pickGgufFile) {
+    showToast('Import disponible uniquement dans Electron', 'error');
+    return;
+  }
+  const filePath = await window.ARIA.pickGgufFile();
+  if (!filePath) return;
+  showToast('Import du modèle...', 'info');
+  try {
+    const result = await api.call('register_local_model', filePath);
+    if (result.success) {
+      showToast(`Modèle ${result.filename} importé ✓`, 'success');
+      loadModelSettings();
+    } else {
+      showToast('Erreur: ' + (result.error || '?'), 'error');
+    }
+  } catch (_) {
+    showToast('Erreur import modèle', 'error');
+  }
+}
+
+async function registerLocalModel(file) {
+  if (!file?.name?.toLowerCase().endsWith('.gguf')) {
+    showToast('Sélectionne un fichier .gguf', 'error');
+    return;
+  }
+  const filePath = file.path;
+  if (!filePath) {
+    showToast('Chemin fichier inaccessible — relance depuis Electron', 'error');
+    return;
+  }
+  showToast('Import du modèle...', 'info');
+  try {
+    const result = await api.call('register_local_model', filePath);
+    if (result.success) {
+      showToast(`Modèle ${result.filename} importé ✓`, 'success');
+      loadModelSettings();
+    } else {
+      showToast('Erreur: ' + (result.error || '?'), 'error');
+    }
+  } catch (e) {
+    showToast('Erreur import modèle', 'error');
+  }
 }
 
 async function savePreset() {
@@ -1714,7 +2219,9 @@ async function savePreset() {
   const key = name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '_');
   const data = {
     name,
-    icon: document.getElementById('preset-icon-input')?.value?.trim() || '⚡',
+    icon: document.getElementById('preset-icon-btn')?.textContent?.trim()
+      || document.getElementById('preset-icon-input')?.value?.trim()
+      || '⚡',
     volume: parseInt(document.getElementById('preset-volume')?.value || '50', 10),
     apps_open: (document.getElementById('preset-apps-open')?.value || '').split(',').map(s => s.trim()).filter(Boolean),
     apps_close: (document.getElementById('preset-apps-close')?.value || '').split(',').map(s => s.trim()).filter(Boolean),
@@ -1822,6 +2329,7 @@ async function loadAgentsPage() {
         </div>
       </div>
     `).join('');
+    await updateAgentsBadge();
   } catch (e) {
     list.innerHTML = `<div class="error-text">Erreur: ${esc(e.message)}</div>`;
   }
@@ -2078,12 +2586,20 @@ function applyActiveAgentUI(agent) {
 
   const chipIcon = document.getElementById('agent-chip-icon');
   const chipName = document.getElementById('agent-chip-name');
+  const homeIcon = document.getElementById('home-agent-icon');
+  const homeName = document.getElementById('home-agent-name');
   const inputIcon = document.getElementById('input-agent-icon');
   const inputName = document.getElementById('input-agent-name');
   const selector = document.getElementById('input-agent-selector');
 
   if (chipIcon) chipIcon.textContent = state._activeAgentIcon;
   if (chipName) chipName.textContent = state._activeAgentName;
+  if (homeIcon) homeIcon.textContent = state._activeAgentIcon;
+  if (homeName) {
+    homeName.textContent = agent.id === 'default'
+      ? 'ARIA'
+      : (state._activeAgentName || 'ARIA');
+  }
   if (inputIcon) inputIcon.textContent = state._activeAgentIcon;
   if (inputName) {
     inputName.textContent = agent.id === 'default'
@@ -2404,15 +2920,17 @@ function bindMainUiButtons() {
 
   document.querySelectorAll('.acc-header').forEach(el => {
     const accId = el.closest('.settings-accordion')?.id?.replace(/^acc-/, '');
-    if (!accId) return;
+    if (!accId || el.getAttribute('onclick')) return;
     el.addEventListener('click', () => toggleAccordion(accId));
   });
 
   document.querySelectorAll('.theme-pill[data-theme]').forEach(btn => {
+    if (btn.getAttribute('onclick')) return;
     btn.addEventListener('click', () => setTheme(btn.dataset.theme));
   });
 
   document.querySelectorAll('.wp-thumb').forEach(el => {
+    if (el.getAttribute('onclick')) return;
     const wpClass = [...el.classList].find(c => c.startsWith('wp-') && c !== 'wp-thumb');
     if (!wpClass) return;
     el.addEventListener('click', () => setWallpaper(wpClass.replace(/^wp-/, '')));
@@ -2458,6 +2976,7 @@ function exposeGlobalApp() {
     deleteConversation,
     deleteAllConversations,
     sendMessage,
+    stopGeneration,
     handleInputKeydown,
     adjustTextarea,
     toggleMic,
@@ -2476,6 +2995,7 @@ function exposeGlobalApp() {
     quickAction,
     applyGreeting,
     applySettingsForm,
+    loadSettingsPage,
     validateSection,
     toggleWidget,
     toggleModeMenu,
@@ -2503,6 +3023,16 @@ function exposeGlobalApp() {
     savePreset,
     updatePresetPreview,
     optimizeMemory,
+    exploreMemory,
+    updateAgentsBadge,
+    togglePresetEmojiPicker,
+    selectPresetEmoji,
+    refreshAppsIndex,
+    refreshInstalledAppsDatalist,
+    registerLocalModel,
+    pickAndRegisterLocalModel,
+    loadGoogleStatus,
+    connectGoogle,
     loadApiKeys,
     saveApiKey,
     deleteApiKey,

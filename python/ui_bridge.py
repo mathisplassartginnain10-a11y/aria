@@ -38,6 +38,8 @@ _event_handlers: dict[str, list[Callable]] = {}
 _connections: set = set()
 # Boucle asyncio du serveur WS
 _loop: asyncio.AbstractEventLoop | None = None
+_pending_finalize_model: str = ""
+_ask_cycle_finalized: bool = False
 
 
 # ── API exposée au renderer (anciennement méthodes de la classe UI) ──────────
@@ -106,7 +108,11 @@ def append_assistant_text(text: str) -> None:
 
 def finalize_assistant_message(model_name: str = "") -> None:
     """Finalise la bulle ARIA en cours."""
-    emit("assistant_done", model_name or None)
+    global _pending_finalize_model, _ask_cycle_finalized
+    _ask_cycle_finalized = True
+    label = model_name or _pending_finalize_model or None
+    emit("assistant_done", label)
+    _pending_finalize_model = ""
 
 
 def show_toast(message: str, toast_type: str = "info") -> None:
@@ -133,19 +139,7 @@ def show_final_transcription(text: str) -> None:
 
 @expose
 def _get_available_models_spec() -> dict:
-    import ollama_manager
-    from llm import MODELS
-    try:
-        running = ollama_manager.is_running()
-        local = ollama_manager.list_local_models() if running else []
-    except Exception as e:
-        running = False
-        local = []
-    return {
-        "ollama_running": running,
-        "local_models": local,
-        "configured": dict(MODELS),
-    }
+    return get_available_models()
 
 
 @expose
@@ -215,14 +209,19 @@ def get_conversations() -> list:
 
 @expose
 def new_conversation() -> dict:
+    import llm
     import memory_engine as _me
+
     conv_id = _me.new_conversation()
+    llm.clear_history()
     return {"id": conv_id}
 
 
 @expose
 def load_conversation(conv_id: str) -> dict:
+    import llm
     import memory_engine as _me
+
     raw = _me.switch_conversation(conv_id)
     messages = [
         {
@@ -231,6 +230,8 @@ def load_conversation(conv_id: str) -> dict:
         }
         for m in (raw or [])
     ]
+    llm.clear_history()
+    llm.load_conversation_messages(messages)
     return {"id": conv_id, "messages": messages}
 
 
@@ -314,11 +315,45 @@ def get_settings() -> dict:
 def save_settings(settings: dict) -> dict:
     import yaml, app_paths
     try:
-        with app_paths.config_path().open('w', encoding='utf-8') as f:
-            yaml.safe_dump(settings, f, allow_unicode=True)
+        path = app_paths.config_path()
+        with path.open('r', encoding='utf-8') as f:
+            cfg = yaml.safe_load(f) or {}
+
+        merged = dict(settings)
+        stt_updates = {}
+        for flat_key in ('stt.device_index', 'stt.model'):
+            if flat_key in merged:
+                stt_updates[flat_key.split('.', 1)[1]] = merged.pop(flat_key)
+        if stt_updates:
+            cfg.setdefault('stt', {}).update(stt_updates)
+
+        cfg.update(merged)
+
+        with path.open('w', encoding='utf-8') as f:
+            yaml.safe_dump(cfg, f, allow_unicode=True)
         return {"success": True}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+@expose
+def set_tts_rate(rate: str) -> dict:
+    import tts
+    import llm
+
+    tts.set_rate(rate)
+    llm._patch_config({"tts_rate": rate})
+    return {"success": True}
+
+
+@expose
+def set_tts_enabled(enabled: bool) -> dict:
+    import tts
+    import llm
+
+    tts.set_enabled(bool(enabled))
+    llm._patch_config({"tts_enabled": bool(enabled)})
+    return {"success": True}
 
 
 @expose
@@ -328,13 +363,15 @@ def speak_text(text: str) -> dict:
     return {"success": True}
 
 
-@expose
-def get_installed_apps() -> list:
-    """Scanne les apps installées (registre + menu démarrer + Steam)."""
-    import os, winreg, subprocess
-    apps = set()
+def _scan_installed_apps() -> tuple[list, dict[str, str]]:
+    """Scan registre + menu démarrer + UWP (nom → AppID)."""
+    import json
+    import os
+    import subprocess
+    import winreg
 
-    # Registre Windows
+    apps: set[str] = set()
+
     keys = [
         (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
         (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
@@ -357,7 +394,6 @@ def get_installed_apps() -> list:
         except Exception:
             pass
 
-    # Menu Démarrer
     for d in [
         os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs"),
         r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs",
@@ -367,7 +403,106 @@ def get_installed_apps() -> list:
                 if f.endswith('.lnk') and 1 < len(f) < 63:
                     apps.add(f[:-4].strip())
 
-    return sorted(apps, key=str.lower)
+    uwp_map: dict[str, str] = {}
+    try:
+        ps = subprocess.run(
+            [
+                "powershell", "-NoProfile", "-Command",
+                "Get-StartApps | Select-Object Name, AppID | ConvertTo-Json -Compress",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if ps.returncode == 0:
+            raw = ps.stdout.strip()
+            if raw:
+                items = json.loads(raw)
+                if isinstance(items, dict):
+                    items = [items]
+                for item in items or []:
+                    name = (item.get("Name") or "").strip()
+                    app_id = (item.get("AppID") or "").strip()
+                    if 1 < len(name) < 80:
+                        apps.add(name)
+                        if app_id:
+                            uwp_map[name.lower()] = app_id
+    except Exception as exc:
+        logger.debug("UWP scan skipped: %s", exc)
+
+    return sorted(apps, key=str.lower), uwp_map
+
+
+@expose
+def get_installed_apps() -> list:
+    """Liste des noms d'apps installées (index cache si disponible)."""
+    import json
+
+    try:
+        import app_paths
+        path = app_paths.data_dir() / "apps_index.json"
+        if path.exists():
+            with path.open("r", encoding="utf-8") as f:
+                data = json.load(f) or {}
+            cached = data.get("apps")
+            if cached:
+                return cached
+    except Exception:
+        pass
+    apps, _uwp = _scan_installed_apps()
+    return apps
+
+
+@expose
+def refresh_apps_index() -> dict:
+    """Scanne et persiste l'index des applications."""
+    import json
+    import time
+
+    apps, uwp = _scan_installed_apps()
+    payload = {
+        "count": len(apps),
+        "updated_at": time.time(),
+        "apps": apps,
+        "uwp": uwp,
+    }
+    try:
+        import app_paths
+        path = app_paths.data_dir() / "apps_index.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        return {"success": True, **payload}
+    except Exception as exc:
+        return {"success": False, "error": str(exc), "count": len(apps)}
+
+
+@expose
+def get_apps_index_stats() -> dict:
+    """Retourne les stats de l'index apps (scan si absent)."""
+    import json
+    import time
+
+    try:
+        import app_paths
+        path = app_paths.data_dir() / "apps_index.json"
+        if path.exists():
+            with path.open("r", encoding="utf-8") as f:
+                data = json.load(f) or {}
+            return {
+                "success": True,
+                "count": data.get("count", len(data.get("apps", []))),
+                "updated_at": data.get("updated_at"),
+            }
+    except Exception:
+        pass
+    result = refresh_apps_index()
+    return {
+        "success": result.get("success", False),
+        "count": result.get("count", 0),
+        "updated_at": result.get("updated_at", time.time()),
+    }
 
 
 # ── Serveur WebSocket ─────────────────────────────────────────────────────────
@@ -463,12 +598,11 @@ def start() -> None:
 
 # ── Helpers étendus (compatibilité llm.py / stt.py / main.py) ─────────────────
 
-_pending_finalize_model: str = ""
-
-
 def set_response_model(model_name: str = "") -> None:
     global _pending_finalize_model
     _pending_finalize_model = model_name or ""
+    if model_name:
+        emit("response_model", model_name)
 
 
 def show_thinking(model_name: str = "", action: str = "Réflexion...") -> None:
@@ -485,6 +619,11 @@ def hide_thinking() -> None:
 
 def show_gdoc_link(title: str, url: str) -> None:
     emit("gdoc_link", {"title": title, "url": url})
+
+
+def notify_active_gdoc(doc: dict | None) -> None:
+    """Notifie l'UI du doc Google actif (widget résumé)."""
+    emit("active_gdoc", doc or {})
 
 
 def show_search_results(html: str) -> None:
@@ -682,8 +821,24 @@ def set_model(role: str, model_name: str) -> dict:
 
 
 @expose
-def ask(text: str, conv_mode: str = "ecrit", request_id: str = None) -> str:
+def stop_generation() -> dict:
+    """Signale au LLM de s'arrêter."""
     import llm
+
+    llm.request_stop()
+    hide_thinking()
+    logger.info("Génération arrêtée par l'utilisateur")
+    return {"success": True}
+
+
+@expose
+def ask(text: str, conv_mode: str = "ecrit", request_id: str = None) -> str:
+    """Traite un message utilisateur et garantit la fin du cycle UI (assistant_done + idle)."""
+    global _ask_cycle_finalized
+    import llm
+
+    _ask_cycle_finalized = False
+    llm.clear_stop()
 
     if conv_mode:
         try:
@@ -694,8 +849,20 @@ def ask(text: str, conv_mode: str = "ecrit", request_id: str = None) -> str:
         except Exception:
             logger.debug("set conv_mode failed", exc_info=True)
 
-    llm.ask(text, show_user=True)
-    return ""
+    result = ""
+    try:
+        llm.ask(text, show_user=True)
+    except Exception as e:
+        logger.error("Erreur ask(): %s", e, exc_info=True)
+        result = f"Désolé, une erreur est survenue : {e}"
+        append_assistant_text(result)
+        finalize_assistant_message()
+    finally:
+        if not _ask_cycle_finalized:
+            finalize_assistant_message()
+        set_status("idle")
+
+    return result
 
 
 @expose
@@ -1003,12 +1170,21 @@ def get_day_summary() -> dict:
     else:
         rappels_label = "Aucun rappel"
 
+    active_gdoc = None
+    try:
+        from actions.gdocs import get_active_doc
+
+        active_gdoc = get_active_doc()
+    except Exception:
+        pass
+
     return {
         "tasks_count": tasks_count,
         "tasks_label": tasks_label,
         "tasks_detail": tasks_detail,
         "rappels_count": pending_today + upcoming,
         "rappels_label": rappels_label,
+        "active_gdoc": active_gdoc,
     }
 
 
@@ -1043,10 +1219,99 @@ def set_daily_brief(enabled: bool) -> dict:
     return {"success": True}
 
 
+_wake_word_running = False
+
+
+def _wake_word_trigger() -> None:
+    """Active le micro quand le wake word est détecté."""
+    import stt
+
+    if stt.is_listening():
+        return
+    stt.start_listening()
+    set_status("listening")
+    notify_mic_state(True)
+    show_toast("Wake word détecté — écoute...", "info")
+
+
+def apply_wake_word(enabled: bool | None = None) -> None:
+    """Démarre ou arrête la détection wake word."""
+    global _wake_word_running
+    import wake_word
+
+    if enabled is None:
+        try:
+            enabled = bool(get_settings().get("wake_word_enabled"))
+        except Exception:
+            enabled = False
+
+    if enabled and not _wake_word_running:
+        model = get_settings().get("wake_word_model", "hey_jarvis_v0.1")
+        wake_word.start(_wake_word_trigger, model_name=model)
+        _wake_word_running = True
+        logger.info("Wake word activé (%s)", model)
+    elif not enabled and _wake_word_running:
+        wake_word.stop()
+        _wake_word_running = False
+        logger.info("Wake word désactivé")
+
+
 @expose
 def set_wake_word(enabled: bool) -> dict:
     _update_config_field("wake_word_enabled", bool(enabled))
+    apply_wake_word(bool(enabled))
     return {"success": True}
+
+
+@expose
+def set_light_vram_mode(enabled: bool) -> dict:
+    """Mode économie VRAM — arrête les serveurs heavy/vision."""
+    import llamacpp_manager
+    from llm import MODELS
+
+    _update_config_field("light_vram_mode", bool(enabled))
+    if enabled:
+        keep = {MODELS.get("intent"), MODELS.get("fast")}
+        llamacpp_manager.stop_servers_except(keep)
+    return {"success": True, "enabled": bool(enabled)}
+
+
+@expose
+def register_local_model(file_path: str) -> dict:
+    """Enregistre un modèle GGUF local (copie vers le dossier llama.cpp)."""
+    import shutil
+    from pathlib import Path
+
+    import llamacpp_manager
+
+    src = Path(file_path).expanduser()
+    if not src.exists() or src.suffix.lower() != ".gguf":
+        return {"success": False, "error": "Fichier GGUF introuvable"}
+
+    models_dir = llamacpp_manager.CUSTOM_MODELS_DIR
+    if not models_dir:
+        return {"success": False, "error": "models_dir non configuré dans config.yaml"}
+    models_dir = Path(models_dir)
+    models_dir.mkdir(parents=True, exist_ok=True)
+    dst = models_dir / src.name
+    try:
+        if src.resolve() != dst.resolve():
+            shutil.copy2(src, dst)
+        return {
+            "success": True,
+            "filename": dst.name,
+            "models": llamacpp_manager.list_available_models(),
+        }
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@expose
+def type_to_active_window(text: str) -> dict:
+    from actions.type_anywhere import type_to_active_window as _type
+
+    message = _type(text)
+    return {"success": "Impossible" not in message, "message": message}
 
 
 @expose
@@ -1234,6 +1499,48 @@ def optimize_memory() -> dict:
     except Exception as e:
         logger.error("optimize_memory: %s", e)
         return {"success": False, "error": str(e)}
+
+
+@expose
+def get_google_status() -> dict:
+    """Statut OAuth Google Workspace."""
+    from actions.google_auth import credentials_path, is_authenticated, is_configured
+
+    path = credentials_path()
+    return {
+        "success": True,
+        "configured": is_configured(),
+        "authenticated": is_authenticated(),
+        "credentials_path": str(path) if path else "",
+    }
+
+
+@expose
+def run_google_setup() -> dict:
+    """Lance le flux OAuth Google (ouvre le navigateur)."""
+    try:
+        from actions.google_auth import get_credentials
+
+        get_credentials(interactive=True)
+        return {"success": True, "message": "Google connecté"}
+    except Exception as exc:
+        logger.exception("run_google_setup")
+        return {"success": False, "error": str(exc)}
+
+
+@expose
+def get_calendar_widget() -> dict:
+    """Prochains événements du jour pour le widget résumé."""
+    try:
+        from actions.gcalendar import get_today_events
+        from actions.google_auth import is_authenticated, is_configured
+
+        if not is_configured() or not is_authenticated():
+            return {"success": False, "events": []}
+        events = get_today_events()
+        return {"success": True, "events": events}
+    except Exception as exc:
+        return {"success": False, "error": str(exc), "events": []}
 
 
 STATIC_FILE_PORT: int | None = None

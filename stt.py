@@ -127,7 +127,11 @@ EXCLUDED_KEYWORDS = (
     "haut-parleur",
     "output",
     "sortie",
+    "haut-parleur du pc",
+    "stereo input",
 )
+
+_whisper_device: str = "cpu"
 
 HALLUCINATIONS = (
     "merci d'avoir regardé",
@@ -197,13 +201,47 @@ def _float_rms(flat: np.ndarray) -> float:
 
 
 def _chunk_rms(flat: np.ndarray) -> float:
-    return _float_rms(flat) * 32768.0
+    return _float_rms(flat)
+
+
+def _waveform_level(flat: np.ndarray) -> float:
+    """Niveau normalisé 0–1 pour l'UI (orbe / bouton micro)."""
+    return _float_rms(flat)
+
+
+def _host_api_priority(pa: Any, dev_idx: int) -> int:
+    """WASAPI/MME d'abord — WDM-KS bloque souvent avec PyAudio."""
+    try:
+        info = pa.get_device_info_by_index(dev_idx)
+        host = pa.get_host_api_info_by_index(int(info["hostApi"]))
+        name = str(host.get("name", "")).lower()
+    except Exception:
+        return 50
+    if "wasapi" in name:
+        return 0
+    if name == "mme":
+        return 1
+    if "directsound" in name:
+        return 2
+    if "wdm" in name:
+        return 99
+    return 50
+
+
+def _device_sort_key(pa: Any, dev_idx: int, name: str) -> tuple[int, int, int]:
+    name_lower = name.lower()
+    kw_priority = 99
+    for j, kw in enumerate(PREFERRED_DEVICE_KEYWORDS):
+        if kw in name_lower:
+            kw_priority = j
+            break
+    return (_host_api_priority(pa, dev_idx), kw_priority, dev_idx)
 
 
 def _pick_best_device_pa() -> int | None:
     """Choisit le meilleur device micro physique via PyAudio."""
     pa = _get_pa()
-    candidates: list[tuple[int, int, str]] = []
+    candidates: list[tuple[tuple[int, int, int], int, str]] = []
     for i in range(pa.get_device_count()):
         try:
             info = pa.get_device_info_by_index(i)
@@ -211,21 +249,21 @@ def _pick_best_device_pa() -> int | None:
             continue
         if info.get("maxInputChannels", 0) < 1:
             continue
-        name = str(info.get("name", "")).lower()
-        if any(excl in name for excl in EXCLUDED_KEYWORDS):
+        name = str(info.get("name", ""))
+        name_lower = name.lower()
+        if any(excl in name_lower for excl in EXCLUDED_KEYWORDS):
             continue
-        priority = 99
-        for j, kw in enumerate(PREFERRED_DEVICE_KEYWORDS):
-            if kw in name:
-                priority = j
-                break
-        candidates.append((priority, i, str(info.get("name", ""))))
-        logger.debug("Device PA [%d] %s (priority=%d)", i, info["name"], priority)
+        sort_key = _device_sort_key(pa, i, name)
+        candidates.append((sort_key, i, name))
+        logger.debug(
+            "Device PA [%d] %s (host=%d, kw=%d)",
+            i, name, sort_key[0], sort_key[1],
+        )
 
     if not candidates:
         return None
 
-    candidates.sort()
+    candidates.sort(key=lambda x: x[0])
     best = candidates[0]
     logger.info("Device PyAudio sélectionné: [%d] %s", best[1], best[2])
     return best[1]
@@ -309,30 +347,41 @@ def _open_mic_stream(device_index: int | None) -> tuple[Any, int, int, str]:
         device_candidates: list[int | None] = [int(forced)]
     else:
         best = _pick_best_device_pa()
-        all_inputs = [
-            i
-            for i in range(pa.get_device_count())
-            if pa.get_device_info_by_index(i).get("maxInputChannels", 0) > 0
-            and not any(
-                excl in pa.get_device_info_by_index(i).get("name", "").lower()
-                for excl in EXCLUDED_KEYWORDS
-            )
-        ]
+        pa_inputs: list[tuple[tuple[int, int, int], int]] = []
+        for i in range(pa.get_device_count()):
+            try:
+                info = pa.get_device_info_by_index(i)
+            except Exception:
+                continue
+            if info.get("maxInputChannels", 0) < 1:
+                continue
+            name = str(info.get("name", ""))
+            if any(excl in name.lower() for excl in EXCLUDED_KEYWORDS):
+                continue
+            if _host_api_priority(pa, i) >= 99:
+                continue
+            pa_inputs.append((_device_sort_key(pa, i, name), i))
+        pa_inputs.sort(key=lambda x: x[0])
+        ordered = [i for _, i in pa_inputs]
         device_candidates = ([best] if best is not None else []) + [
-            i for i in all_inputs if i != best
+            i for i in ordered if i != best
         ] + [None]
 
-    rates = [44100, 48000, 16000, 22050]
     blocksize = 2048
     last_error: Exception | None = None
 
     for dev_idx in device_candidates:
         device_name = "défaut"
+        native_rate = 44100
         try:
             if dev_idx is not None:
-                device_name = str(pa.get_device_info_by_index(dev_idx).get("name", "défaut"))
+                dev_info = pa.get_device_info_by_index(dev_idx)
+                device_name = str(dev_info.get("name", "défaut"))
+                native_rate = int(float(dev_info.get("defaultSampleRate", 44100)))
         except Exception:
             pass
+
+        rates = list(dict.fromkeys([native_rate, 48000, 44100, 16000, 22050]))
 
         for rate in rates:
             stream: Any | None = None
@@ -345,18 +394,17 @@ def _open_mic_stream(device_index: int | None) -> tuple[Any, int, int, str]:
                     frames_per_buffer=blocksize,
                     input_device_index=dev_idx,
                 )
-                audio = _read_pa_stream(stream, blocksize)
-                rms = _float_rms(audio)
-
-                if rms < 0.00001:
+                probe_rms: list[float] = []
+                for _ in range(4):
+                    probe_rms.append(_float_rms(_read_pa_stream(stream, blocksize)))
+                max_rms = max(probe_rms) if probe_rms else 0.0
+                if max_rms < 0.000001:
                     logger.warning(
-                        "Device PA [%s] '%s' silencieux (RMS=%.6f) — essai suivant",
+                        "Device PA [%s] '%s' très silencieux (max RMS=%.6f) — conservé",
                         dev_idx,
                         device_name,
-                        rms,
+                        max_rms,
                     )
-                    _close_pa_stream(stream)
-                    continue
 
                 ACTUAL_RATE = rate
                 ACTUAL_BLOCKSIZE = blocksize
@@ -366,7 +414,7 @@ def _open_mic_stream(device_index: int | None) -> tuple[Any, int, int, str]:
                     dev_idx,
                     device_name,
                     rate,
-                    rms,
+                    max_rms,
                 )
                 return stream, rate, blocksize, device_name
             except Exception as exc:
@@ -532,8 +580,30 @@ def _clean_transcription(text: str) -> str:
     return text.strip()
 
 
+def _is_cuda_whisper_error(exc: Exception) -> bool:
+    err = str(exc).lower()
+    return any(x in err for x in ("cublas", "cuda", "cudnn", "cufft", "gpu"))
+
+
+def _force_whisper_cpu() -> Any:
+    """Recharge Whisper sur CPU après échec CUDA à l'inférence."""
+    global _whisper_model, _whisper_device
+    from faster_whisper import WhisperModel
+
+    with _whisper_lock:
+        _whisper_model = None
+        kwargs: dict = {"device": "cpu", "compute_type": "int8", "num_workers": 1}
+        if WHISPER_MODEL_DIR:
+            kwargs["download_root"] = WHISPER_MODEL_DIR
+        logger.warning("Bascule Whisper → CPU (%s)", WHISPER_MODEL)
+        _whisper_model = WhisperModel(WHISPER_MODEL, **kwargs)
+        _whisper_device = "cpu"
+    ui.show_toast("Whisper en mode CPU (CUDA indisponible)", toast_type="warning")
+    return _whisper_model
+
+
 def _load_whisper_model():
-    global _whisper_model
+    global _whisper_model, _whisper_device
     with _whisper_lock:
         if _whisper_model is not None:
             return _whisper_model
@@ -554,6 +624,7 @@ def _load_whisper_model():
             ("cpu", "int8"),
         ]
         last_error: Exception | None = None
+        test_audio = np.random.randn(16000).astype(np.float32) * 0.01
 
         for device, compute_type in configs:
             if device == "cuda" and not cuda_ok:
@@ -566,11 +637,14 @@ def _load_whisper_model():
                 }
                 if WHISPER_MODEL_DIR:
                     kwargs["download_root"] = WHISPER_MODEL_DIR
-                logger.info("Chargement Whisper '%s' sur %s (%s)…", WHISPER_MODEL, device, compute_type)
+                logger.info(
+                    "Chargement Whisper '%s' sur %s (%s)…",
+                    WHISPER_MODEL, device, compute_type,
+                )
                 model = WhisperModel(WHISPER_MODEL, **kwargs)
-                test_audio = np.zeros(16000, dtype=np.float32)
                 list(model.transcribe(test_audio, language=STT_LANGUAGE)[0])
                 _whisper_model = model
+                _whisper_device = device
                 logger.info(
                     "✅ Whisper chargé: modèle=%s, device=%s, compute=%s, backend=%s",
                     WHISPER_MODEL, device, compute_type, STT_BACKEND,
@@ -579,8 +653,15 @@ def _load_whisper_model():
             except Exception as exc:
                 last_error = exc
                 logger.warning("Config Whisper %s/%s échouée: %s", device, compute_type, exc)
+                if device == "cuda" and _is_cuda_whisper_error(exc):
+                    logger.warning("CUDA Whisper indisponible — essai CPU")
 
         raise RuntimeError(f"Impossible de charger Whisper: {last_error}")
+
+
+def _run_whisper_pass(audio_16k: np.ndarray, **kwargs) -> tuple[str, Any]:
+    segments, info = _whisper_model.transcribe(audio_16k, **kwargs)
+    return " ".join(s.text for s in segments).strip(), info
 
 
 def _transcribe(audio_16k: np.ndarray) -> str:
@@ -594,87 +675,74 @@ def _transcribe(audio_16k: np.ndarray) -> str:
 
     _load_whisper_model()
 
-    # T1
-    try:
-        segments, info = _whisper_model.transcribe(
-            audio_16k,
-            language="fr",
-            beam_size=5,
-            temperature=0.0,
-            vad_filter=True,
-            vad_parameters={
+    passes = [
+        ("T1", {
+            "language": STT_LANGUAGE,
+            "beam_size": 5,
+            "temperature": 0.0,
+            "vad_filter": True,
+            "vad_parameters": {
                 "min_silence_duration_ms": 500,
                 "speech_pad_ms": 200,
                 "threshold": 0.45,
                 "min_speech_duration_ms": 400,
             },
-            condition_on_previous_text=False,
-            no_speech_threshold=0.4,
-        )
-        raw_text = " ".join(s.text for s in segments).strip()
+            "condition_on_previous_text": False,
+            "no_speech_threshold": 0.4,
+        }),
+        ("T2", {
+            "language": STT_LANGUAGE,
+            "beam_size": 5,
+            "temperature": 0.0,
+            "vad_filter": False,
+            "condition_on_previous_text": False,
+            "no_speech_threshold": 0.8,
+        }),
+        ("T3", {
+            "language": STT_LANGUAGE,
+            "beam_size": 3,
+            "temperature": 0.2,
+            "vad_filter": False,
+            "condition_on_previous_text": False,
+            "no_speech_threshold": 0.9,
+        }),
+    ]
 
-        print(f"[T1] AVANT CLEAN: {repr(raw_text)}")
-        cleaned = _clean_transcription(raw_text)
-        print(f"[T1] APRÈS CLEAN: {repr(cleaned)}")
-        logger.warning(
-            "WHISPER T1: brut='%s' clean='%s' lang=%s(%.2f)",
-            raw_text,
-            cleaned,
-            getattr(info, "language", "?"),
-            float(getattr(info, "language_probability", 0.0) or 0.0),
-        )
-
-        if cleaned:
-            return cleaned
-    except Exception as e:
-        logger.error("T1 erreur: %s", e)
-
-    # T2 — sans VAD
-    logger.warning("T1 vide — retry T2 sans VAD")
-    try:
-        segments, info = _whisper_model.transcribe(
-            audio_16k,
-            language="fr",
-            beam_size=5,
-            temperature=0.0,
-            vad_filter=False,
-            condition_on_previous_text=False,
-            no_speech_threshold=0.8,
-        )
-        raw_text = " ".join(s.text for s in segments).strip()
-
-        print(f"[T2] AVANT CLEAN: {repr(raw_text)}")
-        cleaned = _clean_transcription(raw_text)
-        print(f"[T2] APRÈS CLEAN: {repr(cleaned)}")
-        logger.warning("WHISPER T2: brut='%s' clean='%s'", raw_text, cleaned)
-
-        if cleaned:
-            return cleaned
-    except Exception as e:
-        logger.error("T2 erreur: %s", e)
-
-    # T3 — température 0.2
-    logger.warning("T2 vide — retry T3 temp=0.2")
-    try:
-        segments, info = _whisper_model.transcribe(
-            audio_16k,
-            language="fr",
-            beam_size=3,
-            temperature=0.2,
-            vad_filter=False,
-            condition_on_previous_text=False,
-            no_speech_threshold=0.9,
-        )
-        raw_text = " ".join(s.text for s in segments).strip()
-
-        print(f"[T3] AVANT CLEAN: {repr(raw_text)}")
-        cleaned = _clean_transcription(raw_text)
-        print(f"[T3] APRÈS CLEAN: {repr(cleaned)}")
-        logger.warning("WHISPER T3: brut='%s' clean='%s'", raw_text, cleaned)
-
-        return cleaned
-    except Exception as e:
-        logger.error("T3 erreur: %s", e)
+    for idx, (label, kwargs) in enumerate(passes):
+        if idx > 0:
+            logger.warning("%s vide — retry %s", passes[idx - 1][0], label)
+        try:
+            raw_text, info = _run_whisper_pass(audio_16k, **kwargs)
+            cleaned = _clean_transcription(raw_text)
+            logger.warning(
+                "WHISPER %s (%s/%s): brut='%s' clean='%s' lang=%s(%.2f)",
+                label,
+                _whisper_device,
+                WHISPER_MODEL,
+                raw_text,
+                cleaned,
+                getattr(info, "language", "?"),
+                float(getattr(info, "language_probability", 0.0) or 0.0),
+            )
+            if cleaned:
+                return cleaned
+        except Exception as exc:
+            if _is_cuda_whisper_error(exc) and _whisper_device != "cpu":
+                logger.warning("%s CUDA échouée, bascule CPU: %s", label, exc)
+                _force_whisper_cpu()
+                try:
+                    raw_text, info = _run_whisper_pass(audio_16k, **kwargs)
+                    cleaned = _clean_transcription(raw_text)
+                    logger.warning(
+                        "WHISPER %s CPU: brut='%s' clean='%s'",
+                        label, raw_text, cleaned,
+                    )
+                    if cleaned:
+                        return cleaned
+                except Exception as exc2:
+                    logger.error("%s erreur CPU: %s", label, exc2)
+            else:
+                logger.error("%s erreur: %s", label, exc)
 
     return ""
 
@@ -727,12 +795,9 @@ def transcribe_file(path: str | Path, language: str | None = None) -> str:
             return text
         except Exception as exc:
             err = str(exc).lower()
-            if attempt == 0 and ("cublas" in err or "cuda" in err or "cudnn" in err):
-                logger.warning("Transcription fichier CUDA échouée, bascule CPU")
-                with _whisper_lock:
-                    from faster_whisper import WhisperModel
-                    global _whisper_model
-                    _whisper_model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
+            if attempt == 0 and _is_cuda_whisper_error(exc):
+                logger.warning("Transcription fichier CUDA échouée, bascule CPU: %s", exc)
+                _force_whisper_cpu()
                 continue
             logger.error("Erreur Whisper (fichier): %s", exc)
             return ""
@@ -765,11 +830,16 @@ def _dispatch_to_assistant(text: str) -> None:
 
 def _handle_transcription_result(text: str) -> None:
     if text:
-        logger.info("✅ Transcription: '%s'", text)
+        text = _finalize_transcription(text)
+        logger.info("✅ Transcription Whisper: '%s'", text)
         _present_transcription(text)
-        ui.set_status("listening")
+        if VOICE_AUTO_SEND:
+            ui.set_status("thinking")
+            _dispatch_to_assistant(text)
+        else:
+            ui.set_status("listening")
     else:
-        logger.warning("❌ Transcription vide après 3 tentatives")
+        logger.warning("❌ Transcription vide après 3 tentatives Whisper")
         ui.show_toast("Parole non comprise — réessaie", toast_type="info")
         ui.set_status("listening")
 
@@ -834,9 +904,9 @@ def _record_loop_realtime() -> None:
 
             rms = _float_rms(flat)
             with _rms_lock:
-                _current_rms = _chunk_rms(flat)
+                _current_rms = _waveform_level(flat)
             if frame_count % 4 == 0:
-                ui.update_waveform(_chunk_rms(flat))
+                ui.update_waveform(_waveform_level(flat))
             frame_count += 1
 
             if rms > threshold:
@@ -948,7 +1018,10 @@ def _record_loop() -> None:
         )
 
         ui.set_status("listening")
-        ui.show_toast(f"Micro actif ({actual_rate}Hz)", toast_type="info")
+        ui.show_toast(
+            f"Micro actif · Whisper {WHISPER_MODEL} ({actual_rate}Hz)",
+            toast_type="info",
+        )
 
         buffer: list[np.ndarray] = []
         silence_frames = 0
@@ -991,10 +1064,10 @@ def _record_loop() -> None:
 
             rms = _float_rms(flat)
             with _rms_lock:
-                _current_rms = _chunk_rms(flat)
+                _current_rms = _waveform_level(flat)
 
             if frame_count % 4 == 0:
-                ui.update_waveform(_chunk_rms(flat))
+                ui.update_waveform(_waveform_level(flat))
             if frame_count % 20 == 0:
                 logger.debug(
                     "RMS courant=%.4f seuil=%.4f speaking=%s",
@@ -1094,8 +1167,14 @@ def start_listening() -> None:
         def _bootstrap() -> None:
             try:
                 _load_whisper_model()
+                logger.info(
+                    "Whisper prêt pour STT: %s sur %s",
+                    WHISPER_MODEL,
+                    _whisper_device,
+                )
             except Exception as exc:
                 logger.error("Whisper non chargé: %s", exc)
+                ui.show_toast(f"Whisper indisponible: {exc}", toast_type="error")
 
         threading.Thread(target=_bootstrap, daemon=True, name="STT-WhisperBootstrap").start()
         sounds.play("listening")
@@ -1122,6 +1201,47 @@ def stop_listening() -> None:
         _record_thread.join(timeout=5)
     _record_thread = None
     logger.info("STT arrêté")
+
+
+def run_diagnostic() -> str:
+    """Diagnostic rapide micro + Whisper pour l'UI."""
+    lines = [
+        "=== Diagnostic STT ARIA ===",
+        f"Backend: {STT_BACKEND}",
+        f"Modèle Whisper: {WHISPER_MODEL}",
+        f"Langue: {STT_LANGUAGE}",
+    ]
+    try:
+        pa = _get_pa()
+        lines.append(f"PyAudio: OK ({pa.get_device_count()} devices)")
+        best = _pick_best_device_pa()
+        if best is not None:
+            info = pa.get_device_info_by_index(best)
+            host = pa.get_host_api_info_by_index(int(info["hostApi"]))
+            lines.append(f"Micro recommandé: [{best}] {info['name']}")
+            lines.append(f"  Host API: {host.get('name', '?')}")
+        else:
+            lines.append("Micro recommandé: aucun trouvé")
+    except Exception as exc:
+        lines.append(f"PyAudio: ERREUR — {exc}")
+
+    try:
+        _load_whisper_model()
+        lines.append(f"Whisper: OK (device={_whisper_device}, modèle={WHISPER_MODEL})")
+    except Exception as exc:
+        lines.append(f"Whisper: ERREUR — {exc}")
+
+    try:
+        stream, rate, blocksize, name = _open_mic_stream(_find_input_device())
+        rms = _float_rms(_read_pa_stream(stream, blocksize))
+        lines.append(f"Capture test: OK — {name} @ {rate}Hz, RMS={rms:.4f}")
+        _close_pa_stream(stream)
+    except Exception as exc:
+        lines.append(f"Capture test: ERREUR — {exc}")
+
+    report = "\n".join(lines)
+    logger.info(report)
+    return report
 
 
 def toggle() -> None:

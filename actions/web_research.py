@@ -383,22 +383,26 @@ def build_synthesis_prompt(req: ResearchRequest, llm_input: str) -> str:
     """Prompt de synthèse adapté au type de demande."""
     mode_instructions = {
         "news_brief": (
-            "Rédige un brief d'actualités structuré : faits clés, contexte, "
-            "ce qui est confirmé vs spéculatif. Mentionne les dates si disponibles."
+            "Rédige un brief d'actualités en markdown avec EXACTEMENT ces sections :\n"
+            "## Faits clés\n## Contexte\n## Ce qui est confirmé vs spéculatif\n"
+            "Mentionne les dates si disponibles."
         ),
         "howto": (
-            "Rédige un guide pratique étape par étape, clair et actionnable. "
-            "Mentionne les prérequis si nécessaire."
+            "Rédige un guide pratique en markdown :\n"
+            "## Étapes\n## Prérequis\n## Conseils\n"
+            "Clair et actionnable."
         ),
         "comparison": (
-            "Compare objectivement les options : points forts, faiblesses, "
-            "pour qui c'est adapté. Utilise des listes si utile."
+            "Compare objectivement en markdown :\n"
+            "## Option A\n## Option B\n## Recommandation\n"
         ),
         "brief": (
-            "Réponds de façon concise et précise en 1-2 paragraphes."
+            "Réponds en markdown concis : ## Réponse (1-2 paragraphes)."
         ),
         "detailed": (
-            "Synthétise en 3-5 paragraphes clairs, factuels et utiles."
+            "Synthétise en markdown structuré :\n"
+            "## Résumé\n## Points importants\n## Sources\n"
+            "3-5 paragraphes factuels."
         ),
     }
     instruction = mode_instructions.get(req.synthesis_mode, mode_instructions["detailed"])
@@ -414,6 +418,40 @@ def build_synthesis_prompt(req: ResearchRequest, llm_input: str) -> str:
         f"Résultats de recherche pour « {req.query} » :\n\n"
         f"{llm_input}"
     )
+
+
+_REQUIRED_SECTIONS: dict[str, list[str]] = {
+    "news_brief": ["Faits clés", "Contexte", "Ce qui est confirmé vs spéculatif"],
+    "howto": ["Étapes", "Prérequis", "Conseils"],
+    "comparison": ["Option A", "Option B", "Recommandation"],
+    "brief": ["Réponse"],
+    "detailed": ["Résumé", "Points importants", "Sources"],
+}
+
+
+def normalize_structured_markdown(text: str, synthesis_mode: str = "detailed") -> str:
+    """Complète les sections markdown manquantes pour un rendu doc structuré."""
+    if not text or not text.strip():
+        return text
+
+    body = text.strip()
+    existing = {
+        m.group(1).strip().lower()
+        for m in re.finditer(r"^##\s+(.+)$", body, flags=re.MULTILINE)
+    }
+    required = _REQUIRED_SECTIONS.get(synthesis_mode, _REQUIRED_SECTIONS["detailed"])
+
+    missing: list[str] = []
+    for section in required:
+        key = section.lower()
+        if not any(key in e or e in key for e in existing):
+            missing.append(section)
+
+    if not missing:
+        return body
+
+    suffix = "".join(f"\n\n## {title}\n—" for title in missing)
+    return body + suffix
 
 
 def ddg_search(query: str, max_results: int = 8) -> list[dict]:
@@ -723,6 +761,100 @@ def format_results_for_ui(results: dict, query: str) -> str:
             )
 
     return "".join(parts)
+
+
+def parse_pipe_csv_table(text: str) -> list[list]:
+    """Parse un tableau CSV avec séparateur | en list[list]."""
+    rows: list[list] = []
+    for line in text.strip().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "|" in line:
+            cells = [c.strip() for c in line.split("|")]
+        elif ";" in line:
+            cells = [c.strip() for c in line.split(";")]
+        else:
+            cells = [line]
+        if cells and any(cells):
+            rows.append(cells)
+    return rows[:21]
+
+
+def build_doc_structure_prompt(sujet: str, resultats: str) -> str:
+    """Prompt FAST pour structurer une recherche en sections Google Doc."""
+    return (
+        f"Tu es ARIA. Structure ces résultats de recherche sur '{sujet}' en sections "
+        f"markdown claires pour un Google Doc. Utilise ## pour les titres "
+        f"(Introduction, Points clés, Actualités, Sources). "
+        f"Sois concis et factuel. Maximum 400 mots.\n\n"
+        f"Résultats:\n{resultats}"
+    )
+
+
+def build_sheet_table_prompt(donnees: str) -> str:
+    """Prompt FAST pour formater des données en tableau pipe-separated."""
+    return (
+        "Transforme ces données en tableau CSV (séparateur: |). "
+        "Première ligne = en-têtes. Maximum 20 lignes.\n\n"
+        f"Données:\n{donnees}"
+    )
+
+
+def build_email_draft_prompt(
+    sujet: str, destinataire: str, contexte: str
+) -> str:
+    """Prompt FAST pour rédiger un brouillon d'email."""
+    return (
+        "Rédige un email professionnel en français. "
+        f"Objet: {sujet}. Corps: 3-4 phrases max. "
+        f"Destinataire: {destinataire}. "
+        f"Contexte: {contexte}. "
+        "Format:\nOBJET: ...\nCORPS: ..."
+    )
+
+
+def extract_recherche_et_doc_topic(text: str) -> str | None:
+    """Extrait le sujet d'une demande recherche → doc."""
+    patterns = (
+        r"(?:fais|fait|lance)\s+(?:une\s+)?recherche\s+sur\s+(.+?)\s+(?:et\s+)?"
+        r"(?:écris|ecris|note|mets|crée|créer).*(?:doc|document)",
+        r"(?:crée|créer|cree)\s+(?:un\s+)?(?:doc\s+(?:de\s+)?)?"
+        r"(?:veille|rapport|synthèse|synthese)\s+(?:sur\s+)?(.+)",
+        r"veille\s+(?:sur|concernant)\s+(.+)",
+        r"rapport\s+(?:sur|concernant|de)\s+(.+)",
+        r"recherche\s+sur\s+(.+?)\s+(?:et\s+)?(?:écris|ecris|note).*(?:doc|document)",
+    )
+    for pat in patterns:
+        m = re.search(pat, text, re.I)
+        if m:
+            topic = m.group(1).strip(" :'\"?.")
+            if len(topic) >= 2:
+                return topic
+    return None
+
+
+def extract_recherche_et_sheet_topic(text: str) -> str | None:
+    """Extrait le sujet d'une demande recherche → sheet."""
+    patterns = (
+        r"(?:comparatif|comparaison)\s+(?:de\s+)?(.+?)\s+(?:dans\s+)?(?:un\s+)?(?:tableau|sheet)",
+        r"(?:tableau|sheet)\s+(?:des|de|avec)\s+(.+)",
+        r"crée\s+(?:un\s+)?(?:tableau|sheet)\s+(?:avec|de|des)\s+(.+)",
+        r"fais\s+(?:un\s+)?(?:comparatif|tableau)\s+(?:de\s+)?(.+?)\s+(?:dans\s+)?(?:un\s+)?sheet",
+    )
+    for pat in patterns:
+        m = re.search(pat, text, re.I)
+        if m:
+            topic = m.group(1).strip(" :'\"?.")
+            if len(topic) >= 2:
+                return topic
+    return None
+
+
+def extract_sheet_title_from_topic(topic: str) -> str:
+    """Titre court pour un Google Sheet."""
+    title = topic.strip()[:60]
+    return title or "Tableau ARIA"
 
 
 def format_results_for_doc(results: dict, query: str) -> str:

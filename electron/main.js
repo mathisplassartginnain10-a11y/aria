@@ -3,7 +3,7 @@
  * Lance le backend Python, gère la fenêtre, le tray icon.
  */
 
-const { app, BrowserWindow, Tray, Menu, ipcMain, shell, screen } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, shell, screen, dialog, nativeImage } = require('electron');
 const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
@@ -22,7 +22,10 @@ const PYTHON_EXE = process.platform === 'win32'
 // ── État global ───────────────────────────────────────────────────────────────
 
 let mainWindow = null;
+let splashWindow = null;
 let tray = null;
+let trayMenu = null;
+let micTrayActive = false;
 let pythonProcess = null;
 let wsClient = null;
 let wsReady = false;
@@ -93,12 +96,6 @@ function startPythonBackend() {
     wsClient = null;
     wsReady = false;
   });
-
-  // Attendre que Python écrive le port dans le fichier temp
-  setTimeout(async () => {
-    activeWsPort = await getWsPort();
-    connectWebSocket(15, activeWsPort);
-  }, 1000);
 }
 
 // ── Connexion WebSocket vers Python ──────────────────────────────────────────
@@ -117,8 +114,9 @@ function connectWebSocket(retries = 15, port = DEFAULT_WS_PORT) {
     pendingMessages.forEach(msg => ws.send(msg));
     pendingMessages = [];
 
-    // Notifier le renderer que le backend est prêt
-    if (mainWindow) {
+    // Notifier le process principal et le renderer que le backend est prêt
+    ipcMain.emit('backend-ready-main');
+    if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('backend-ready');
     }
   });
@@ -126,6 +124,10 @@ function connectWebSocket(retries = 15, port = DEFAULT_WS_PORT) {
   ws.on('message', (data) => {
     try {
       const msg = JSON.parse(data.toString());
+      if (msg.type === 'event' && msg.event === 'mic_state') {
+        micTrayActive = !!msg.data;
+        rebuildTrayMenu();
+      }
       // Relayer le message au renderer
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('ws-message', msg);
@@ -191,6 +193,56 @@ ipcMain.on('window-maximize', () => {
 });
 ipcMain.on('window-close', () => { if (mainWindow) mainWindow.close(); });
 
+ipcMain.handle('pick-gguf-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Importer un modèle GGUF',
+    properties: ['openFile'],
+    filters: [{ name: 'Modèles GGUF', extensions: ['gguf'] }],
+  });
+  if (result.canceled || !result.filePaths?.length) return null;
+  return result.filePaths[0];
+});
+
+
+// ── Splash screen au démarrage ────────────────────────────────────────────────
+
+function createSplashWindow() {
+  splashWindow = new BrowserWindow({
+    width: 480,
+    height: 620,
+    frame: false,
+    transparent: false,
+    resizable: false,
+    center: true,
+    alwaysOnTop: true,
+    backgroundColor: '#04080F',
+    webPreferences: { contextIsolation: true },
+  });
+  splashWindow.loadFile(path.join(__dirname, 'renderer', 'splash.html'));
+  splashWindow.once('ready-to-show', () => splashWindow.show());
+}
+
+function closeSplash() {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    splashWindow.webContents.executeJavaScript(`
+      document.getElementById('splash').classList.add('fadeout');
+      setTimeout(()=>{document.getElementById('finish-overlay').classList.add('active')},800);
+    `);
+    setTimeout(() => {
+      if (splashWindow && !splashWindow.isDestroyed()) splashWindow.close();
+      splashWindow = null;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.maximize();
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    }, 1400);
+  } else if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.maximize();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+}
 
 // ── Création de la fenêtre principale ─────────────────────────────────────────
 
@@ -203,7 +255,7 @@ function createWindow() {
     height: height,
     minWidth: 900,
     minHeight: 600,
-    backgroundColor: '#060B1A',
+    backgroundColor: '#04080F',
     titleBarStyle: 'hidden',
     frame: false,
     transparent: false,
@@ -222,8 +274,6 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
   mainWindow.once('ready-to-show', () => {
-    mainWindow.maximize();
-    mainWindow.show();
     if (process.env.ARIA_DEV) {
       mainWindow.webContents.openDevTools();
     }
@@ -243,33 +293,24 @@ function createWindow() {
 
 // ── Tray Icon ─────────────────────────────────────────────────────────────────
 
-function createTray() {
-  const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
-  tray = new Tray(iconPath);
+function rebuildTrayMenu() {
+  if (!tray) return;
 
-  const contextMenu = Menu.buildFromTemplate([
+  trayMenu = Menu.buildFromTemplate([
     {
       label: 'ARIA',
       enabled: false,
-      icon: path.join(__dirname, 'assets', 'icon-small.png'),
     },
     { type: 'separator' },
     {
       label: 'Ouvrir',
-      click: () => {
-        if (mainWindow) {
-          mainWindow.show();
-          mainWindow.maximize();
-          mainWindow.focus();
-        }
-      },
+      click: () => showMainWindow(),
     },
     {
-      label: 'Microphone',
-      submenu: [
-        { label: 'Activer', click: () => sendToPython('start_mic', []) },
-        { label: 'Désactiver', click: () => sendToPython('stop_mic', []) },
-      ],
+      label: micTrayActive ? 'Micro : ON' : 'Micro : OFF',
+      type: 'checkbox',
+      checked: micTrayActive,
+      click: () => sendToPython('toggle_activation', []),
     },
     { type: 'separator' },
     {
@@ -281,12 +322,34 @@ function createTray() {
     },
   ]);
 
-  tray.setContextMenu(contextMenu);
+  tray.setContextMenu(trayMenu);
+}
+
+function showMainWindow() {
+  if (!mainWindow) return;
+  mainWindow.show();
+  mainWindow.maximize();
+  mainWindow.focus();
+}
+
+function createTray() {
+  const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+  let trayIcon = nativeImage.createFromPath(iconPath);
+  if (trayIcon.isEmpty()) {
+    console.warn('[Electron] Tray icon missing:', iconPath);
+    trayIcon = nativeImage.createEmpty();
+  }
+  tray = new Tray(trayIcon);
+
+  rebuildTrayMenu();
   tray.setToolTip('ARIA — Assistant Personnel');
 
   tray.on('click', () => {
-    if (mainWindow) {
-      mainWindow.isVisible() ? mainWindow.hide() : mainWindow.show();
+    if (!mainWindow) return;
+    if (mainWindow.isVisible()) {
+      mainWindow.hide();
+    } else {
+      showMainWindow();
     }
   });
 }
@@ -311,9 +374,31 @@ function sendToPython(action, args = [], kwargs = {}) {
 
 app.whenReady().then(() => {
   try { fs.unlinkSync(PORT_FILE); } catch (e) {}
+  createSplashWindow();
   createWindow();
   createTray();
   startPythonBackend();
+
+  let backendReady = false;
+  let minTimeReached = false;
+
+  const tryCloseSplash = () => {
+    if (backendReady && minTimeReached) closeSplash();
+  };
+
+  setTimeout(() => {
+    minTimeReached = true;
+    tryCloseSplash();
+  }, 5200);
+
+  setTimeout(async () => {
+    activeWsPort = await getWsPort();
+    connectWebSocket(15, activeWsPort);
+    ipcMain.once('backend-ready-main', () => {
+      backendReady = true;
+      tryCloseSplash();
+    });
+  }, 1000);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
