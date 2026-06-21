@@ -55,6 +55,27 @@ def data_dir() -> Path:
     return path
 
 
+def voix_ia_whisper_dir() -> Path | None:
+    """Chemin vers la copie locale openai/whisper (dossier voix ia/whisper-main)."""
+    candidates = (
+        app_dir() / "voix ia" / "whisper-main",
+        app_dir() / "voix-ia" / "whisper-main",
+        _PROJECT_ROOT / "voix ia" / "whisper-main",
+        _PROJECT_ROOT / "voix-ia" / "whisper-main",
+    )
+    for root in candidates:
+        if (root / "whisper" / "__init__.py").is_file():
+            return root.resolve()
+    return None
+
+
+def whisper_models_dir() -> Path:
+    """Cache des poids Whisper (.pt) — hors git."""
+    path = (data_dir() / "whisper_models").resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def ensure_runtime_layout() -> None:
     """Copie config/data/prompts/sounds à côté de l'exe au premier lancement."""
     if not is_frozen():

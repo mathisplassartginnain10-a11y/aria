@@ -93,7 +93,7 @@ _stt_device_raw = _STT_CFG.get("device_index")
 STT_DEVICE_INDEX: int | None = (
     int(_stt_device_raw) if _stt_device_raw is not None else None
 )
-WHISPER_MODEL_DIR = _config.get("whisper_model_dir")
+WHISPER_MODEL_DIR = _config.get("whisper_model_dir") or str(app_paths.whisper_models_dir())
 BLOCK_SIZE: int = int(_config.get("chunk_size", 2048))
 SILENCE_DURATION: float = float(_config.get("silence_duration", 2.0))
 
@@ -162,6 +162,55 @@ VOICE_AUTO_SEND: bool = str(_config.get("voice_mode", "auto")).lower() in (
 
 _whisper_model: Any | None = None
 _whisper_lock = threading.Lock()
+_active_backend: str = ""
+
+
+def _normalize_backend_name(name: str) -> str:
+    return str(name or "faster_whisper").lower().replace("-", "_")
+
+
+def _faster_whisper_available() -> bool:
+    try:
+        import faster_whisper  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _effective_backend() -> str:
+    """Résout le backend STT effectif (faster_whisper ou openai_whisper local)."""
+    configured = _normalize_backend_name(STT_BACKEND)
+    if configured == "auto":
+        if _faster_whisper_available():
+            return "faster_whisper"
+        if app_paths.voix_ia_whisper_dir():
+            return "openai_whisper"
+        return "faster_whisper"
+    if configured in ("voix_ia", "openai_whisper", "whisper", "whisper_local"):
+        return "openai_whisper"
+    return "faster_whisper"
+
+
+def _load_openai_whisper_model() -> Any:
+    """Charge openai/whisper depuis voix ia/whisper-main."""
+    import stt_whisper_local
+
+    if not stt_whisper_local.is_available():
+        raise RuntimeError(
+            "Backend openai_whisper : dossier voix ia/whisper-main introuvable "
+            "ou dépendances manquantes (torch, tiktoken)."
+        )
+    model, device = stt_whisper_local.load_model(WHISPER_MODEL, WHISPER_MODEL_DIR)
+    global _whisper_device, _active_backend
+    _whisper_device = device
+    _active_backend = "openai_whisper"
+    logger.info(
+        "✅ Whisper local chargé: modèle=%s, device=%s, path=%s",
+        WHISPER_MODEL,
+        device,
+        stt_whisper_local.voix_ia_whisper_dir(),
+    )
+    return model
 _realtime_model: Any | None = None
 
 
@@ -587,25 +636,43 @@ def _is_cuda_whisper_error(exc: Exception) -> bool:
 
 def _force_whisper_cpu() -> Any:
     """Recharge Whisper sur CPU après échec CUDA à l'inférence."""
-    global _whisper_model, _whisper_device
-    from faster_whisper import WhisperModel
+    global _whisper_model, _whisper_device, _active_backend
 
     with _whisper_lock:
         _whisper_model = None
+        if _active_backend == "openai_whisper":
+            import stt_whisper_local
+
+            model, device = stt_whisper_local.load_model(
+                WHISPER_MODEL, WHISPER_MODEL_DIR, device="cpu"
+            )
+            _whisper_model = model
+            _whisper_device = device
+            ui.show_toast("Whisper local en mode CPU", toast_type="warning")
+            return _whisper_model
+
+        from faster_whisper import WhisperModel
+
         kwargs: dict = {"device": "cpu", "compute_type": "int8", "num_workers": 1}
         if WHISPER_MODEL_DIR:
             kwargs["download_root"] = WHISPER_MODEL_DIR
         logger.warning("Bascule Whisper → CPU (%s)", WHISPER_MODEL)
         _whisper_model = WhisperModel(WHISPER_MODEL, **kwargs)
         _whisper_device = "cpu"
+        _active_backend = "faster_whisper"
     ui.show_toast("Whisper en mode CPU (CUDA indisponible)", toast_type="warning")
     return _whisper_model
 
 
 def _load_whisper_model():
-    global _whisper_model, _whisper_device
+    global _whisper_model, _whisper_device, _active_backend
     with _whisper_lock:
         if _whisper_model is not None:
+            return _whisper_model
+
+        backend = _effective_backend()
+        if backend == "openai_whisper":
+            _whisper_model = _load_openai_whisper_model()
             return _whisper_model
 
         from faster_whisper import WhisperModel
@@ -645,9 +712,10 @@ def _load_whisper_model():
                 list(model.transcribe(test_audio, language=STT_LANGUAGE)[0])
                 _whisper_model = model
                 _whisper_device = device
+                _active_backend = "faster_whisper"
                 logger.info(
                     "✅ Whisper chargé: modèle=%s, device=%s, compute=%s, backend=%s",
-                    WHISPER_MODEL, device, compute_type, STT_BACKEND,
+                    WHISPER_MODEL, device, compute_type, _active_backend,
                 )
                 return _whisper_model
             except Exception as exc:
@@ -656,10 +724,35 @@ def _load_whisper_model():
                 if device == "cuda" and _is_cuda_whisper_error(exc):
                     logger.warning("CUDA Whisper indisponible — essai CPU")
 
+        # Fallback voix ia/ openai-whisper si faster-whisper échoue
+        if app_paths.voix_ia_whisper_dir():
+            logger.warning(
+                "faster-whisper indisponible (%s) — bascule voix ia/openai-whisper",
+                last_error,
+            )
+            try:
+                _whisper_model = _load_openai_whisper_model()
+                ui.show_toast("STT : bascule sur Whisper local (voix ia)", toast_type="info")
+                return _whisper_model
+            except Exception as local_exc:
+                last_error = local_exc
+
         raise RuntimeError(f"Impossible de charger Whisper: {last_error}")
 
 
 def _run_whisper_pass(audio_16k: np.ndarray, **kwargs) -> tuple[str, Any]:
+    if _active_backend == "openai_whisper":
+        import stt_whisper_local
+
+        text = stt_whisper_local.transcribe_audio(
+            _whisper_model,
+            audio_16k,
+            language=str(kwargs.get("language") or STT_LANGUAGE),
+            beam_size=int(kwargs.get("beam_size") or 5),
+            temperature=float(kwargs.get("temperature") or 0.0),
+        )
+        return text, None
+
     segments, info = _whisper_model.transcribe(audio_16k, **kwargs)
     return " ".join(s.text for s in segments).strip(), info
 
@@ -772,8 +865,21 @@ def transcribe_file(path: str | Path, language: str | None = None) -> str:
     lang = language or STT_LANGUAGE
     for attempt in range(2):
         try:
-            model = _load_whisper_model()
-            segments, info = model.transcribe(
+            _load_whisper_model()
+            if _active_backend == "openai_whisper":
+                import stt_whisper_local
+
+                text = _clean_transcription(
+                    stt_whisper_local.transcribe_file(
+                        _whisper_model,
+                        str(path),
+                        language=lang,
+                    )
+                )
+                logger.info("Whisper local fichier: texte='%s'", text)
+                return text
+
+            segments, info = _whisper_model.transcribe(
                 str(path),
                 language=lang,
                 beam_size=5,
@@ -789,7 +895,9 @@ def transcribe_file(path: str | Path, language: str | None = None) -> str:
             )
             text = _clean_transcription(" ".join(s.text for s in segments).strip())
             if not text:
-                segments2, _ = model.transcribe(str(path), language=lang, vad_filter=False, temperature=0.0)
+                segments2, _ = _whisper_model.transcribe(
+                    str(path), language=lang, vad_filter=False, temperature=0.0
+                )
                 text = _clean_transcription(" ".join(s.text for s in segments2).strip())
             logger.info("Whisper fichier: lang=%s, texte='%s'", getattr(info, "language", "?"), text)
             return text
@@ -847,12 +955,44 @@ def _handle_transcription_result(text: str) -> None:
 def _get_realtime_model():
     global _realtime_model
     if _realtime_model is None:
-        from faster_whisper import WhisperModel
-        try:
-            _realtime_model = WhisperModel("tiny", device="cuda", compute_type="int8")
-        except Exception:
-            _realtime_model = WhisperModel("tiny", device="cpu", compute_type="int8")
+        backend = _active_backend or _effective_backend()
+        if backend == "openai_whisper":
+            import stt_whisper_local
+
+            model, _ = stt_whisper_local.load_model("tiny", WHISPER_MODEL_DIR)
+            _realtime_model = model
+        else:
+            from faster_whisper import WhisperModel
+            try:
+                _realtime_model = WhisperModel("tiny", device="cuda", compute_type="int8")
+            except Exception:
+                _realtime_model = WhisperModel("tiny", device="cpu", compute_type="int8")
     return _realtime_model
+
+
+def _realtime_partial_text(rt_model: Any, audio_16k: np.ndarray) -> str:
+    """Transcription partielle temps réel — compatible faster-whisper et voix ia."""
+    if _active_backend == "openai_whisper":
+        import stt_whisper_local
+
+        raw = stt_whisper_local.transcribe_audio(
+            rt_model,
+            audio_16k,
+            language=STT_LANGUAGE,
+            beam_size=1,
+            temperature=0.0,
+        )
+        return _clean_transcription(raw)
+
+    segments, _ = rt_model.transcribe(
+        audio_16k,
+        language=STT_LANGUAGE,
+        beam_size=1,
+        temperature=0.0,
+        vad_filter=False,
+        condition_on_previous_text=False,
+    )
+    return _clean_transcription(" ".join(s.text for s in segments).strip())
 
 
 def _record_loop_realtime() -> None:
@@ -884,6 +1024,7 @@ def _record_loop_realtime() -> None:
     max_buffer = int(actual_rate / blocksize * 30)
 
     try:
+        _load_whisper_model()
         rt_model = _get_realtime_model()
     except Exception as exc:
         logger.warning("Modèle realtime indisponible: %s", exc)
@@ -923,11 +1064,7 @@ def _record_loop_realtime() -> None:
                     rolling = np.concatenate([rolling, flat])
                     if len(rolling) >= window_size:
                         audio_16k = _normalize_audio(_resample_to_16k(rolling[-window_size:], actual_rate))
-                        segments, _ = rt_model.transcribe(
-                            audio_16k, language=STT_LANGUAGE, beam_size=1,
-                            temperature=0.0, vad_filter=False, condition_on_previous_text=False,
-                        )
-                        partial = _clean_transcription(" ".join(s.text for s in segments).strip())
+                        partial = _realtime_partial_text(rt_model, audio_16k)
                         if partial:
                             _show_partial_transcription(partial)
                         rolling = rolling[-slide_size:]
@@ -1207,10 +1344,17 @@ def run_diagnostic() -> str:
     """Diagnostic rapide micro + Whisper pour l'UI."""
     lines = [
         "=== Diagnostic STT ARIA ===",
-        f"Backend: {STT_BACKEND}",
+        f"Backend configuré: {STT_BACKEND}",
+        f"Backend actif: {_active_backend or _effective_backend()}",
         f"Modèle Whisper: {WHISPER_MODEL}",
         f"Langue: {STT_LANGUAGE}",
     ]
+    voix_path = app_paths.voix_ia_whisper_dir()
+    if voix_path:
+        lines.append(f"voix ia/: {voix_path}")
+    else:
+        lines.append("voix ia/: absent")
+    lines.append(f"Cache modèles: {WHISPER_MODEL_DIR}")
     try:
         pa = _get_pa()
         lines.append(f"PyAudio: OK ({pa.get_device_count()} devices)")
@@ -1227,7 +1371,9 @@ def run_diagnostic() -> str:
 
     try:
         _load_whisper_model()
-        lines.append(f"Whisper: OK (device={_whisper_device}, modèle={WHISPER_MODEL})")
+        lines.append(
+            f"Whisper: OK (backend={_active_backend or '?'}, device={_whisper_device}, modèle={WHISPER_MODEL})"
+        )
     except Exception as exc:
         lines.append(f"Whisper: ERREUR — {exc}")
 

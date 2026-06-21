@@ -44,7 +44,9 @@ assistant-vocal.log
 data/aria_lora/
 *.gguf
 *.bin
-voix ia/
+voix ia/*
+!voix ia/README.md
+data/whisper_models/
 
 # Fichiers système
 .DS_Store

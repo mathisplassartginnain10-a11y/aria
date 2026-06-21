@@ -1,4 +1,7 @@
 faster-whisper
+torch
+tiktoken
+numba
 sounddevice
 pyaudio
 scipy
