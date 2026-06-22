@@ -70,7 +70,7 @@ for _role, _name in _cfg_models.items():
         MODELS[_role] = str(_name)
 
 KNOWN_INTENTS = [
-    'lancer_app', 'fermer_app', 'volume', 'meteo', 'heure_date', 'minuteur',
+    'lancer_app', 'fermer_app', 'apps_ouvertes', 'volume', 'meteo', 'heure_date', 'minuteur',
     'search_web', 'search_news', 'aviation_metar', 'aviation_taf',
     'math_calculate', 'question_libre', 'browser_open_site',
     'browser_search_in_site', 'preset',
@@ -488,9 +488,10 @@ DRIVE_INTENTS = frozenset({
 })
 
 FAST_REGEX: dict[str, str] = {
-    r"\b(lance|démarre|demarre|start)\b.+": "lancer_app",
-    r"\b(ouvre|ouvre-moi)\b.+": "lancer_app",
-    r"\b(ferme|quitte|stop|arrête|arrete)\b.+": "fermer_app",
+    r"\b(lance|démarre|demarre|start|exécute|run|joue à|jouer à)\b.+": "lancer_app",
+    r"\b(ouvre|ouvre-moi|met en marche|active|allume)\b.+": "lancer_app",
+    r"\b(ferme|quitte|stop|arrête|arrete|kill|tue|coupe|éteins|désactive)\b.+": "fermer_app",
+    r"\b(applications? ouvertes?|apps ouvertes?|qu'est-ce qui tourne)\b": "apps_ouvertes",
     r"\b(volume|son)\b.+(up|down|monte|baisse|\d+)": "volume",
     r"\b(météo|meteo|température|temperature|temps)\b": "meteo",
     r"\b(quelle heure|quelle date|l'heure|heure qu'il|quel jour)\b": "heure_date",
@@ -508,6 +509,18 @@ FAST_BROWSER_REGEX: list[tuple[str, str]] = [
     (r"cherche .+ (?:sur|dans) (?:youtube|google|github|reddit|amazon|wikipedia)", "browser_search_in_site"),
     (r"recherche .+ dans (?:le navigateur|chrome|edge)", "search_web"),
     (r"va sur ", "browser_open_site"),
+]
+
+LAUNCH_PATTERNS = [
+    r"(?:lance|ouvre|démarre|start|exécute|run|joue à|jouer à)\s+(.+)",
+    r"(?:met en marche|active|allume)\s+(.+)",
+    r"(?:je veux|je voudrais)\s+(?:ouvrir|utiliser|lancer)\s+(.+)",
+    r"(?:ouvre moi|lance moi)\s+(.+)",
+]
+
+CLOSE_PATTERNS = [
+    r"(?:ferme|quitte|arrête|stop|stoppe|kill|tue|coupe)\s+(.+)",
+    r"(?:éteins|désactive)\s+(.+)",
 ]
 
 # Spec v20 — recherche multi-sources + Google Docs
@@ -797,7 +810,7 @@ INTENT_CATEGORY_MAP: dict[str, str] = {
 
 # Actions that NEVER need the LLM — pure function calls
 PURE_ACTIONS = frozenset({
-    "lancer_app", "fermer_app", "volume", "luminosite", "veille",
+    "lancer_app", "fermer_app", "apps_ouvertes", "volume", "luminosite", "veille",
     "reboot", "shutdown", "lock", "screenshot", "clipboard_copy",
     "clipboard_paste", "minuteur", "alarme", "preset",
     "browser_open_site", "browser_open_url", "ouvrir_site",
@@ -830,6 +843,7 @@ API_ONLY = frozenset({
     "ouvrir_site",
     "lancer_app",
     "fermer_app",
+    "apps_ouvertes",
     "volume",
     "luminosite",
 })
@@ -2771,16 +2785,31 @@ def _extract_icao(text: str) -> str:
 
 
 def _extract_app_name(text: str) -> str:
-    text = re.sub(
-        r"^(lance(?:-moi)?|ouvre(?:-moi)?|d[ée]marre(?:-moi)?|mets?|ferme(?:-moi)?|quitte(?:-moi)?|arr[êe]te(?:-moi)?)\s+",
+    text_clean = text.strip()
+    for pattern in LAUNCH_PATTERNS + CLOSE_PATTERNS:
+        m = re.search(pattern, text_clean, re.I)
+        if m:
+            text_clean = m.group(1).strip()
+            break
+    text_clean = re.sub(
+        r"^(lance(?:-moi)?|ouvre(?:-moi)?|d[ée]marre(?:-moi)?|mets?|ferme(?:-moi)?|"
+        r"quitte(?:-moi)?|arr[êe]te(?:-moi)?|start|exécute|run)\s+",
         "",
-        text.strip(),
+        text_clean,
         flags=re.I,
     )
-    text = re.sub(r"\s+en route$", "", text, flags=re.I)
-    for word in ("ferme", "quitte", "arrête", "arrete", "stop"):
-        text = re.sub(rf"\b{word}\b", "", text, flags=re.I)
-    return text.strip()
+    text_clean = re.sub(r"\s+en route$", "", text_clean, flags=re.I)
+    for word in ("ferme", "quitte", "arrête", "arrete", "stop", "kill", "tue"):
+        text_clean = re.sub(rf"\b{word}\b", "", text_clean, flags=re.I)
+    noise = [
+        "l'application", "le logiciel", "le programme", "le jeu",
+        "s'il te plaît", "stp", "merci", "maintenant", "vite",
+        "application", "logiciel", "programme",
+    ]
+    lower = text_clean.lower()
+    for n in noise:
+        lower = lower.replace(n, "").strip()
+    return lower.strip() or text.strip()
 
 
 def _extract_search_query(text: str) -> str:
@@ -3587,36 +3616,35 @@ def _conversation_via_generate(
 def _execute_action(intent: str, params: dict, text: str) -> str | None:
     try:
         if intent == "lancer_app":
-            app = params.get("app", "")
-            if not app:
-                match = re.search(r"(?:lance|ouvre|démarre|demarre|start)\s+(.+)", text, re.I)
-                app = match.group(1).strip() if match else text
-            clean = _extract_app_name(app)
-            app_names = [a.strip() for a in re.split(r"\bet\b|,|&", clean) if a.strip()]
+            app_query = params.get("app", "") or _extract_app_name(text)
+            if not app_query:
+                return "Quelle application veux-tu lancer ?"
+            app_names = [a.strip() for a in re.split(r"\bet\b|,|&", app_query) if a.strip()]
             if len(app_names) > 1:
                 for name in app_names:
                     memory_engine.record_app_launch(name)
                 return apps.launch_multiple(app_names)
-            query = clean or app
-            entry = apps.find_app(query)
-            if not entry:
-                apps.scan_and_save_apps()
-                entry = apps.find_app(query)
-            if entry:
-                memory_engine.record_app_launch(entry["name"])
-                return apps.launch(entry["name"])
-            memory_engine.record_app_launch(query)
-            result = apps.launch(query)
-            if "introuvable" in result.lower() or "pas trouvé" in result.lower():
-                site = browser._extract_site_name(text) or clean
+            if apps.is_running(app_query):
+                return f"{app_query} est déjà ouvert."
+            memory_engine.record_app_launch(app_query)
+            result = apps.launch(app_query)
+            if "introuvable" in result.lower() or "pas trouvé" in result.lower() or "pas pu lancer" in result.lower():
+                site = browser._extract_site_name(text) or app_query
                 if site:
                     return browser.open_site(site)
             return result
 
         if intent == "fermer_app":
-            query = _extract_app_name(params.get("app", text))
-            entry = apps.find_app(query)
-            return apps.close(entry["name"] if entry else query)
+            app_query = params.get("app", "") or _extract_app_name(text)
+            return apps.close(app_query)
+
+        if intent == "apps_ouvertes":
+            running = apps.get_running_apps()
+            if not running:
+                return "Aucune application utilisateur détectée en cours."
+            preview = ", ".join(running[:15])
+            suffix = f"… (+{len(running) - 15})" if len(running) > 15 else ""
+            return f"Applications ouvertes ({len(running)}) : {preview}{suffix}"
 
         if intent == "volume":
             level = params.get("level", text)
@@ -3848,17 +3876,12 @@ def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
             result = apps.launch_multiple(app_names)
         else:
             query = clean or app_param
-            entry = apps.find_app(query)
-            if not entry:
-                apps.scan_and_save_apps()
-                entry = apps.find_app(query)
-            if entry:
-                memory_engine.record_app_launch(entry["name"])
-                result = apps.launch(entry["name"])
+            if apps.is_running(query):
+                result = f"{query} est déjà ouvert."
             else:
                 memory_engine.record_app_launch(query)
                 result = apps.launch(query)
-            if "introuvable" in result.lower() or "pas trouvé" in result.lower():
+            if "introuvable" in result.lower() or "pas trouvé" in result.lower() or "pas pu lancer" in result.lower():
                 site = browser._extract_site_name(original_text) or query
                 result = browser.open_site(site)
 
@@ -3866,10 +3889,16 @@ def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
         return result
     if intent == "fermer_app":
         query = _extract_app_name(params.get("app", original_text))
-        entry = apps.find_app(query)
-        result = apps.close(entry["name"] if entry else query)
+        result = apps.close(query)
         ui.show_toast(result, toast_type="success" if "fermé" in result.lower() else "info")
         return result
+    if intent == "apps_ouvertes":
+        running = apps.get_running_apps()
+        if not running:
+            return "Aucune application utilisateur détectée en cours."
+        preview = ", ".join(running[:15])
+        suffix = f"… (+{len(running) - 15})" if len(running) > 15 else ""
+        return f"Applications ouvertes ({len(running)}) : {preview}{suffix}"
     if intent == "volume":
         level = params.get("level", original_text)
         nums = re.findall(r"\d+", level)

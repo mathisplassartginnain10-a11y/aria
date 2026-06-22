@@ -927,31 +927,525 @@ def _resolve_app_target(name_lower: str) -> str | None:
     return _resolve_launch_target(name_lower)
 
 
-def _execute_launch(path: str, label: str) -> str:
-    """Lance un path résolu."""
+# ── Détection et blocage de l'explorateur ────────────────────────────────────
+
+EXPLORER_PATTERNS = [
+    "explorer.exe",
+    "explorer",
+    "windows explorer",
+    "file explorer",
+    "explorateur",
+]
+
+
+def _is_explorer_launch(exe: str) -> bool:
+    """Bloque l'ouverture de l'explorateur de fichiers à la place d'une app."""
+    if not exe:
+        return False
+    exe_lower = exe.lower()
+    if "explorer.exe" in exe_lower and not any(
+        kw in exe_lower for kw in ("shell:", "ms-", "::")
+    ):
+        return True
+    return False
+
+
+def _normalize_launch_query(app_name: str) -> str:
+    name = app_name.lower().strip()
+    name = re.sub(
+        r"^(lance(?:-moi)?|ouvre(?:-moi)?|d[ée]marre(?:-moi)?|mets?|start|exécute|run)\s+",
+        "",
+        name,
+        flags=re.I,
+    ).strip()
+    name = re.sub(r"\s+en route$", "", name).strip()
+    noise = [
+        "l'application",
+        "le logiciel",
+        "le programme",
+        "le jeu",
+        "s'il te plaît",
+        "stp",
+        "merci",
+        "maintenant",
+        "vite",
+        "application",
+        "logiciel",
+        "programme",
+    ]
+    for n in noise:
+        name = name.replace(n, "").strip()
+    return name
+
+
+_LAUNCH_FLAGS = CREATE_NO_WINDOW
+if sys.platform == "win32":
+    _LAUNCH_FLAGS = CREATE_NO_WINDOW | getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+
+
+def _launch_exe_direct(exe_path: str, app_name: str) -> bool:
+    if not exe_path:
+        return False
+    resolved = _resolve_path_candidate(exe_path) or exe_path
+    if not resolved or not os.path.exists(resolved):
+        return False
+    if _is_explorer_launch(resolved):
+        logger.warning("Bloqué: tentative d'ouvrir explorer.exe pour '%s'", app_name)
+        return False
     try:
-        if path.startswith("shell:"):
-            subprocess.Popen(
-                f'explorer.exe "{path}"',
-                shell=True,
-                creationflags=CREATE_NO_WINDOW,
-            )
-        elif path.endswith(".msc") or path.endswith(".cpl"):
-            subprocess.Popen(["mmc.exe", path], creationflags=CREATE_NO_WINDOW)
-        elif path.endswith(":"):
-            os.startfile(path)
-        elif path.endswith(".lnk"):
-            os.startfile(path)
-        else:
-            subprocess.Popen([path], creationflags=CREATE_NO_WINDOW)
-        logger.info("Lancé: %s → %s", label, path)
-        memory.remember("context.last_app_launched", label)
-        return f"{label} lancé"
-    except FileNotFoundError:
-        return f"Fichier introuvable : {path}"
+        subprocess.Popen(
+            [resolved],
+            creationflags=_LAUNCH_FLAGS,
+            close_fds=True,
+        )
+        logger.info("Lancé via exe direct: %s", resolved)
+        return True
     except Exception as exc:
-        logger.error("Erreur lancement %s: %s", label, exc)
-        return f"Erreur : {exc}"
+        logger.debug("Exe direct échoué %s: %s", resolved, exc)
+        return False
+
+
+def _launch_lnk(lnk_path: str) -> bool:
+    if not lnk_path or not os.path.exists(lnk_path):
+        return False
+    try:
+        import win32api
+        import win32con
+
+        win32api.ShellExecute(0, "open", lnk_path, None, None, win32con.SW_SHOWNORMAL)
+        logger.info("Lancé via LNK ShellExecute: %s", lnk_path)
+        return True
+    except ImportError:
+        try:
+            os.startfile(lnk_path)
+            return True
+        except Exception as exc:
+            logger.debug("LNK os.startfile échoué: %s", exc)
+            return False
+    except Exception as exc:
+        logger.debug("LNK ShellExecute échoué: %s", exc)
+        try:
+            os.startfile(lnk_path)
+            return True
+        except Exception:
+            return False
+
+
+def _launch_shell_apps_folder(app_id: str) -> bool:
+    """Active une app via shell:AppsFolder (UWP / menu Démarrer)."""
+    if not app_id:
+        return False
+    try:
+        subprocess.Popen(
+            ["explorer.exe", f"shell:AppsFolder\\{app_id}"],
+            creationflags=CREATE_NO_WINDOW,
+        )
+        logger.info("Lancé via AppUserModelId: %s", app_id)
+        return True
+    except Exception as exc:
+        logger.debug("shell:AppsFolder échoué %s: %s", app_id, exc)
+        return False
+
+
+def _launch_shell_uri(uri: str) -> bool:
+    if not uri:
+        return False
+    if uri.startswith("shell:") and "AppsFolder\\" in uri:
+        return _launch_shell_apps_folder(uri.split("AppsFolder\\", 1)[-1])
+    if uri.endswith(":"):
+        try:
+            os.startfile(uri)
+            return True
+        except Exception:
+            return False
+    return False
+
+
+def _launch_uwp(package_name: str, app_name: str) -> bool:
+    try:
+        pkg_filter = package_name or app_name
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                f'(Get-AppxPackage | Where-Object {{$_.Name -like "*{pkg_filter}*"}} | '
+                f"Select-Object -First 1).PackageFamilyName",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            creationflags=CREATE_NO_WINDOW,
+        )
+        family_name = result.stdout.strip()
+        result2 = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                f'(Get-StartApps | Where-Object {{$_.Name -like "*{app_name}*"}} | '
+                f"Select-Object -First 1).AppId",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            creationflags=CREATE_NO_WINDOW,
+        )
+        app_id = result2.stdout.strip()
+        if app_id:
+            return _launch_shell_apps_folder(app_id)
+        if family_name:
+            return _launch_shell_apps_folder(f"{family_name}!App")
+    except Exception as exc:
+        logger.debug("UWP launch échoué pour %s: %s", app_name, exc)
+    return False
+
+
+def _launch_via_uri(app_name: str) -> bool:
+    uri_map = {
+        "xbox": "xbox:",
+        "store": "ms-windows-store:",
+        "calculator": "calculator:",
+        "photos": "ms-photos:",
+        "mail": "outlookmail:",
+        "maps": "bingmaps:",
+        "calendar": "outlookcal:",
+        "camera": "microsoft.windows.camera:",
+        "settings": "ms-settings:",
+        "paint": "ms-paint:",
+        "skype": "skype:",
+        "spotify": "spotify:",
+        "discord": "discord:",
+        "teams": "msteams:",
+        "steam": "steam:",
+        "edge": "microsoft-edge:",
+    }
+    name_lower = app_name.lower().strip()
+    for key, uri in uri_map.items():
+        if key in name_lower:
+            try:
+                os.startfile(uri)
+                logger.info("Lancé via URI: %s → %s", app_name, uri)
+                return True
+            except Exception as exc:
+                logger.debug("URI %s échoué: %s", uri, exc)
+    return False
+
+
+def _launch_via_powershell_start(app_name: str) -> bool:
+    try:
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                f'Start-Process "{app_name}" -ErrorAction SilentlyContinue; $?',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=6,
+            creationflags=CREATE_NO_WINDOW,
+        )
+        if result.returncode == 0 and "True" in result.stdout:
+            logger.info("Lancé via PowerShell Start-Process: %s", app_name)
+            return True
+    except Exception as exc:
+        logger.debug("PowerShell start échoué: %s", exc)
+    return False
+
+
+def _find_steam_appid_by_name(game_name: str) -> str | None:
+    steam_dirs = [
+        r"C:\Program Files (x86)\Steam\steamapps",
+        r"C:\Program Files\Steam\steamapps",
+        os.path.join(LOCALAPPDATA, "Steam", "steamapps"),
+    ]
+    query = game_name.lower()
+    for steam_dir in steam_dirs:
+        if not os.path.exists(steam_dir):
+            continue
+        try:
+            for fname in os.listdir(steam_dir):
+                if not fname.startswith("appmanifest_") or not fname.endswith(".acf"):
+                    continue
+                manifest = Path(steam_dir) / fname
+                content = manifest.read_text(encoding="utf-8", errors="ignore")
+                name_match = re.search(r'"name"\s+"([^"]+)"', content)
+                appid_match = re.search(r'"appid"\s+"(\d+)"', content)
+                if name_match and appid_match:
+                    game = name_match.group(1).lower()
+                    if query in game or game in query:
+                        return appid_match.group(1)
+        except Exception:
+            pass
+    return None
+
+
+def _launch_steam_game(game_name: str) -> bool:
+    app_id = _find_steam_appid_by_name(game_name)
+    if not app_id:
+        return False
+    try:
+        os.startfile(f"steam://rungameid/{app_id}")
+        logger.info("Lancé via Steam: %s (appid=%s)", game_name, app_id)
+        return True
+    except Exception as exc:
+        logger.debug("Steam launch échoué: %s", exc)
+        return False
+
+
+def _find_epic_launcher() -> str | None:
+    paths = [
+        r"C:\Program Files (x86)\Epic Games\Launcher\Portal\Binaries\Win32\EpicGamesLauncher.exe",
+        r"C:\Program Files\Epic Games\Launcher\Portal\Binaries\Win32\EpicGamesLauncher.exe",
+        r"C:\Program Files (x86)\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe",
+        str(Path(LOCALAPPDATA) / "EpicGamesLauncher" / "Portal" / "Binaries" / "Win64" / "EpicGamesLauncher.exe"),
+    ]
+    for p in paths:
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def _launch_epic_game(app_info: dict) -> bool:
+    path = str(app_info.get("path") or app_info.get("exe") or "")
+    name = str(app_info.get("name") or "")
+    if path and _launch_exe_direct(path, name):
+        return True
+    epic_exe = _find_epic_launcher()
+    if epic_exe:
+        try:
+            subprocess.Popen([epic_exe], creationflags=CREATE_NO_WINDOW)
+            return True
+        except Exception:
+            pass
+    return False
+
+
+def _launch_via_path_search(app_name: str) -> bool:
+    search_dirs = [
+        LOCALAPPDATA,
+        APPDATA,
+        PROGRAMFILES,
+        PROGRAMFILES86,
+        os.path.expanduser(r"~\AppData\Local\Programs"),
+    ]
+    query = app_name.lower().replace(" ", "")
+    best_match = None
+    best_score = 0
+
+    for base in search_dirs:
+        if not base or not os.path.exists(base):
+            continue
+        for root, dirs, files in os.walk(base):
+            depth = root.replace(base, "").count(os.sep)
+            if depth > 4:
+                dirs.clear()
+                continue
+            dirs[:] = [
+                d
+                for d in dirs
+                if d not in ("__pycache__", "node_modules", "Cache", "cache", "Temp", "temp", "logs", "Logs")
+            ]
+            for f in files:
+                if not f.lower().endswith(".exe"):
+                    continue
+                if f.lower() == "explorer.exe":
+                    continue
+                if any(kw in f.lower() for kw in ("unins", "setup", "install", "update", "crash")):
+                    continue
+                fname = (
+                    f.lower()
+                    .replace(".exe", "")
+                    .replace(" ", "")
+                    .replace("-", "")
+                    .replace("_", "")
+                )
+                score = 0
+                if fname == query:
+                    score = 100
+                elif query in fname:
+                    score = 80 - len(fname)
+                elif fname in query and len(fname) > 3:
+                    score = 60
+                else:
+                    q_words = set(re.split(r"[^a-z0-9]+", query))
+                    f_words = set(re.split(r"[^a-z0-9]+", fname))
+                    common = q_words & f_words
+                    if common:
+                        score = 40 * len(common)
+                if score > best_score:
+                    best_score = score
+                    best_match = os.path.join(root, f)
+            if best_score >= 100:
+                break
+
+    if best_match and best_score > 30:
+        return _launch_exe_direct(best_match, app_name)
+    return False
+
+
+def _launch_via_start_apps(app_name: str) -> bool:
+    import json
+
+    try:
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                f'Get-StartApps | Where-Object {{$_.Name -like "*{app_name}*"}} | '
+                f"Select-Object -First 3 Name,AppId | ConvertTo-Json -Compress",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            creationflags=CREATE_NO_WINDOW,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return False
+        data = json.loads(result.stdout.strip())
+        if isinstance(data, dict):
+            data = [data]
+        for app in data:
+            app_id = app.get("AppId", "")
+            if app_id and _launch_shell_apps_folder(app_id):
+                logger.info("Lancé via Get-StartApps: %s → %s", app_name, app_id)
+                return True
+    except Exception as exc:
+        logger.debug("Get-StartApps échoué: %s", exc)
+    return False
+
+
+def _launch_resolved_path(path: str, label: str) -> bool:
+    if not path:
+        return False
+    if path.startswith("shell:"):
+        return _launch_shell_uri(path)
+    if path.endswith(".msc") or path.endswith(".cpl"):
+        try:
+            subprocess.Popen(["mmc.exe", path], creationflags=CREATE_NO_WINDOW)
+            return True
+        except Exception:
+            return False
+    if path.endswith(".lnk"):
+        return _launch_lnk(path)
+    if path.endswith(":"):
+        try:
+            os.startfile(path)
+            return True
+        except Exception:
+            return False
+    resolved = _resolve_path_candidate(path) or path
+    if resolved.endswith(".lnk"):
+        return _launch_lnk(resolved)
+    if resolved.lower().endswith(".exe") or os.path.isfile(resolved):
+        return _launch_exe_direct(resolved, label)
+    return False
+
+
+def _launch_from_entry(app: dict) -> bool:
+    name = str(app.get("name", ""))
+    path = str(app.get("path") or "").strip()
+    app_type = str(app.get("type") or "").lower()
+
+    if path.startswith("shell:"):
+        return _launch_shell_uri(path)
+
+    if app_type == "uwp":
+        if path and _launch_shell_uri(path):
+            return True
+        return _launch_uwp("", name) or _launch_via_start_apps(name)
+
+    if path.endswith(".lnk") or app_type in ("start_menu", "lnk"):
+        return _launch_lnk(path)
+
+    if app_type == "gaming":
+        if path and _launch_resolved_path(path, name):
+            return True
+        return _launch_steam_game(name)
+
+    if "epic" in name.lower() or "fortnite" in name.lower():
+        if _launch_epic_game(app):
+            return True
+
+    if path:
+        return _launch_resolved_path(path, name)
+    return False
+
+
+def launch(app_name: str) -> str:
+    """Lance une application Windows — hiérarchie complète, jamais l'explorateur de fichiers."""
+    logger.info("launch('%s')", app_name)
+    query = _normalize_launch_query(app_name)
+    if not query:
+        return "Quelle application veux-tu lancer ?"
+
+    app = find_app(query)
+    if app and _launch_from_entry(app):
+        label = str(app.get("name") or query)
+        memory.remember("context.last_app_launched", label)
+        return f"{label} lancé ✓"
+
+    if _launch_via_uri(query):
+        memory.remember("context.last_app_launched", query)
+        return f"{query} lancé ✓"
+
+    known = _resolve_app(query)
+    if known and _launch_resolved_path(known, query):
+        memory.remember("context.last_app_launched", query)
+        return f"{query} lancé ✓"
+
+    if _launch_via_start_apps(query):
+        memory.remember("context.last_app_launched", query)
+        return f"{query} lancé ✓"
+
+    if _launch_via_path_search(query):
+        memory.remember("context.last_app_launched", query)
+        return f"{query} trouvé et lancé ✓"
+
+    if _launch_steam_game(query):
+        memory.remember("context.last_app_launched", query)
+        return f"{query} lancé via Steam ✓"
+
+    if _launch_via_powershell_start(query):
+        memory.remember("context.last_app_launched", query)
+        return f"{query} lancé ✓"
+
+    logger.info("App '%s' non trouvée — relance scan complet", query)
+    new_index = scan_and_save_apps()
+    app = find_app(query, new_index)
+    if app and _launch_from_entry(app):
+        label = str(app.get("name") or query)
+        memory.remember("context.last_app_launched", label)
+        return f"{label} lancé ✓ (trouvé après re-scan)"
+
+    registry_path = _find_in_registry(query)
+    if registry_path and _launch_exe_direct(registry_path, query):
+        memory.remember("context.last_app_launched", query)
+        return f"{query} lancé ✓"
+
+    start_menu = _search_start_menu(query)
+    if start_menu and _launch_lnk(start_menu):
+        memory.remember("context.last_app_launched", query)
+        return f"{query} lancé ✓"
+
+    return (
+        f"Je n'ai pas pu lancer '{app_name}'.\n"
+        f"Essaie de préciser le nom exact ou vérifie qu'il est installé."
+    )
+
+
+def _execute_launch(path: str, label: str) -> str:
+    """Compatibilité — délègue au lanceur robuste."""
+    if _launch_resolved_path(path, label):
+        memory.remember("context.last_app_launched", label)
+        return f"{label} lancé ✓"
+    return f"Impossible de lancer {label}"
 
 
 def _normalize_close_query(app_name: str) -> str:
@@ -1016,34 +1510,6 @@ def _process_matches_close(proc_name: str, candidates: list[str], name_lower: st
     if len(query_stem) >= 3 and (query_stem in proc_stem or proc_stem in query_stem):
         return True
     return False
-
-
-def launch(app_name: str) -> str:
-    """Lance une application depuis l'index scanné (data/apps_index.json)."""
-    name_lower = app_name.lower().strip()
-    name_lower = re.sub(
-        r"^(lance(?:-moi)?|ouvre(?:-moi)?|d[ée]marre(?:-moi)?|mets?)\s+",
-        "",
-        name_lower,
-        flags=re.I,
-    ).strip()
-    name_lower = re.sub(r"\s+en route$", "", name_lower).strip()
-
-    entry = find_app(name_lower)
-    if not entry:
-        scan_and_save_apps()
-        entry = find_app(name_lower)
-    if not entry:
-        return f"Application '{app_name}' introuvable sur ce PC"
-
-    path = _resolve_entry_path(entry)
-    if not path:
-        return (
-            f"Je n'ai pas trouvé '{entry.get('name', app_name)}' sur ton PC. "
-            "Vérifie le nom exact dans l'index des applications."
-        )
-
-    return _execute_launch(path, str(entry.get("name") or app_name).strip())
 
 
 def launch_multiple(app_names: list[str]) -> str:
@@ -1114,8 +1580,57 @@ def close(app_name: str) -> str:
 
     if closed_names:
         unique = sorted(set(closed_names))
-        return f"{', '.join(unique)} fermé(s)"
-    return f"Aucun processus trouvé pour {app_name.strip()}"
+        return f"Fermé : {', '.join(unique)} ✓"
+    return f"Aucune instance de '{app_name}' trouvée en cours d'exécution."
+
+
+def is_running(app_name: str) -> bool:
+    """Vérifie si une application est en cours d'exécution."""
+    query = _normalize_launch_query(app_name).replace(" ", "")
+    if not query:
+        return False
+    candidates = _resolve_close_process_names(query)
+    for proc in psutil.process_iter(["name"]):
+        try:
+            if _process_matches_close(proc.info.get("name") or "", candidates, query):
+                return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    return False
+
+
+_SYSTEM_PROCESSES = frozenset({
+    "system", "svchost", "csrss", "lsass", "winlogon", "dwm",
+    "wininit", "services", "smss", "registry", "idle",
+})
+
+
+def get_running_apps() -> list[str]:
+    """Liste des applications utilisateur actuellement en cours."""
+    running: set[str] = set()
+    for proc in psutil.process_iter(["name", "status"]):
+        try:
+            if proc.info.get("status") != psutil.STATUS_RUNNING:
+                continue
+            name = (proc.info.get("name") or "").replace(".exe", "")
+            if len(name) > 2 and name.lower() not in _SYSTEM_PROCESSES:
+                running.add(name)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    return sorted(running)
+
+
+def list_running() -> list[str]:
+    """Alias — apps connues de l'index en cours d'exécution."""
+    indexed = get_running_apps()
+    known_exes: set[str] = set()
+    for entry in load_apps_index().values():
+        path = str(entry.get("path") or "")
+        if path.lower().endswith(".exe"):
+            known_exes.add(Path(path).name.lower().replace(".exe", ""))
+    if known_exes:
+        return sorted([n for n in indexed if n.lower() in known_exes])
+    return indexed
 
 
 def close_all_except(keep_list: list[str]) -> str:
@@ -1129,27 +1644,6 @@ def close_all_except(keep_list: list[str]) -> str:
         if "fermé" in result.lower():
             closed += 1
     return f"{closed} applications fermées."
-
-
-def list_running() -> list[str]:
-    running: list[str] = []
-    known_exes: set[str] = set()
-    for entry in load_apps_index().values():
-        path = str(entry.get("path") or "")
-        if path.lower().endswith(".exe"):
-            known_exes.add(Path(path).name.lower())
-        elif path.endswith(".lnk") and os.path.exists(path):
-            known_exes.add(f"{Path(path).stem}.exe".lower())
-
-    for proc in psutil.process_iter(["name"]):
-        try:
-            name = (proc.info.get("name") or "").lower()
-            if name in known_exes:
-                running.append(proc.info["name"])
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            pass
-
-    return list(set(running))
 
 
 # ── Scan d'applications installées (index splash + ui_bridge) ─────────────────

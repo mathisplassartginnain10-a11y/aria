@@ -448,6 +448,34 @@ def _scan_installed_apps() -> tuple[list, dict[str, str]]:
 
 
 @expose
+def launch_app(name: str) -> str:
+    from actions.apps import launch
+
+    return launch(name)
+
+
+@expose
+def close_app(name: str) -> str:
+    from actions.apps import close
+
+    return close(name)
+
+
+@expose
+def is_app_running(name: str) -> bool:
+    from actions.apps import is_running
+
+    return is_running(name)
+
+
+@expose
+def get_running_apps() -> list:
+    from actions.apps import get_running_apps as _running
+
+    return _running()
+
+
+@expose
 def get_apps_index() -> list:
     """Retourne la liste des apps indexées pour l'autocomplete UI."""
     from actions.apps import load_apps_index

@@ -328,6 +328,20 @@ def main() -> None:
 
     threading.Thread(target=_startup_scan, daemon=True, name="ARIA-Splash-Scan").start()
 
+    try:
+        from actions.web_research import warmup_cache
+
+        warmup_cache(
+            [
+                "météo Couëron",
+                "actualités technologie 2026",
+                "Microsoft Flight Simulator 2024",
+                "aviation VFR PPL",
+            ]
+        )
+    except Exception:
+        _logger.debug("Warmup cache recherche ignoré", exc_info=True)
+
     time.sleep(0.5)
 
     def _load_llm() -> None:

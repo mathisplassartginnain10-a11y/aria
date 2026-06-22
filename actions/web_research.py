@@ -8,43 +8,90 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import pickle
 import re
+import threading
+import time
 import urllib.parse
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
+import app_paths
 import requests
 
 logger = logging.getLogger(__name__)
 
-# ── Cache en mémoire (10 minutes) ────────────────────────────────────────────
+# ── Constantes de performance ─────────────────────────────────────────────────
+TIMEOUT_FAST = 3.0
+TIMEOUT_TOTAL = 5.0
+CACHE_TTL = 600
+MAX_WORKERS = 6
+
+# ── Cache mémoire + disque (10 minutes) ───────────────────────────────────────
 _cache: dict = {}
-CACHE_TTL = 600  # 10 minutes
+_disk_cache: dict = {}
+DISK_CACHE_FILE: Path = app_paths.data_dir() / "search_cache.pkl"
 
 
 def _cache_key(query: str, source: str) -> str:
     return hashlib.md5(f"{source}:{query.lower().strip()}".encode()).hexdigest()
 
 
+def _load_disk_cache() -> None:
+    global _disk_cache
+    try:
+        if DISK_CACHE_FILE.exists():
+            _disk_cache = pickle.loads(DISK_CACHE_FILE.read_bytes())
+            now = time.time()
+            _disk_cache = {
+                k: v for k, v in _disk_cache.items() if now - v["ts"] < CACHE_TTL
+            }
+            logger.debug("Cache disque chargé: %d entrées", len(_disk_cache))
+    except Exception:
+        _disk_cache = {}
+
+
+def _save_disk_cache() -> None:
+    try:
+        DISK_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        DISK_CACHE_FILE.write_bytes(pickle.dumps(_disk_cache))
+    except Exception:
+        pass
+
+
 def _cache_get(key: str) -> Optional[list]:
     entry = _cache.get(key)
-    if entry and __import__("time").time() - entry["ts"] < CACHE_TTL:
+    if entry and time.time() - entry["ts"] < CACHE_TTL:
+        return entry["data"]
+    entry = _disk_cache.get(key)
+    if entry and time.time() - entry["ts"] < CACHE_TTL:
+        _cache[key] = entry
         return entry["data"]
     return None
 
 
 def _cache_set(key: str, data: list) -> None:
-    import time
-
-    _cache[key] = {"ts": time.time(), "data": data}
+    entry = {"ts": time.time(), "data": data}
+    _cache[key] = entry
+    _disk_cache[key] = entry
+    threading.Thread(target=_save_disk_cache, daemon=True).start()
 
 
 def clear_cache() -> None:
-    """Vide le cache de recherche."""
-    global _cache
+    """Vide le cache de recherche (mémoire + disque)."""
+    global _cache, _disk_cache
     _cache = {}
+    _disk_cache = {}
+    try:
+        if DISK_CACHE_FILE.exists():
+            DISK_CACHE_FILE.unlink()
+    except Exception:
+        pass
     logger.info("Cache recherche vidé")
+
+
+_load_disk_cache()
 
 
 def _get_ddgs():
@@ -60,32 +107,80 @@ def _get_ddgs():
 
 # ── Sources de recherche ──────────────────────────────────────────────────────
 
-def _search_duckduckgo(query: str, max_results: int = 8) -> list[dict]:
-    """Recherche DuckDuckGo — résultats web généraux."""
+def _search_duckduckgo(query: str, max_results: int = 8, retries: int = 2) -> list[dict]:
+    """Recherche DuckDuckGo — résultats web généraux avec retry."""
     key = _cache_key(query, "ddg")
     cached = _cache_get(key)
     if cached:
+        logger.debug("Cache hit DDG: %s", query)
         return cached
-    try:
-        DDGS = _get_ddgs()
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=max_results, region="fr-fr"))
-        formatted = [
-            {
-                "source": "web",
-                "title": r.get("title", ""),
-                "snippet": r.get("body", ""),
-                "url": r.get("href", ""),
-                "score": 1.0,
-            }
-            for r in results
-            if r.get("body")
-        ]
-        _cache_set(key, formatted)
-        return formatted
-    except Exception as e:
-        logger.warning("DDG web search error: %s", e)
-        return []
+
+    for attempt in range(retries):
+        try:
+            DDGS = _get_ddgs()
+            with DDGS(timeout=TIMEOUT_FAST) as ddgs:
+                results = list(
+                    ddgs.text(
+                        query,
+                        max_results=max_results,
+                        region="fr-fr",
+                        safesearch="off",
+                    )
+                )
+            if results:
+                formatted = [
+                    {
+                        "source": "web",
+                        "title": r.get("title", ""),
+                        "snippet": r.get("body", ""),
+                        "url": r.get("href", ""),
+                        "score": 1.0,
+                    }
+                    for r in results
+                    if r.get("body")
+                ]
+                _cache_set(key, formatted)
+                return formatted
+        except TypeError:
+            # Ancienne version ddgs sans paramètre timeout
+            try:
+                DDGS = _get_ddgs()
+                with DDGS() as ddgs:
+                    results = list(
+                        ddgs.text(
+                            query,
+                            max_results=max_results,
+                            region="fr-fr",
+                            safesearch="off",
+                        )
+                    )
+                if results:
+                    formatted = [
+                        {
+                            "source": "web",
+                            "title": r.get("title", ""),
+                            "snippet": r.get("body", ""),
+                            "url": r.get("href", ""),
+                            "score": 1.0,
+                        }
+                        for r in results
+                        if r.get("body")
+                    ]
+                    _cache_set(key, formatted)
+                    return formatted
+            except Exception as e:
+                if attempt < retries - 1:
+                    time.sleep(0.5)
+                    logger.debug("DDG retry %d: %s", attempt + 1, e)
+                else:
+                    logger.warning("DDG échoué après %d tentatives: %s", retries, e)
+        except Exception as e:
+            if attempt < retries - 1:
+                time.sleep(0.5)
+                logger.debug("DDG retry %d: %s", attempt + 1, e)
+            else:
+                logger.warning("DDG échoué après %d tentatives: %s", retries, e)
+    return []
 
 
 def _search_duckduckgo_news(
@@ -98,7 +193,11 @@ def _search_duckduckgo_news(
         return cached
     try:
         DDGS = _get_ddgs()
-        with DDGS() as ddgs:
+        try:
+            ddgs_ctx = DDGS(timeout=TIMEOUT_FAST)
+        except TypeError:
+            ddgs_ctx = DDGS()
+        with ddgs_ctx as ddgs:
             results = list(
                 ddgs.news(query, max_results=max_results, region="fr-fr", timelimit=timelimit)
             )
@@ -122,58 +221,62 @@ def _search_duckduckgo_news(
 
 
 def _search_wikipedia(query: str, lang: str = "fr") -> list[dict]:
-    """Recherche Wikipedia — résumés encyclopédiques."""
+    """Recherche Wikipedia — 2 requêtes max (search + extract batch)."""
     key = _cache_key(query, f"wiki_{lang}")
     cached = _cache_get(key)
     if cached:
         return cached
     try:
-        search_url = f"https://{lang}.wikipedia.org/w/api.php"
+        api_url = f"https://{lang}.wikipedia.org/w/api.php"
+        headers = {"User-Agent": "ARIA-Assistant/1.0"}
         search_resp = requests.get(
-            search_url,
+            api_url,
             params={
                 "action": "query",
                 "list": "search",
                 "srsearch": query,
-                "srlimit": 3,
+                "srlimit": 2,
                 "format": "json",
-                "srprop": "snippet|titlesnippet",
+                "redirects": 1,
             },
-            timeout=5,
-            headers={"User-Agent": "ARIA-Assistant/1.0"},
+            timeout=TIMEOUT_FAST,
+            headers=headers,
         )
-        search_data = search_resp.json()
+        hits = search_resp.json().get("query", {}).get("search", [])[:2]
+        if not hits:
+            return []
+
+        titles = "|".join(item["title"] for item in hits)
+        extract_resp = requests.get(
+            api_url,
+            params={
+                "action": "query",
+                "titles": titles,
+                "prop": "extracts",
+                "exintro": True,
+                "explaintext": True,
+                "exsentences": 5,
+                "format": "json",
+                "redirects": 1,
+            },
+            timeout=TIMEOUT_FAST,
+            headers=headers,
+        )
+        pages = extract_resp.json().get("query", {}).get("pages", {})
         results = []
-        for item in search_data.get("query", {}).get("search", []):
-            title = item.get("title", "")
-            extract_resp = requests.get(
-                search_url,
-                params={
-                    "action": "query",
-                    "titles": title,
-                    "prop": "extracts",
-                    "exintro": True,
-                    "explaintext": True,
-                    "format": "json",
-                    "exsentences": 5,
-                },
-                timeout=5,
-                headers={"User-Agent": "ARIA-Assistant/1.0"},
-            )
-            extract_data = extract_resp.json()
-            pages = extract_data.get("query", {}).get("pages", {})
-            for page in pages.values():
-                extract = page.get("extract", "")
-                if extract and len(extract) > 50:
-                    results.append(
-                        {
-                            "source": "wikipedia",
-                            "title": title,
-                            "snippet": extract[:600],
-                            "url": f"https://{lang}.wikipedia.org/wiki/{title.replace(' ', '_')}",
-                            "score": 1.5,
-                        }
-                    )
+        for page in pages.values():
+            extract = page.get("extract", "")
+            title = page.get("title", "")
+            if extract and len(extract) > 50 and title:
+                results.append(
+                    {
+                        "source": "wikipedia",
+                        "title": title,
+                        "snippet": extract[:800],
+                        "url": f"https://{lang}.wikipedia.org/wiki/{title.replace(' ', '_')}",
+                        "score": 1.5,
+                    }
+                )
         _cache_set(key, results)
         return results
     except Exception as e:
@@ -345,7 +448,7 @@ def _fetch_page_content(url: str, max_chars: int = 1500) -> str:
 
         resp = requests.get(
             url,
-            timeout=6,
+            timeout=TIMEOUT_FAST,
             headers={
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -421,45 +524,50 @@ def _collect_results(
     max_per_source: int = 8,
     *,
     include_page_content: bool = False,
-    timeout: float = 8.0,
+    timeout: float | None = None,
     news_timelimit: str | None = None,
 ) -> list[dict]:
-    """Recherche parallèle multi-sources — retourne une liste normalisée."""
+    """Recherche parallèle multi-sources — retourne dès que le timeout est atteint."""
+    timeout_total = timeout if timeout is not None else TIMEOUT_TOTAL
     fetchers = _source_fetchers()
     all_results: list[dict] = []
+    lock = threading.Lock()
+    active = [s for s in sources if s in fetchers]
 
-    with ThreadPoolExecutor(max_workers=6) as executor:
-        futures = {
-            executor.submit(
-                fetchers[src], query, max_per_source, news_timelimit=news_timelimit
-            ): src
-            for src in sources
-            if src in fetchers
-        }
+    def run_source(src: str) -> None:
         try:
-            completed = as_completed(futures, timeout=timeout)
-            for future in completed:
-                src = futures[future]
-                try:
-                    results = future.result(timeout=2)
-                    all_results.extend(results)
-                    logger.debug("Source %s: %d résultats", src, len(results))
-                except Exception as e:
-                    logger.warning("Source %s échouée: %s", src, e)
+            results = fetchers[src](query, max_per_source, news_timelimit=news_timelimit)
+            with lock:
+                all_results.extend(results)
         except Exception as e:
-            logger.warning("Recherche parallèle timeout/partielle: %s", e)
+            logger.debug("Source %s: %s", src, e)
 
-    if include_page_content:
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            enrich_futures = []
-            for r in all_results:
-                if len(r.get("snippet", "")) < 150 and r.get("url"):
-                    enrich_futures.append(
-                        (r, executor.submit(_fetch_page_content, r["url"]))
-                    )
-            for r, future in enrich_futures:
+    threads = [
+        threading.Thread(target=run_source, args=(src,), daemon=True, name=f"ARIA-Search-{src}")
+        for src in active
+    ]
+    t0 = time.time()
+    for t in threads:
+        t.start()
+
+    deadline = t0 + timeout_total
+    for t in threads:
+        remaining = max(0.0, deadline - time.time())
+        t.join(timeout=remaining)
+        if time.time() >= deadline:
+            logger.debug(
+                "Timeout recherche atteint — résultats partiels (%d)", len(all_results)
+            )
+            break
+
+    if include_page_content and all_results and time.time() < deadline:
+        enrich_deadline = min(deadline, time.time() + 2.0)
+        for r in all_results:
+            if time.time() >= enrich_deadline:
+                break
+            if len(r.get("snippet", "")) < 150 and r.get("url"):
                 try:
-                    content = future.result(timeout=5)
+                    content = _fetch_page_content(r["url"], max_chars=1200)
                     if content:
                         r["snippet"] = content
                 except Exception:
@@ -470,6 +578,50 @@ def _collect_results(
     all_results = _deduplicate(all_results)
     all_results.sort(key=lambda x: x["_score"], reverse=True)
     return all_results
+
+
+def search_multi_fast(
+    query: str,
+    max_results: int = 8,
+    sources: list[str] | None = None,
+    include_page_content: bool = False,
+    timeout_total: float = TIMEOUT_TOTAL,
+    *,
+    news_timelimit: str | None = None,
+) -> str:
+    """
+    Recherche multi-sources ultra-rapide — threads daemon, timeout agressif.
+    Retourne les premiers résultats disponibles sans attendre toutes les sources.
+    """
+    if sources is None:
+        sources = ["web", "news", "wikipedia"]
+
+    src_list = list(sources)
+    if "news" in src_list and "newsapi" not in src_list:
+        src_list.append("newsapi")
+
+    t0 = time.time()
+    all_results = _collect_results(
+        query,
+        src_list,
+        max_per_source=max_results,
+        include_page_content=include_page_content,
+        timeout=timeout_total,
+        news_timelimit=news_timelimit,
+    )
+    top = all_results[:max_results]
+    elapsed = time.time() - t0
+    logger.info(
+        "search_multi_fast '%s': %.2fs, %d résultats",
+        query[:60],
+        elapsed,
+        len(top),
+    )
+
+    if not top:
+        return f"Aucun résultat trouvé pour '{query}'."
+
+    return _format_results_text(top)
 
 
 def _format_results_text(top: list[dict]) -> str:
@@ -566,7 +718,7 @@ def search_multi(
     max_results: int = 10,
     sources: list[str] | None = None,
     include_page_content: bool = False,
-    timeout: float = 8.0,
+    timeout: float = TIMEOUT_TOTAL,
     *,
     news_timelimit: str | None = None,
 ) -> str:
@@ -575,26 +727,44 @@ def search_multi(
     Sources : web, news, wikipedia, youtube, reddit, hackernews, newsapi.
     Retourne un texte structuré prêt pour le LLM.
     """
-    if sources is None:
-        sources = ["web", "news", "wikipedia"]
-
-    if "news" in sources and "newsapi" not in sources:
-        sources = list(sources) + ["newsapi"]
-
-    all_results = _collect_results(
+    return search_multi_fast(
         query,
-        sources,
-        max_per_source=max_results,
+        max_results=max_results,
+        sources=sources,
         include_page_content=include_page_content,
-        timeout=timeout,
+        timeout_total=timeout,
         news_timelimit=news_timelimit,
     )
-    top = all_results[:max_results]
 
-    if not top:
-        return f"Aucun résultat trouvé pour '{query}'."
 
-    return _format_results_text(top)
+def warmup_cache(queries: list[str] | None = None) -> None:
+    """
+    Précharge le cache avec des requêtes fréquentes.
+    Appelé au démarrage de main.py en thread daemon.
+    """
+    if queries is None:
+        queries = [
+            "météo Couëron",
+            "actualités France",
+            "actualités technologie",
+            "aviation PPL",
+            "Microsoft Flight Simulator 2024",
+        ]
+
+    def _warm() -> None:
+        time.sleep(5)
+        for q in queries:
+            key = _cache_key(q, "ddg")
+            if not _cache_get(key):
+                try:
+                    _search_duckduckgo(q, max_results=5)
+                    logger.debug("Cache préchauffé: %s", q)
+                except Exception:
+                    pass
+
+    threading.Thread(
+        target=_warm, daemon=True, name="ARIA-Search-Warmup"
+    ).start()
 
 
 def search_and_synthesize(
@@ -612,7 +782,10 @@ def search_and_synthesize(
     if sources is None:
         sources = ["web", "news", "wikipedia"]
 
-    raw = search_multi(query, max_results=max_results, sources=sources)
+    t0 = time.time()
+    raw = search_multi_fast(query, max_results=max_results, sources=sources)
+    t1 = time.time()
+    logger.info("Recherche '%s': %.2fs, %d chars", query[:60], t1 - t0, len(raw))
 
     if output_format == "doc":
         prompt = f"""Tu es ARIA. Structure ces résultats de recherche sur "{query}" pour un Google Doc.
@@ -639,6 +812,8 @@ RÉSULTATS:
         temperature=0.3,
         stream=False,
     )
+    t2 = time.time()
+    logger.info("Synthèse LLM: %.2fs — total: %.2fs", t2 - t1, t2 - t0)
     return response
 
 

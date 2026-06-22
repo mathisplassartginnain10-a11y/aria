@@ -26,6 +26,7 @@ data/site_aliases.stamp
 data/site_aliases.tmp
 data/site_aliases.old
 data/site_aliases_prefixes.txt
+data/search_cache.pkl
 
 # Clés API et config sensible
 config.yaml
