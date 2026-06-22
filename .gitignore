@@ -27,6 +27,7 @@ data/site_aliases.tmp
 data/site_aliases.old
 data/site_aliases_prefixes.txt
 data/search_cache.pkl
+data/mobile_ports.json
 
 # Clés API et config sensible
 config.yaml

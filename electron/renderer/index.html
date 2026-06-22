@@ -67,6 +67,7 @@
       <div id="sidebar-brand-text">
         <div id="sidebar-title">ARIA</div>
         <div id="sidebar-subtitle" class="status-idle">En veille</div>
+        <span id="nexus-badge" class="nexus-badge hidden">NEXUS</span>
       </div>
     </div>
 
@@ -413,7 +414,17 @@
               </span>
             </div>
             <div class="acc-body hidden">
-              <div id="model-settings"><div class="loading-text">Cliquer pour charger...</div></div>
+              <div class="model-tabs">
+                <button type="button" class="model-tab active" data-tab="active" onclick="app.switchModelTab('active')">Modèles actifs</button>
+                <button type="button" class="model-tab" data-tab="catalog" onclick="app.switchModelTab('catalog')">Catalogue</button>
+              </div>
+              <div id="model-tab-active">
+                <div id="model-settings"><div class="loading-text">Cliquer pour charger...</div></div>
+              </div>
+              <div id="model-tab-catalog" class="hidden">
+                <div id="model-catalog"><div class="loading-text">Cliquer pour charger...</div></div>
+                <div id="model-install-log" class="model-install-log hidden"></div>
+              </div>
               <button type="button" class="settings-btn-outline" style="margin-top:8px"
                 onclick="app.pickAndRegisterLocalModel()">📦 Importer modèle GGUF</button>
               <label class="settings-btn-outline" style="margin-top:8px;display:inline-block;margin-left:8px">
@@ -422,6 +433,18 @@
                   onchange="app.registerLocalModel(this.files[0]);this.value=''">
               </label>
               <button class="settings-btn-outline" onclick="app.loadModelSettings()" style="margin-top:8px">🔄 Rafraîchir</button>
+            </div>
+          </div>
+
+          <!-- Profils -->
+          <div class="settings-accordion" id="acc-profils">
+            <div class="acc-header" onclick="app.toggleAccordion('profils')">👤 Profils <span class="acc-chevron">▸</span></div>
+            <div class="acc-body hidden">
+              <div id="profiles-list"><div class="loading-text">Cliquer pour charger...</div></div>
+              <div class="profile-create-row" style="margin-top:10px;display:flex;gap:8px">
+                <input type="text" id="new-profile-name" placeholder="Nom du profil" class="agent-select" style="flex:1">
+                <button type="button" class="settings-btn-outline" onclick="app.createProfile()">+ Créer</button>
+              </div>
             </div>
           </div>
 
@@ -528,6 +551,26 @@
                 <label>Mode économie VRAM (intent + fast uniquement)</label>
                 <input type="checkbox" id="set-light-vram"
                   onchange="app.saveSetting('light_vram_mode', this.checked)">
+              </div>
+              <div class="setting-row">
+                <label>⚡ Mode Nexus (libère la VRAM pour les jeux)</label>
+                <input type="checkbox" id="set-nexus-mode"
+                  onchange="app.toggleNexusMode(this.checked)">
+              </div>
+              <div id="vram-widget" class="vram-widget">
+                <div class="vram-label"><span id="vram-text">VRAM —</span></div>
+                <div class="vram-bar-track"><div id="vram-bar-fill" class="vram-bar-fill"></div></div>
+              </div>
+              <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:8px;margin-top:12px">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                  <label>Mises à jour</label>
+                  <span id="app-version-label" style="font-size:11px;color:var(--text3)">—</span>
+                </div>
+                <div id="update-status" style="font-size:12px;color:var(--text2)">—</div>
+                <div style="display:flex;gap:8px">
+                  <button type="button" class="settings-btn-outline" onclick="app.checkForUpdates()">Vérifier les mises à jour</button>
+                  <button type="button" class="settings-btn-outline hidden" id="btn-apply-update" onclick="app.applyUpdate()">Mettre à jour maintenant</button>
+                </div>
               </div>
               <div class="setting-row">
                 <label>Index applications</label>

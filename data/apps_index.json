@@ -1,15 +1,12 @@
 {
-  "count": 621,
-  "updated_at": 1782141851.7057776,
+  "count": 517,
+  "updated_at": 1782142949.8373306,
   "apps": [
     ".IdentityService",
     "3DMark Demo",
     "Access",
-    "Accs vocal",
     "Acrobat",
     "AcrobatInfo",
-    "Actions par clic",
-    "Actualits",
     "Administrative Tools",
     "Adobe",
     "Adobe Acrobat",
@@ -17,9 +14,7 @@
     "Adobe Refresh Manager",
     "ads_event_reporter",
     "Age Of Empires 3",
-    "Age of Empires IV Anniversary Edition",
     "Age of Empires IV: Anniversary Edition",
-    "Analyseur de performances",
     "Android",
     "Android Studio",
     "AnybrainSDK",
@@ -28,7 +23,6 @@
     "ARC Raiders",
     "ARIA",
     "ARIA Assistant",
-    "Assistance rapide",
     "Autodesk",
     "AWSToolkit",
     "Bac Francais (serveur)",
@@ -42,25 +36,18 @@
     "Blender",
     "Blender 5.0",
     "Blender Foundation",
-    "Bloc-notes",
     "BlueStacks X_msi5",
     "cache",
-    "Calculatrice",
-    "Calendar",
-    "Camra",
     "CapCut",
     "CD Projekt Red",
     "CEF",
-    "Centre de configuration des graphiques Intel",
     "Character Map",
     "chrome",
-    "Cities Skylines",
     "Cities: Skylines",
     "Cities_Skylines",
     "Claude",
     "Claude-3p",
     "claude-cli-nodejs",
-    "Clavier visuel",
     "ClickOnce Bootstrapper Package for Microsoft .NET Framework",
     "Client Riot",
     "ClockworkMod",
@@ -72,13 +59,10 @@
     "Comms",
     "Component Services",
     "Computer Management",
-    "Configuration du systme",
     "Configure vJoy",
     "ConnectedDevicesPlatform",
-    "Connexion Bureau  distance",
     "Control Panel",
     "Cossacks 3",
-    "Cossacks Back to War",
     "Cossacks: Back to War",
     "CrashDumps",
     "CrashReportClient",
@@ -99,20 +83,16 @@
     "DCSWorld",
     "Debuggable Package Manager",
     "Delta Force",
-    "Dev Home",
     "Developer Command Prompt for VS",
     "Developer Command Prompt for VS 2022",
     "Developer PowerShell for VS",
     "Developer PowerShell for VS 2022",
     "devenv",
-    "Dfragmenter et optimiser les lecteurs",
     "dfrgui",
     "dfshim",
-    "Diagnostic de mmoire Windows",
     "DiagnosticsHub_CollectionService",
     "Discord",
     "Disk Cleanup",
-    "diteur du Registre",
     "Docker",
     "Docker Desktop",
     "docker-secrets-engine",
@@ -121,11 +101,8 @@
     "Dragon Center version 2.0.155.0",
     "eas-cli",
     "EasyAntiCheat_EOS",
-    "EcoleDirecte",
     "electron",
     "Embark",
-    "Enregistreur d'actions utilisateur",
-    "Enregistreur vocal",
     "Envoyer à OneNote",
     "Epic Games",
     "Epic Games Launcher",
@@ -133,30 +110,21 @@
     "EpicGamesLauncher",
     "Event Viewer",
     "excel",
-    "Excuter",
-    "Explorateur de fichiers",
     "Fairlight Audio Accelerator Utility",
     "Fairlight Studio Utility",
-    "Family",
     "FFmpeg",
     "File Explorer",
-    "Files",
     "Finkit",
     "FlightSimulator",
     "fsquirt",
     "FSX Plugin",
     "Futuremark",
     "Futuremark SystemInfo",
-    "Game Bar",
     "Gear.Club Unlimited 2 Ultimate Edition",
-    "Gestion de l'ordinateur",
-    "Gestionnaire d'enregistrements Skype Entreprise",
-    "Gestionnaire des tches",
     "Gestionnaire d’enregistrements Skype Entreprise",
     "Git",
     "Git Bash",
     "Git CMD",
-    "Git FAQs (Frequently Asked Questions)",
     "Git GUI",
     "Git Release Notes",
     "GitHub Desktop",
@@ -167,45 +135,31 @@
     "HandBrake",
     "Historique",
     "Hogwarts Legacy",
-    "Hogwarts Legacy L'Hritage de Poudlard",
     "Hogwarts Legacy : L'Héritage de Poudlard",
-    "Horloge",
     "HPE",
-    "Hub de commentaires",
     "icecap_collection_neutral",
     "icecap_collection_x64",
-    "IDLE (Python 3.13)",
     "IEDIAG",
     "IEDIAGCMD",
     "IEXPLORE",
-    "Informations systme",
-    "Initiateur iSCSI",
-    "Instagram",
     "install",
     "Install Additional Tools for Node.js",
     "InstallShield Installation Information",
     "Intel",
-    "Intel Rapid Storage Technology Application",
     "Intel(R) Wireless Bluetooth(R)",
     "IntelliTraceProfilerProxy",
     "Internet Explorer",
-    "Invite de commandes",
     "iSCSI Initiator",
-    "Journal de tlmtrie pour Office",
     "Journal de télémétrie pour Office",
     "kdenlive",
     "kotlin",
-    "Lecteur de rcupration",
-    "Lecteur multimdia",
     "LGHUB",
     "licensemanagershellext",
     "LiveCaptions",
-    "Lively Wallpaper",
     "Logi",
     "LogiMicrosoftFlightSimulator",
     "Logitech",
     "Logitech G HUB",
-    "Loupe",
     "Lunar Client",
     "lunarclient-updater",
     "Lync",
@@ -242,7 +196,6 @@
     "Microsoft .NET Toolset 10.0.201 (x64)",
     "Microsoft 365 Apps for enterprise - en-gb",
     "Microsoft 365 Apps for enterprise - fr-fr",
-    "Microsoft 365 Copilot",
     "Microsoft ASP.NET Core Runtime - 10.0.5 (x64)",
     "Microsoft ASP.NET Core Runtime - 10.0.5 (x86)",
     "Microsoft ASP.NET Core Targeting Pack - 10.0.5 (x64)",
@@ -261,11 +214,8 @@
     "Microsoft OneNote - fr-fr",
     "Microsoft SDKs",
     "Microsoft SQL Server",
-    "Microsoft Store",
     "Microsoft System CLR Types pour SQL Server 2019",
-    "Microsoft Teams",
     "Microsoft Teams Meeting Add-in for Microsoft Office",
-    "Microsoft To Do",
     "Microsoft Visual C++ 2005 Redistributable",
     "Microsoft Visual C++ 2008 Redistributable - x86 9.0.21022",
     "Microsoft Visual C++ 2010  x64 Redistributable - 10.0.40219",
@@ -295,15 +245,9 @@
     "Microsoft.NET.Sdk.tvOS.Manifest-10.0.100 (x64)",
     "MicrosoftFlightSimulator",
     "mime",
-    "Minecraft for Windows",
-    "Minecraft Launcher",
-    "Minecraft: Java Edition",
     "MinecraftInstaller",
-    "Mobile connect",
     "ModifiableWindowsApps",
-    "Moniteur de ressources",
     "Monitor vJoy",
-    "MotoGPT22",
     "MotoGP™22",
     "mplayer2",
     "ms-playwright",
@@ -317,7 +261,6 @@
     "MSI Afterburner localization reference",
     "MSI Afterburner skin format reference",
     "MSI App Player",
-    "MSI Center",
     "MSI Center SDK",
     "MSI companion",
     "MSI NBFoundation Service",
@@ -327,16 +270,13 @@
     "MsoHtmEd",
     "msoxmled",
     "MSPUB",
-    "Mto",
     "Nahimic",
     "Nahimic Companion",
-    "Narrateur",
     "Narrator",
     "Navigateur Opera GX",
     "NEO",
     "Netease",
     "netmarblegpg-updater",
-    "Nettoyage de disque",
     "NgConsentManager",
     "ngrok",
     "NhNotifSys",
@@ -344,8 +284,6 @@
     "node-gyp",
     "Node.js",
     "Node.js command prompt",
-    "Node.js documentation",
-    "Node.js website",
     "nodejs",
     "Norton",
     "npm-cache",
@@ -357,7 +295,6 @@
     "NVIDIA App 11.0.8.244",
     "NVIDIA Backend",
     "NVIDIA Container",
-    "NVIDIA Control Panel",
     "NVIDIA Corporation",
     "NVIDIA FrameView SDK 1.8.12421.37835365",
     "NVIDIA Install Application",
@@ -377,8 +314,6 @@
     "NVIDIA Watchdog Plugin for NvContainer",
     "OBS Studio",
     "obs-studio",
-    "Observateur d'vnements",
-    "Obtenir de l'aide",
     "ODBC Data Sources (32-bit)",
     "ODBC Data Sources (64-bit)",
     "Office 16 Click-to-Run Extensibility Component",
@@ -391,55 +326,37 @@
     "OneNote",
     "Opera GX Stable 132.0.5905.43",
     "Opera Software",
-    "Outil Capture d'cran",
-    "Outils Windows",
     "OUTLOOK",
     "Outlook (classic)",
-    "Outlook (PWA)",
     "Overwolf",
     "Package Cache",
     "Packages",
-    "Paint",
-    "Palette de commandes",
-    "Panneau de configuration",
     "Paradox Interactive",
     "Paradox Launcher v2",
-    "Paramtres",
-    "Pare-feu Windows Defender avec fonctions avances de scurit",
     "Parsec",
     "Parsec Virtual Display Driver",
     "Parsec Virtual USB Adapter Driver",
-    "Pense-btes",
-    "People",
     "Performance Monitor",
-    "Photos",
     "PioneerGame",
     "pip",
     "PlaceholderTileLogoFolder",
-    "Planificateur de tches",
     "plastic4",
     "Postman",
     "Postman x64 12.0.6",
-    "Power Automate",
     "powerpnt",
     "PowerPoint",
     "PowerShell",
     "PowerToys",
     "PowerToys (Preview)",
     "PowerToys (Preview) x64",
-    "Prfrences linguistiques d'Office",
-    "Prise en main",
     "Programs",
     "Préférences linguistiques d’Office",
     "Publisher",
     "Publishers",
-    "Python 3.13",
     "Quick Share",
-    "QuickShare",
     "Rainmeter",
     "ReadMe",
     "Realtek",
-    "Realtek Audio Console",
     "Realtek Audio Driver",
     "Realtek Card Reader",
     "Realtek Ethernet Controller Driver",
@@ -458,38 +375,29 @@
     "RustDesk",
     "RustDesk Tray",
     "Samples",
-    "Sauvegarde Windows",
     "SayIntentionsAI",
     "SayIntentionsAI.exe",
-    "Scurit Windows",
     "sdxhelper",
     "Sentry",
     "services",
-    "Services de composants",
     "setup",
     "Skype Entreprise",
     "SKYPESERVER",
     "Skyrim Special Edition",
     "SolidDocuments",
-    "Sources de donnes ODBC (32 bits)",
-    "Sources de donnes ODBC (64 bits)",
-    "Sous-titres en direct",
     "speech",
     "Spotify",
     "Spreadsheet Compare",
     "SquirrelTemp",
     "stalefiles",
-    "Start ADB Server",
     "State",
     "Steam",
     "Steam Controller Configs",
-    "Steam Support Center",
     "Steamworks Shared",
     "Steps Recorder",
     "Sticky Notes (new)",
     "System Configuration",
     "System Information",
-    "Table des caractres",
     "table30",
     "Tabletop Simulator",
     "TabTip",
@@ -499,19 +407,14 @@
     "TBShare",
     "Temp",
     "Temporary Internet Files",
-    "Terminal",
     "The Mound Client",
-    "The Mound Omen of Cthulhu Demo",
     "The Mound: Omen of Cthulhu Demo",
     "TheMound",
     "Thunderbolt Share",
     "Thunderbolt™ Share",
     "TierTime",
     "ToastNotificationManagerCompat",
-    "Total War ROME II - Emperor Edition",
     "Total War: ROME II - Emperor Edition",
-    "Traducteur",
-    "TranslucentTB",
     "UL",
     "UniCompactView",
     "Uninstall",
@@ -528,7 +431,6 @@
     "Unity 6000.4.1f1",
     "Unity Hub",
     "Unity Hub 3.16.4",
-    "Unity Release Notes",
     "unityhub-updater",
     "Universal Adb Driver",
     "UnrealEngine",
@@ -553,8 +455,6 @@
     "vJoy Device Driver 2.1.9.1",
     "vJoy Device List",
     "vJoy Feeder (Demo)",
-    "vJoy Home",
-    "vJoy SDK",
     "VoiceAccess",
     "vPilot",
     "vPilot (Debug)",
@@ -594,7 +494,6 @@
     "wabmig",
     "War Thunder",
     "WarThunder",
-    "WhatsApp",
     "Windows Defender",
     "Windows Defender Firewall with Advanced Security",
     "Windows Kits",
@@ -611,18 +510,15 @@
     "Windows Subsystem for Linux",
     "WindowsApps",
     "WindowsPowerShell",
-    "Wintoys",
     "Winword",
     "wmplayer",
     "Word",
     "WSL",
     "WSL Settings",
-    "Xbox",
     "XboxGameStudios",
     "YOUDJ DESKTOP",
     "YOUDJ DESKTOP 19.2.0",
-    "youdj-updater",
-    "YouTube"
+    "youdj-updater"
   ],
   "entries": {
     "android studio": {
@@ -702,8 +598,8 @@
     },
     "microsoft flight simulator (2020)": {
       "name": "Microsoft Flight Simulator (2020)",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\steam://rungameid/1250410"
+      "type": "registry",
+      "path": ""
     },
     "age of empires iv: anniversary edition": {
       "name": "Age of Empires IV: Anniversary Edition",
@@ -722,8 +618,8 @@
     },
     "arc raiders": {
       "name": "ARC Raiders",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\steam://rungameid/1808500"
+      "type": "registry",
+      "path": ""
     },
     "total war: rome ii - emperor edition": {
       "name": "Total War: ROME II - Emperor Edition",
@@ -732,13 +628,13 @@
     },
     "war thunder": {
       "name": "War Thunder",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\steam://rungameid/236390"
+      "type": "gaming",
+      "path": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\War Thunder\\gaijin_downloader.exe"
     },
     "microsoft flight simulator 2024": {
       "name": "Microsoft Flight Simulator 2024",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\steam://rungameid/2537590"
+      "type": "registry",
+      "path": ""
     },
     "cities: skylines": {
       "name": "Cities: Skylines",
@@ -747,18 +643,18 @@
     },
     "no man's sky": {
       "name": "No Man's Sky",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\steam://rungameid/275850"
+      "type": "registry",
+      "path": ""
     },
     "tabletop simulator": {
       "name": "Tabletop Simulator",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\steam://rungameid/286160"
+      "type": "registry",
+      "path": ""
     },
     "cossacks 3": {
       "name": "Cossacks 3",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\steam://rungameid/333420"
+      "type": "registry",
+      "path": ""
     },
     "the mound: omen of cthulhu demo": {
       "name": "The Mound: Omen of Cthulhu Demo",
@@ -2440,531 +2336,6 @@
       "type": "start_menu",
       "path": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Windows PowerShell\\Windows PowerShell ISE.lnk"
     },
-    "accs vocal": {
-      "name": "Accs vocal",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\voiceaccess.exe"
-    },
-    "actions par clic": {
-      "name": "Actions par clic",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\MicrosoftWindows.Client.CoreAI_cw5n1h2txyewy!ClickToDoApp"
-    },
-    "actualits": {
-      "name": "Actualits",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.BingNews_8wekyb3d8bbwe!AppexNews"
-    },
-    "age of empires iv anniversary edition": {
-      "name": "Age of Empires IV Anniversary Edition",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\steam://rungameid/1466860"
-    },
-    "analyseur de performances": {
-      "name": "Analyseur de performances",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.AutoGenerated.{67DEE369-C509-982D-F248-ABCEA8A27352}"
-    },
-    "assistance rapide": {
-      "name": "Assistance rapide",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\MicrosoftCorporationII.QuickAssist_8wekyb3d8bbwe!App"
-    },
-    "bloc-notes": {
-      "name": "Bloc-notes",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.WindowsNotepad_8wekyb3d8bbwe!App"
-    },
-    "calculatrice": {
-      "name": "Calculatrice",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"
-    },
-    "calendar": {
-      "name": "Calendar",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.M365Companions_8wekyb3d8bbwe!Calendar"
-    },
-    "camra": {
-      "name": "Camra",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.WindowsCamera_8wekyb3d8bbwe!App"
-    },
-    "centre de configuration des graphiques intel": {
-      "name": "Centre de configuration des graphiques Intel",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\AppUp.IntelGraphicsExperience_8j3eq9eme6ctt!App"
-    },
-    "cities skylines": {
-      "name": "Cities Skylines",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\steam://rungameid/255710"
-    },
-    "clavier visuel": {
-      "name": "Clavier visuel",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\osk.exe"
-    },
-    "configuration du systme": {
-      "name": "Configuration du systme",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\msconfig.exe"
-    },
-    "connexion bureau  distance": {
-      "name": "Connexion Bureau  distance",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.Windows.RemoteDesktop"
-    },
-    "cossacks back to war": {
-      "name": "Cossacks Back to War",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\steam://rungameid/4850"
-    },
-    "dfragmenter et optimiser les lecteurs": {
-      "name": "Dfragmenter et optimiser les lecteurs",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\dfrgui.exe"
-    },
-    "dev home": {
-      "name": "Dev Home",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.Windows.DevHome_8wekyb3d8bbwe!App"
-    },
-    "diagnostic de mmoire windows": {
-      "name": "Diagnostic de mmoire Windows",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\MdSched.exe"
-    },
-    "ecoledirecte": {
-      "name": "EcoleDirecte",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\www.ecoledirecte.com-79F6A4E9_hts8221kcdg8c!App"
-    },
-    "diteur du registre": {
-      "name": "diteur du Registre",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\{F38BF404-1D43-42F2-9305-67DE0B28FC23}\\regedit.exe"
-    },
-    "enregistreur d'actions utilisateur": {
-      "name": "Enregistreur d'actions utilisateur",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\psr.exe"
-    },
-    "enregistreur vocal": {
-      "name": "Enregistreur vocal",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.WindowsSoundRecorder_8wekyb3d8bbwe!App"
-    },
-    "excuter": {
-      "name": "Excuter",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.Windows.Shell.RunDialog"
-    },
-    "explorateur de fichiers": {
-      "name": "Explorateur de fichiers",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.Windows.Explorer"
-    },
-    "family": {
-      "name": "Family",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\MicrosoftCorporationII.MicrosoftFamily_8wekyb3d8bbwe!App"
-    },
-    "files": {
-      "name": "Files",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.M365Companions_8wekyb3d8bbwe!Files"
-    },
-    "game bar": {
-      "name": "Game Bar",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.XboxGamingOverlay_8wekyb3d8bbwe!App"
-    },
-    "gestion de l'ordinateur": {
-      "name": "Gestion de l'ordinateur",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.AutoGenerated.{E28FB7A9-B922-0A8D-14A7-F4A12E61B8C2}"
-    },
-    "gestionnaire d'enregistrements skype entreprise": {
-      "name": "Gestionnaire d'enregistrements Skype Entreprise",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.Office.OcPubMgr.exe.15"
-    },
-    "gestionnaire des tches": {
-      "name": "Gestionnaire des tches",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.AutoGenerated.{F9BA49F8-6791-D89D-CCEC-71D3D9C0C7AE}"
-    },
-    "git faqs (frequently asked questions)": {
-      "name": "Git FAQs (Frequently Asked Questions)",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\https://gitforwindows.org/faq"
-    },
-    "hogwarts legacy l'hritage de poudlard": {
-      "name": "Hogwarts Legacy L'Hritage de Poudlard",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\steam://rungameid/990080"
-    },
-    "horloge": {
-      "name": "Horloge",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.WindowsAlarms_8wekyb3d8bbwe!App"
-    },
-    "hub de commentaires": {
-      "name": "Hub de commentaires",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.WindowsFeedbackHub_8wekyb3d8bbwe!App"
-    },
-    "idle (python 3.13)": {
-      "name": "IDLE (Python 3.13)",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0!Idle"
-    },
-    "informations systme": {
-      "name": "Informations systme",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\msinfo32.exe"
-    },
-    "initiateur iscsi": {
-      "name": "Initiateur iSCSI",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\iscsicpl.exe"
-    },
-    "instagram": {
-      "name": "Instagram",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\www.instagram.com-E4B7766F_ysfa6mcnwr1rw!App"
-    },
-    "intel rapid storage technology application": {
-      "name": "Intel Rapid Storage Technology Application",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\AppUp.IntelOptaneMemoryandStorageManagement_8j3eq9eme6ctt!App"
-    },
-    "invite de commandes": {
-      "name": "Invite de commandes",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\cmd.exe"
-    },
-    "journal de tlmtrie pour office": {
-      "name": "Journal de tlmtrie pour Office",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.Office.msoev.exe.15"
-    },
-    "lecteur de rcupration": {
-      "name": "Lecteur de rcupration",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\RecoveryDrive.exe"
-    },
-    "lecteur multimdia": {
-      "name": "Lecteur multimdia",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic"
-    },
-    "lively wallpaper": {
-      "name": "Lively Wallpaper",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\12030rocksdanister.LivelyWallpaper_97hta09mmv6hy!App"
-    },
-    "loupe": {
-      "name": "Loupe",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\magnify.exe"
-    },
-    "mto": {
-      "name": "Mto",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.BingWeather_8wekyb3d8bbwe!App"
-    },
-    "microsoft 365 copilot": {
-      "name": "Microsoft 365 Copilot",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.MicrosoftOfficeHub_8wekyb3d8bbwe!Microsoft.MicrosoftOfficeHub"
-    },
-    "microsoft store": {
-      "name": "Microsoft Store",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.WindowsStore_8wekyb3d8bbwe!App"
-    },
-    "microsoft teams": {
-      "name": "Microsoft Teams",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\MSTeams_8wekyb3d8bbwe!MSTeams"
-    },
-    "microsoft to do": {
-      "name": "Microsoft To Do",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.Todos_8wekyb3d8bbwe!App"
-    },
-    "minecraft for windows": {
-      "name": "Minecraft for Windows",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.MinecraftUWP_8wekyb3d8bbwe!Game"
-    },
-    "minecraft launcher": {
-      "name": "Minecraft Launcher",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.4297127D64EC6_8wekyb3d8bbwe!Minecraft"
-    },
-    "minecraft: java edition": {
-      "name": "Minecraft: Java Edition",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.MinecraftJavaEdition_8wekyb3d8bbwe!Game"
-    },
-    "mobile connect": {
-      "name": "Mobile connect",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.YourPhone_8wekyb3d8bbwe!App"
-    },
-    "moniteur de ressources": {
-      "name": "Moniteur de ressources",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.AutoGenerated.{2486123E-0FE5-4788-B86E-2A11B662F89B}"
-    },
-    "motogpt22": {
-      "name": "MotoGPT22",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\steam://rungameid/1710580"
-    },
-    "msi center": {
-      "name": "MSI Center",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\9426MICRO-STARINTERNATION.MSICenter_kzh8wxbdkxb8p!App"
-    },
-    "nahimic": {
-      "name": "Nahimic",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\A-Volute.Nahimic_w2gh52qy24etm!App"
-    },
-    "narrateur": {
-      "name": "Narrateur",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\narrator.exe"
-    },
-    "nettoyage de disque": {
-      "name": "Nettoyage de disque",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\cleanmgr.exe"
-    },
-    "node.js documentation": {
-      "name": "Node.js documentation",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\https://nodejs.org/download/release/v24.14.0/docs/api/"
-    },
-    "node.js website": {
-      "name": "Node.js website",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\https://nodejs.org/"
-    },
-    "nvidia control panel": {
-      "name": "NVIDIA Control Panel",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\NVIDIACorp.NVIDIAControlPanel_56jybvy8sckqj!NVIDIACorp.NVIDIAControlPanel"
-    },
-    "observateur d'vnements": {
-      "name": "Observateur d'vnements",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.AutoGenerated.{245F8F81-DE65-1904-B2D3-1D7B3B99AF6D}"
-    },
-    "obtenir de l'aide": {
-      "name": "Obtenir de l'aide",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.GetHelp_8wekyb3d8bbwe!App"
-    },
-    "outil capture d'cran": {
-      "name": "Outil Capture d'cran",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.ScreenSketch_8wekyb3d8bbwe!App"
-    },
-    "outils windows": {
-      "name": "Outils Windows",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.Windows.AdministrativeTools"
-    },
-    "outlook (pwa)": {
-      "name": "Outlook (PWA)",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\outlook.office.com-4D813D4_akxy2sb7nnr06!App"
-    },
-    "paint": {
-      "name": "Paint",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.Paint_8wekyb3d8bbwe!App"
-    },
-    "palette de commandes": {
-      "name": "Palette de commandes",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.CommandPalette_8wekyb3d8bbwe!App"
-    },
-    "panneau de configuration": {
-      "name": "Panneau de configuration",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.Windows.ControlPanel"
-    },
-    "paramtres": {
-      "name": "Paramtres",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel"
-    },
-    "pare-feu windows defender avec fonctions avances de scurit": {
-      "name": "Pare-feu Windows Defender avec fonctions avances de scurit",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WF.msc"
-    },
-    "pense-btes": {
-      "name": "Pense-btes",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.MicrosoftStickyNotes_8wekyb3d8bbwe!App"
-    },
-    "people": {
-      "name": "People",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.M365Companions_8wekyb3d8bbwe!People"
-    },
-    "photos": {
-      "name": "Photos",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.Windows.Photos_8wekyb3d8bbwe!App"
-    },
-    "planificateur de tches": {
-      "name": "Planificateur de tches",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.AutoGenerated.{AB568050-88B9-C154-AE66-C3E1E4EF4479}"
-    },
-    "power automate": {
-      "name": "Power Automate",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.PowerAutomateDesktop_8wekyb3d8bbwe!PAD.Console"
-    },
-    "prfrences linguistiques d'office": {
-      "name": "Prfrences linguistiques d'Office",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.Office.SETLANG.EXE.15"
-    },
-    "prise en main": {
-      "name": "Prise en main",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\MicrosoftWindows.Client.CBS_cw5n1h2txyewy!WebExperienceHost"
-    },
-    "python 3.13": {
-      "name": "Python 3.13",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0!Python"
-    },
-    "quickshare": {
-      "name": "QuickShare",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\NearbyShare_21hpf16v5xp10!NearbyShare"
-    },
-    "realtek audio console": {
-      "name": "Realtek Audio Console",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\RealtekSemiconductorCorp.RealtekAudioControl_dt26b99r8h8gj!App"
-    },
-    "sauvegarde windows": {
-      "name": "Sauvegarde Windows",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\MicrosoftWindows.Client.CBS_cw5n1h2txyewy!WindowsBackup"
-    },
-    "scurit windows": {
-      "name": "Scurit Windows",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.SecHealthUI_8wekyb3d8bbwe!SecHealthUI"
-    },
-    "services de composants": {
-      "name": "Services de composants",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\comexp.msc"
-    },
-    "sources de donnes odbc (32 bits)": {
-      "name": "Sources de donnes ODBC (32 bits)",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\{D65231B0-B2F1-4857-A4CE-A8E7C6EA7D27}\\odbcad32.exe"
-    },
-    "sources de donnes odbc (64 bits)": {
-      "name": "Sources de donnes ODBC (64 bits)",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\odbcad32.exe"
-    },
-    "sous-titres en direct": {
-      "name": "Sous-titres en direct",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\LiveCaptions.exe"
-    },
-    "start adb server": {
-      "name": "Start ADB Server",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.AutoGenerated.{48E528AD-1264-E1FB-02CE-CCE5FB444D3E}"
-    },
-    "steam support center": {
-      "name": "Steam Support Center",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\http://support.steampowered.com/"
-    },
-    "table des caractres": {
-      "name": "Table des caractres",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\charmap.exe"
-    },
-    "terminal": {
-      "name": "Terminal",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.WindowsTerminal_8wekyb3d8bbwe!App"
-    },
-    "the mound omen of cthulhu demo": {
-      "name": "The Mound Omen of Cthulhu Demo",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\steam://rungameid/4669520"
-    },
-    "total war rome ii - emperor edition": {
-      "name": "Total War ROME II - Emperor Edition",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\steam://rungameid/214950"
-    },
-    "traducteur": {
-      "name": "Traducteur",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.BingTranslator_8wekyb3d8bbwe!App"
-    },
-    "translucenttb": {
-      "name": "TranslucentTB",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\28017CharlesMilette.TranslucentTB_v826wp6bftszj!TranslucentTB"
-    },
-    "unity release notes": {
-      "name": "Unity Release Notes",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\http://unity3d.com/whatsnew.html"
-    },
-    "vjoy home": {
-      "name": "vJoy Home",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\http://vjoystick.sourceforge.net/site"
-    },
-    "vjoy sdk": {
-      "name": "vJoy SDK",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\http://vjoystick.sourceforge.net/redirect_download_vJoy2SDK.php"
-    },
-    "whatsapp": {
-      "name": "WhatsApp",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"
-    },
-    "wintoys": {
-      "name": "Wintoys",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\11413PtruceanBogdan.Wintoys_ankwhmsh70gj6!Wintoys"
-    },
-    "xbox": {
-      "name": "Xbox",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\Microsoft.GamingApp_8wekyb3d8bbwe!Microsoft.Xbox.App"
-    },
-    "youtube": {
-      "name": "YouTube",
-      "type": "uwp",
-      "path": "shell:AppsFolder\\www.youtube.com-54E21B02_pd8mbgmqs65xy!App"
-    },
     "3dmark demo": {
       "name": "3DMark Demo",
       "type": "gaming",
@@ -3490,6 +2861,11 @@
       "type": "program_files",
       "path": ""
     },
+    "nahimic": {
+      "name": "Nahimic",
+      "type": "program_files",
+      "path": ""
+    },
     "neo": {
       "name": "NEO",
       "type": "program_files",
@@ -3731,230 +3107,5 @@
       "path": "C:\\Users\\mathi\\AppData\\Local\\youdj-updater\\installer.exe"
     }
   },
-  "uwp": {
-    "accs vocal": "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\voiceaccess.exe",
-    "access": "Microsoft.Office.MSACCESS.EXE.15",
-    "actions par clic": "MicrosoftWindows.Client.CoreAI_cw5n1h2txyewy!ClickToDoApp",
-    "actualits": "Microsoft.BingNews_8wekyb3d8bbwe!AppexNews",
-    "adobe acrobat": "AcrobatReader",
-    "age of empires iv anniversary edition": "steam://rungameid/1466860",
-    "analyseur de performances": "Microsoft.AutoGenerated.{67DEE369-C509-982D-F248-ABCEA8A27352}",
-    "android studio": "{6D809377-6AF0-444B-8957-A3773F02200E}\\Android\\Android Studio\\bin\\studio64.exe",
-    "arc raiders": "steam://rungameid/1808500",
-    "aria": "C:\\Users\\mathi\\OneDrive\\Documents\\assistant-ia\\assistant-vocal\\launch_aria.bat",
-    "assistance rapide": "MicrosoftCorporationII.QuickAssist_8wekyb3d8bbwe!App",
-    "blackmagic proxy generator lite": "Microsoft.AutoGenerated.{C2A4A863-0656-6D2C-6664-92F1631676F8}",
-    "blackmagic raw player": "{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\\Blackmagic Design\\Blackmagic RAW\\Blackmagic RAW Player\\BlackmagicRAWPlayer.exe",
-    "blackmagic raw speed test": "{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\\Blackmagic Design\\Blackmagic RAW\\Blackmagic RAW Speed Test\\BlackmagicRAWSpeedTest.exe",
-    "blender 5.0": "{6D809377-6AF0-444B-8957-A3773F02200E}\\Blender Foundation\\Blender 5.0\\blender-launcher.exe",
-    "bloc-notes": "Microsoft.WindowsNotepad_8wekyb3d8bbwe!App",
-    "calculatrice": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
-    "calendar": "Microsoft.M365Companions_8wekyb3d8bbwe!Calendar",
-    "camra": "Microsoft.WindowsCamera_8wekyb3d8bbwe!App",
-    "centre de configuration des graphiques intel": "AppUp.IntelGraphicsExperience_8j3eq9eme6ctt!App",
-    "cities skylines": "steam://rungameid/255710",
-    "claude": "com.squirrel.AnthropicClaude.claude",
-    "clavier visuel": "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\osk.exe",
-    "client riot": "C:\\Riot Games\\Riot Client\\RiotClientServices.exe",
-    "configuration du systme": "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\msconfig.exe",
-    "configure vjoy": "{6D809377-6AF0-444B-8957-A3773F02200E}\\vJoy\\x64\\vJoyConf.exe",
-    "connexion bureau  distance": "Microsoft.Windows.RemoteDesktop",
-    "cossacks 3": "steam://rungameid/333420",
-    "cossacks back to war": "steam://rungameid/4850",
-    "crystaldiskmark 9": "{6D809377-6AF0-444B-8957-A3773F02200E}\\CrystalDiskMark9\\DiskMark64.exe",
-    "cursor": "Anysphere.Cursor",
-    "cyberpunk 2077": "steam://rungameid/1091500",
-    "database compare": "Microsoft.Office.DATABASECOMPARE.EXE.15",
-    "davinci control panels": "{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\\Blackmagic Design\\DaVinci Control Panels\\Setup Utility\\DaVinci Control Panels Setup.exe",
-    "davinci resolve": "{6D809377-6AF0-444B-8957-A3773F02200E}\\Blackmagic Design\\DaVinci Resolve\\Resolve.exe",
-    "debuggable package manager": "Microsoft.AutoGenerated.{96690F80-0B7F-841E-E0DB-CC38AC5C839F}",
-    "dfragmenter et optimiser les lecteurs": "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\dfrgui.exe",
-    "dev home": "Microsoft.Windows.DevHome_8wekyb3d8bbwe!App",
-    "developer command prompt for vs": "Microsoft.AutoGenerated.{DD0C8265-3625-801F-0053-2D8DB20761F4}",
-    "developer command prompt for vs 2022": "Microsoft.AutoGenerated.{AF786F56-C95A-2910-4FF9-116D53266237}",
-    "developer powershell for vs": "Microsoft.AutoGenerated.{FB53C11F-8E7A-78A3-AEB1-5EBEC6226FD3}",
-    "developer powershell for vs 2022": "Microsoft.AutoGenerated.{4B44830D-2003-48DA-7D83-648EBD5DA682}",
-    "diagnostic de mmoire windows": "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\MdSched.exe",
-    "discord": "com.squirrel.Discord.Discord",
-    "docker desktop": "Docker.DockerForWindows.Settings",
-    "dragon center": "C:\\ProgramData\\MSI\\Dragon Center UWP\\DCv2\\DCv2.exe",
-    "ecoledirecte": "www.ecoledirecte.com-79F6A4E9_hts8221kcdg8c!App",
-    "diteur du registre": "{F38BF404-1D43-42F2-9305-67DE0B28FC23}\\regedit.exe",
-    "enregistreur d'actions utilisateur": "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\psr.exe",
-    "enregistreur vocal": "Microsoft.WindowsSoundRecorder_8wekyb3d8bbwe!App",
-    "epic games launcher": "{6D809377-6AF0-444B-8957-A3773F02200E}\\Epic Games\\Launcher\\Portal\\Binaries\\Win64\\EpicGamesLauncher.exe",
-    "excel": "Microsoft.Office.EXCEL.EXE.15",
-    "excuter": "Microsoft.Windows.Shell.RunDialog",
-    "explorateur de fichiers": "Microsoft.Windows.Explorer",
-    "fairlight studio utility": "{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\\Blackmagic Design\\DaVinci Control Panels\\Fairlight Studio Utility\\Fairlight Studio Utility.exe",
-    "family": "MicrosoftCorporationII.MicrosoftFamily_8wekyb3d8bbwe!App",
-    "files": "Microsoft.M365Companions_8wekyb3d8bbwe!Files",
-    "game bar": "Microsoft.XboxGamingOverlay_8wekyb3d8bbwe!App",
-    "gear.club unlimited 2 ultimate edition": "steam://rungameid/1557860",
-    "gestion de l'ordinateur": "Microsoft.AutoGenerated.{E28FB7A9-B922-0A8D-14A7-F4A12E61B8C2}",
-    "gestionnaire d'enregistrements skype entreprise": "Microsoft.Office.OcPubMgr.exe.15",
-    "gestionnaire des tches": "Microsoft.AutoGenerated.{F9BA49F8-6791-D89D-CCEC-71D3D9C0C7AE}",
-    "git bash": "Microsoft.AutoGenerated.{0FDD9C6B-656B-0F1F-AB08-B1CDBB7067B3}",
-    "git cmd": "Microsoft.AutoGenerated.{29591C0F-7C09-B655-C0EB-8544FCA7D1DE}",
-    "git faqs (frequently asked questions)": "https://gitforwindows.org/faq",
-    "git gui": "{6D809377-6AF0-444B-8957-A3773F02200E}\\Git\\cmd\\git-gui.exe",
-    "git release notes": "{6D809377-6AF0-444B-8957-A3773F02200E}\\Git\\ReleaseNotes.html",
-    "github desktop": "com.squirrel.GitHubDesktop.GitHubDesktop",
-    "google chrome": "Chrome",
-    "handbrake": "{6D809377-6AF0-444B-8957-A3773F02200E}\\HandBrake\\HandBrake.exe",
-    "hogwarts legacy l'hritage de poudlard": "steam://rungameid/990080",
-    "horloge": "Microsoft.WindowsAlarms_8wekyb3d8bbwe!App",
-    "hub de commentaires": "Microsoft.WindowsFeedbackHub_8wekyb3d8bbwe!App",
-    "idle (python 3.13)": "PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0!Idle",
-    "informations systme": "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\msinfo32.exe",
-    "initiateur iscsi": "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\iscsicpl.exe",
-    "instagram": "www.instagram.com-E4B7766F_ysfa6mcnwr1rw!App",
-    "install additional tools for node.js": "Microsoft.AutoGenerated.{04770C2D-34E6-BE94-EFAD-FA817237D6E9}",
-    "intel rapid storage technology application": "AppUp.IntelOptaneMemoryandStorageManagement_8j3eq9eme6ctt!App",
-    "invite de commandes": "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\cmd.exe",
-    "journal de tlmtrie pour office": "Microsoft.Office.msoev.exe.15",
-    "lecteur de rcupration": "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\RecoveryDrive.exe",
-    "lecteur multimdia": "Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic",
-    "lively wallpaper": "12030rocksdanister.LivelyWallpaper_97hta09mmv6hy!App",
-    "logitech g hub": "{6D809377-6AF0-444B-8957-A3773F02200E}\\LGHUB\\system_tray\\lghub_system_tray.exe",
-    "loupe": "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\magnify.exe",
-    "lunar client": "com.moonsworth.client",
-    "manictime": "ManicTime",
-    "mto": "Microsoft.BingWeather_8wekyb3d8bbwe!App",
-    "microsoft 365 copilot": "Microsoft.MicrosoftOfficeHub_8wekyb3d8bbwe!Microsoft.MicrosoftOfficeHub",
-    "microsoft edge": "MSEdge",
-    "microsoft flight simulator (2020)": "steam://rungameid/1250410",
-    "microsoft flight simulator 2024": "steam://rungameid/2537590",
-    "microsoft store": "Microsoft.WindowsStore_8wekyb3d8bbwe!App",
-    "microsoft teams": "MSTeams_8wekyb3d8bbwe!MSTeams",
-    "microsoft to do": "Microsoft.Todos_8wekyb3d8bbwe!App",
-    "minecraft for windows": "Microsoft.MinecraftUWP_8wekyb3d8bbwe!Game",
-    "minecraft launcher": "Microsoft.4297127D64EC6_8wekyb3d8bbwe!Minecraft",
-    "minecraft: java edition": "Microsoft.MinecraftJavaEdition_8wekyb3d8bbwe!Game",
-    "mobile connect": "Microsoft.YourPhone_8wekyb3d8bbwe!App",
-    "moniteur de ressources": "Microsoft.AutoGenerated.{2486123E-0FE5-4788-B86E-2A11B662F89B}",
-    "monitor vjoy": "{6D809377-6AF0-444B-8957-A3773F02200E}\\vJoy\\x64\\JoyMonitor.exe",
-    "motogpt22": "steam://rungameid/1710580",
-    "msi afterburner": "{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\\MSI Afterburner\\MSIAfterburner.exe",
-    "msi afterburner localization reference": "{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\\MSI Afterburner\\SDK\\Doc\\Localization reference.pdf",
-    "msi afterburner skin format reference": "{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\\MSI Afterburner\\SDK\\Doc\\USF skin format reference.pdf",
-    "msi app player": "{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\\BlueStacks X_msi5\\MSI App Player.exe",
-    "msi center": "9426MICRO-STARINTERNATION.MSICenter_kzh8wxbdkxb8p!App",
-    "msi companion": "overwolf.ddlhcmnbjcondncokaaocnpbhbmhchohknbhpnbd",
-    "nahimic": "A-Volute.Nahimic_w2gh52qy24etm!App",
-    "nahimic companion": "A-Volute.NahimicCompanion.nahimic",
-    "narrateur": "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\narrator.exe",
-    "navigateur opera gx": "OperaSoftware.OperaGXWebBrowser.1771588058",
-    "nettoyage de disque": "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\cleanmgr.exe",
-    "no man's sky": "steam://rungameid/275850",
-    "node.js": "{6D809377-6AF0-444B-8957-A3773F02200E}\\nodejs\\node.exe",
-    "node.js command prompt": "Microsoft.AutoGenerated.{499EE7CA-7ED5-EBC9-AB09-80DC143D7B90}",
-    "node.js documentation": "https://nodejs.org/download/release/v24.14.0/docs/api/",
-    "node.js website": "https://nodejs.org/",
-    "nvidia app": "com.nvidia.nvapp",
-    "nvidia control panel": "NVIDIACorp.NVIDIAControlPanel_56jybvy8sckqj!NVIDIACorp.NVIDIAControlPanel",
-    "obs studio": "{6D809377-6AF0-444B-8957-A3773F02200E}\\obs-studio\\bin\\64bit\\obs64.exe",
-    "observateur d'vnements": "Microsoft.AutoGenerated.{245F8F81-DE65-1904-B2D3-1D7B3B99AF6D}",
-    "obtenir de l'aide": "Microsoft.GetHelp_8wekyb3d8bbwe!App",
-    "ollama": "C:\\Users\\mathi\\AppData\\Local\\Programs\\Ollama\\ollama app.exe",
-    "onedrive": "Microsoft.SkyDrive.Desktop",
-    "onenote": "Microsoft.Office.ONENOTE.EXE.15",
-    "outil capture d'cran": "Microsoft.ScreenSketch_8wekyb3d8bbwe!App",
-    "outils windows": "Microsoft.Windows.AdministrativeTools",
-    "outlook": "Microsoft.OutlookForWindows_8wekyb3d8bbwe!Microsoft.OutlookforWindows",
-    "outlook (classic)": "Microsoft.Office.OUTLOOK.EXE.15",
-    "outlook (pwa)": "outlook.office.com-4D813D4_akxy2sb7nnr06!App",
-    "overwolf": "Overwolf.Client",
-    "paint": "Microsoft.Paint_8wekyb3d8bbwe!App",
-    "palette de commandes": "Microsoft.CommandPalette_8wekyb3d8bbwe!App",
-    "panneau de configuration": "Microsoft.Windows.ControlPanel",
-    "paradox launcher v2": "C:\\Users\\mathi\\AppData\\Local\\Programs\\Paradox Interactive\\launcher\\bootstrapper-v2.exe",
-    "paramtres": "windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel",
-    "pare-feu windows defender avec fonctions avances de scurit": "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WF.msc",
-    "parsec": "{6D809377-6AF0-444B-8957-A3773F02200E}\\Parsec\\parsecd.exe",
-    "pense-btes": "Microsoft.MicrosoftStickyNotes_8wekyb3d8bbwe!App",
-    "people": "Microsoft.M365Companions_8wekyb3d8bbwe!People",
-    "photos": "Microsoft.Windows.Photos_8wekyb3d8bbwe!App",
-    "planificateur de tches": "Microsoft.AutoGenerated.{AB568050-88B9-C154-AE66-C3E1E4EF4479}",
-    "postman": "com.squirrel.Postman.Postman",
-    "power automate": "Microsoft.PowerAutomateDesktop_8wekyb3d8bbwe!PAD.Console",
-    "powerpoint": "Microsoft.Office.POWERPNT.EXE.15",
-    "powertoys (preview)": "Microsoft.PowerToysWin32",
-    "prfrences linguistiques d'office": "Microsoft.Office.SETLANG.EXE.15",
-    "prise en main": "MicrosoftWindows.Client.CBS_cw5n1h2txyewy!WebExperienceHost",
-    "publisher": "Microsoft.Office.MSPUB.EXE.15",
-    "python 3.13": "PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0!Python",
-    "quickshare": "NearbyShare_21hpf16v5xp10!NearbyShare",
-    "rainmeter": "{6D809377-6AF0-444B-8957-A3773F02200E}\\Rainmeter\\Rainmeter.exe",
-    "readme": "{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\\MSI Afterburner\\Doc\\ReadMe.pdf",
-    "realtek audio console": "RealtekSemiconductorCorp.RealtekAudioControl_dt26b99r8h8gj!App",
-    "report a problem with unity": "{6D809377-6AF0-444B-8957-A3773F02200E}\\Unity\\Hub\\Editor\\6000.4.1f1\\Editor\\BugReporter\\UnityBugReporter.exe",
-    "rustdesk": "{6D809377-6AF0-444B-8957-A3773F02200E}\\RustDesk\\RustDesk.exe",
-    "samples": "{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\\MSI Afterburner\\SDK\\Samples",
-    "sauvegarde windows": "MicrosoftWindows.Client.CBS_cw5n1h2txyewy!WindowsBackup",
-    "sayintentionsai.exe": "C:\\Users\\mathi\\AppData\\Roaming\\SayIntentionsAI\\SayIntentionsAI\\SayIntentionsAI.exe",
-    "scurit windows": "Microsoft.SecHealthUI_8wekyb3d8bbwe!SecHealthUI",
-    "services": "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\services.msc",
-    "services de composants": "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\comexp.msc",
-    "skype entreprise": "Microsoft.Office.lync.exe.15",
-    "sources de donnes odbc (32 bits)": "{D65231B0-B2F1-4857-A4CE-A8E7C6EA7D27}\\odbcad32.exe",
-    "sources de donnes odbc (64 bits)": "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\odbcad32.exe",
-    "sous-titres en direct": "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\LiveCaptions.exe",
-    "spotify": "C:\\Users\\mathi\\AppData\\Roaming\\Spotify\\Spotify.exe",
-    "spreadsheet compare": "Microsoft.Office.SPREADSHEETCOMPARE.EXE.15",
-    "start adb server": "Microsoft.AutoGenerated.{48E528AD-1264-E1FB-02CE-CCE5FB444D3E}",
-    "steam": "{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\\Steam\\Steam.exe",
-    "steam support center": "http://support.steampowered.com/",
-    "sticky notes (new)": "Microsoft.Office.OneNote.MemoryPreview",
-    "table des caractres": "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\charmap.exe",
-    "tabletop simulator": "steam://rungameid/286160",
-    "tailscale": "{6D809377-6AF0-444B-8957-A3773F02200E}\\Tailscale\\tailscale-ipn.exe",
-    "terminal": "Microsoft.WindowsTerminal_8wekyb3d8bbwe!App",
-    "the mound omen of cthulhu demo": "steam://rungameid/4669520",
-    "thunderbolt share": "{6D809377-6AF0-444B-8957-A3773F02200E}\\Thunderbolt Share\\TBShare.exe",
-    "total war rome ii - emperor edition": "steam://rungameid/214950",
-    "traducteur": "Microsoft.BingTranslator_8wekyb3d8bbwe!App",
-    "translucenttb": "28017CharlesMilette.TranslucentTB_v826wp6bftszj!TranslucentTB",
-    "uninstall": "{6D809377-6AF0-444B-8957-A3773F02200E}\\HandBrake\\uninst.exe",
-    "uninstall msi app player": "{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\\BlueStacks X_msi5\\BlueStacksXUninstaller.exe",
-    "uninstall node.js": "Microsoft.AutoGenerated.{66BBC888-2812-4F2E-217B-5F51E13821F0}",
-    "uninstall vpilot": "C:\\Users\\mathi\\AppData\\Local\\vPilot\\Uninstall.exe",
-    "unity": "{6D809377-6AF0-444B-8957-A3773F02200E}\\Unity\\Hub\\Editor\\6000.4.1f1\\Editor\\Unity.exe",
-    "unity hub": "com.unity3d.unityhub",
-    "unity release notes": "http://unity3d.com/whatsnew.html",
-    "up studio 3": "{6D809377-6AF0-444B-8957-A3773F02200E}\\UP Studio3\\UP Studio3.exe",
-    "valorant": "Microsoft.AutoGenerated.{B90C4CF3-5116-AEB7-2542-2440C94B666D}",
-    "visual studio": "VisualStudio.8f0a4978",
-    "visual studio 2022": "VisualStudio.8329b490",
-    "visual studio code": "Microsoft.VisualStudioCode",
-    "visual studio installer": "Microsoft.VisualStudio.Installer",
-    "vjoy device list": "{6D809377-6AF0-444B-8957-A3773F02200E}\\vJoy\\x64\\vJoyList.exe",
-    "vjoy feeder (demo)": "{6D809377-6AF0-444B-8957-A3773F02200E}\\vJoy\\x64\\vJoyFeeder.exe",
-    "vjoy home": "http://vjoystick.sourceforge.net/site",
-    "vjoy sdk": "http://vjoystick.sourceforge.net/redirect_download_vJoy2SDK.php",
-    "vpilot": "C:\\Users\\mathi\\AppData\\Local\\vPilot\\vPilot.exe",
-    "vpilot (debug)": "Microsoft.AutoGenerated.{E4C6BC9A-4B6E-659F-6D01-7B6B74183C2E}",
-    "vpilot host mode": "Microsoft.AutoGenerated.{9AF2EE1D-C168-021E-ACF1-3E1A6791E9F6}",
-    "vpilot host mode (debug)": "Microsoft.AutoGenerated.{6A3C4684-9520-7A2B-4CA6-E7D0B3A73D6B}",
-    "vpilot host mode with voice": "Microsoft.AutoGenerated.{8CB25DE2-197F-76AB-E3EB-F330CB7130FD}",
-    "vpilot host mode with voice (debug)": "Microsoft.AutoGenerated.{3358A5C6-5810-7BA7-941A-902F036C7369}",
-    "vpilot remote mode": "Microsoft.AutoGenerated.{4C5DF6D0-1BA6-9E5D-429D-C45A6A660D3A}",
-    "vpilot remote mode (debug)": "Microsoft.AutoGenerated.{B07828E0-2A43-C5B5-A5A1-E06E614FAD51}",
-    "vpilot remote mode with voice": "Microsoft.AutoGenerated.{3B54FD88-48C4-051E-1B25-CB5C89DD96F0}",
-    "vpilot remote mode with voice (debug)": "Microsoft.AutoGenerated.{141131BC-3B18-77ED-C22C-741B262602ED}",
-    "war thunder": "steam://rungameid/236390",
-    "whatsapp": "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App",
-    "windows media player legacy": "Microsoft.Windows.MediaPlayer32",
-    "windows powershell": "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe",
-    "windows powershell (x86)": "{D65231B0-B2F1-4857-A4CE-A8E7C6EA7D27}\\WindowsPowerShell\\v1.0\\powershell.exe",
-    "windows powershell ise": "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\PowerShell_ISE.exe",
-    "windows powershell ise (x86)": "{D65231B0-B2F1-4857-A4CE-A8E7C6EA7D27}\\WindowsPowerShell\\v1.0\\PowerShell_ISE.exe",
-    "wintoys": "11413PtruceanBogdan.Wintoys_ankwhmsh70gj6!Wintoys",
-    "word": "Microsoft.Office.WINWORD.EXE.15",
-    "wsl": "Microsoft.WSL",
-    "wsl settings": "{6D809377-6AF0-444B-8957-A3773F02200E}\\WSL\\wslsettings\\wslsettings.exe",
-    "xbox": "Microsoft.GamingApp_8wekyb3d8bbwe!Microsoft.Xbox.App",
-    "youdj desktop": "you.dj",
-    "youtube": "www.youtube.com-54E21B02_pd8mbgmqs65xy!App"
-  }
+  "uwp": {}
 }

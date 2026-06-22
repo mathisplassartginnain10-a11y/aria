@@ -89,6 +89,7 @@ STT_DEBUG: bool = bool(_config.get("stt_debug", False))
 WHISPER_MODEL: str = str(_STT_CFG.get("model") or _config.get("whisper_model", "small"))
 STT_LANGUAGE: str = str(_STT_CFG.get("language") or _config.get("language", "fr"))
 STT_BACKEND: str = str(_STT_CFG.get("backend", "faster_whisper"))
+WHISPER_DEVICE: str = str(_STT_CFG.get("device") or _config.get("whisper_device", "cuda")).lower()
 _stt_device_raw = _STT_CFG.get("device_index")
 STT_DEVICE_INDEX: int | None = (
     int(_stt_device_raw) if _stt_device_raw is not None else None
@@ -742,6 +743,10 @@ def _load_whisper_model():
             ("cuda", "int8"),
             ("cpu", "int8"),
         ]
+        if WHISPER_DEVICE == "cpu":
+            configs = [("cpu", "int8")]
+        elif WHISPER_DEVICE == "cuda":
+            configs = [c for c in configs if c[0] == "cuda"] + [("cpu", "int8")]
         last_error: Exception | None = None
         test_audio = np.random.randn(16000).astype(np.float32) * 0.01
 

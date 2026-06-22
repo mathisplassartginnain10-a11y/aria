@@ -211,12 +211,32 @@ def _on_hotkey(_event=None) -> None:
 
 def _start_llamacpp() -> None:
     log = _logger or logging.getLogger(__name__)
-    if llamacpp_manager.should_use_ollama_gpu():
+    status = llamacpp_manager.get_gpu_status()
+    log.info("Inférence locale: %s", status)
+
+    if status["inference_backend"] == "ollama-gpu":
+        llamacpp_manager.ensure_ollama_running()
         ui_bridge.show_toast(
-            "Inférence via Ollama GPU (CUDA manquant pour llama.cpp)",
+            "Inférence via Ollama GPU (VRAM RTX)",
             "info",
         )
         log.info("CUDA absent pour llama.cpp — inférence déléguée à Ollama GPU")
+        return
+
+    if status["inference_backend"] == "llama.cpp-gpu":
+        ui_bridge.show_toast("llama.cpp GPU (VRAM) activé", "info")
+    elif status["inference_backend"] == "cpu":
+        ui_bridge.show_toast(
+            "Attention : inférence CPU (RAM) — installe les paquets CUDA ou Ollama",
+            "warning",
+        )
+        log.warning(
+            "CUDA non détecté — lance scripts/fix_cuda_dlls.ps1 "
+            "pour copier les DLLs CUDA dans C:/llama.cpp/"
+        )
+
+    if llamacpp_manager.should_use_ollama_gpu():
+        llamacpp_manager.ensure_ollama_running()
         return
     if not Path(llamacpp_manager.LLAMA_SERVER_EXE).exists():
         ui_bridge.show_toast("llama-server.exe introuvable — mode cloud API possible", "warning")
@@ -293,12 +313,38 @@ def _keyboard_thread(debug_keys: bool) -> None:
         ui_bridge.show_error("Hook clavier impossible — vérifiez les droits admin")
 
 
-@ui_bridge.expose
-def shutdown() -> dict:
-    _logger.info("Arrêt demandé par Electron") if _logger else None
-    _on_aria_closing()
-    sys.exit(0)
-    return {"success": True}
+def _register_shutdown() -> None:
+    ui_bridge.register_shutdown_hook(_on_aria_closing)
+
+
+def _install_console_shutdown_handler() -> None:
+    """Intercepte la fermeture du terminal Windows (croix) pour tuer llama-server."""
+    if sys.platform != "win32":
+        return
+
+    import ctypes
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_uint)
+    def _handler(ctrl_type):
+        # 0=CTRL_C, 1=CTRL_BREAK, 2=CTRL_CLOSE, 5=LOGOFF, 6=SHUTDOWN
+        if ctrl_type not in (0, 1, 2, 5, 6):
+            return False
+
+        def _shutdown() -> None:
+            try:
+                _on_aria_closing()
+            except Exception:
+                pass
+            try:
+                llamacpp_manager.stop_all_servers()
+            except Exception:
+                pass
+            os._exit(0)
+
+        threading.Thread(target=_shutdown, daemon=True, name="ARIA-ConsoleShutdown").start()
+        return True
+
+    ctypes.windll.kernel32.SetConsoleCtrlHandler(_handler, True)
 
 
 def main() -> None:
@@ -313,10 +359,7 @@ def main() -> None:
 
     _logger.info("=== ARIA Backend démarrage ===")
 
-    generate_sounds.ensure_sounds()
-    memory.init()
-    memory_engine.get_engine().update_active_hours()
-    llamacpp_manager.configure(_config)
+    _register_shutdown()
     atexit.register(llamacpp_manager.stop_all_servers)
     atexit.register(lambda: memory_engine.get_engine().save_session())
     atexit.register(lambda: memory_engine.get_engine().save_current_conversation())
@@ -324,9 +367,21 @@ def main() -> None:
 
     signal.signal(signal.SIGINT, lambda s, f: (_on_aria_closing(), sys.exit(0)))
     signal.signal(signal.SIGTERM, lambda s, f: (_on_aria_closing(), sys.exit(0)))
+    _install_console_shutdown_handler()
 
+    # WebSocket en premier — launch_aria.bat / Electron attendent le port file
     ui_bridge.start()
     _logger.info("WebSocket serveur démarré")
+
+    generate_sounds.ensure_sounds()
+    memory.init()
+    memory_engine.get_engine().update_active_hours()
+    try:
+        from actions import profiles as _profiles
+        _profiles._apply_profile_to_runtime(_profiles.get_current_profile())
+    except Exception:
+        _logger.debug("Profil init skipped", exc_info=True)
+    llamacpp_manager.configure(_config)
 
     def _start_splash_scan() -> None:
         """Scan lancé une fois Electron connecté au WebSocket."""
@@ -385,16 +440,38 @@ def main() -> None:
     if _config.get("mobile_auto_start", True):
         def _start_mobile() -> None:
             try:
-                import aria_mobile_server as mobile_server
-                mobile_server.start_mobile_server(
-                    config=_config, block=False, ensure_ollama=False, banner=False
-                )
+                import mobile_server
+                mobile_server.start_mobile_server(config=_config)
                 info = mobile_server.get_connect_info()
-                ui_bridge.show_toast(f"📱 Mobile : {info['ip']}:{info['port']}", "info")
+                ui_bridge.show_toast(f"📱 Mobile : {info['url']}", "info")
             except Exception:
                 _logger.exception("Serveur mobile indisponible")
 
         threading.Thread(target=_start_mobile, daemon=True).start()
+
+    def _nexus_auto_watch() -> None:
+        import time
+        import yaml
+        import app_paths
+        from actions import apps as _apps
+        while True:
+            try:
+                with app_paths.config_path().open("r", encoding="utf-8") as f:
+                    cfg = yaml.safe_load(f) or {}
+                auto_apps = cfg.get("nexus_auto_apps") or []
+                if auto_apps:
+                    running = any(_apps.is_running(str(a)) for a in auto_apps)
+                    nexus_on = bool(cfg.get("nexus_mode", False))
+                    if running and not nexus_on:
+                        ui_bridge.set_nexus_mode(True)
+                    elif not running and nexus_on and cfg.get("models_backup"):
+                        ui_bridge.set_nexus_mode(False)
+            except Exception:
+                _logger.debug("Nexus auto-watch skipped", exc_info=True)
+            time.sleep(30)
+
+    if _config.get("nexus_auto_apps"):
+        threading.Thread(target=_nexus_auto_watch, daemon=True, name="ARIA-NexusAuto").start()
 
     ui_bridge.set_status("idle")
     _logger.info("=== ARIA Backend prêt ===")
@@ -409,6 +486,12 @@ def main() -> None:
             ui_bridge.set_light_vram_mode(True)
         except Exception:
             _logger.debug("Light VRAM mode init skipped", exc_info=True)
+
+    if _config.get("nexus_mode"):
+        try:
+            ui_bridge.set_nexus_mode(True)
+        except Exception:
+            _logger.debug("Nexus mode init skipped", exc_info=True)
 
     try:
         while True:

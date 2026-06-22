@@ -70,6 +70,75 @@ let wsClient = null;
 let wsReady = false;
 let pendingMessages = [];
 let activeWsPort = DEFAULT_WS_PORT;
+let backendsKilled = false;
+
+function killAllBackends() {
+  if (backendsKilled) return;
+  backendsKilled = true;
+  console.log('[ARIA] Arrêt de tous les backends...');
+
+  // 1. Signaler au backend Python de s'arrêter proprement
+  if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+    try {
+      wsClient.send(JSON.stringify({
+        id: 'shutdown',
+        action: 'shutdown',
+        args: [],
+        kwargs: {},
+      }));
+    } catch (e) {
+      console.error('[ARIA] Erreur WS shutdown:', e.message);
+    }
+  }
+
+  // 2. Tuer le process Python et tous ses enfants via taskkill
+  if (pythonProcess && !pythonProcess.killed) {
+    try {
+      if (process.platform === 'win32') {
+        spawn('taskkill', ['/F', '/T', '/PID', String(pythonProcess.pid)], {
+          detached: true,
+          stdio: 'ignore',
+        }).unref();
+      }
+      pythonProcess.kill('SIGKILL');
+    } catch (e) {
+      console.error('[ARIA] Erreur kill Python:', e.message);
+    }
+    pythonProcess = null;
+  }
+
+  // 3. Tuer llama-server.exe directement (au cas où)
+  if (process.platform === 'win32') {
+    try {
+      spawn('taskkill', ['/F', '/IM', 'llama-server.exe'], {
+        detached: true,
+        stdio: 'ignore',
+      }).unref();
+    } catch (e) {
+      console.error('[ARIA] Erreur kill llama-server:', e.message);
+    }
+
+    // 4. Tuer Ollama (processus orphelins)
+    try {
+      spawn('taskkill', ['/F', '/IM', 'ollama.exe'], {
+        detached: true,
+        stdio: 'ignore',
+      }).unref();
+    } catch (e) {
+      console.error('[ARIA] Erreur kill Ollama:', e.message);
+    }
+  }
+
+  wsClient = null;
+  wsReady = false;
+  console.log('[ARIA] Backends arrêtés');
+}
+
+function quitAria() {
+  app.isQuitting = true;
+  killAllBackends();
+  setTimeout(() => app.quit(), 500);
+}
 
 function getWsPort(retries = 20) {
   return new Promise((resolve) => {
@@ -231,7 +300,7 @@ ipcMain.on('open-external', (event, url) => {
 
 // Quitter proprement
 ipcMain.on('quit-app', () => {
-  app.quit();
+  quitAria();
 });
 // Contrôles de fenêtre
 ipcMain.on('window-minimize', () => { if (mainWindow) mainWindow.minimize(); });
@@ -345,6 +414,8 @@ function createWindow() {
     if (!app.isQuitting) {
       event.preventDefault();
       mainWindow.hide();
+    } else {
+      killAllBackends();
     }
   });
 
@@ -377,10 +448,7 @@ function rebuildTrayMenu() {
     { type: 'separator' },
     {
       label: 'Quitter ARIA',
-      click: () => {
-        app.isQuitting = true;
-        app.quit();
-      },
+      click: () => quitAria(),
     },
   ]);
 
@@ -510,21 +578,11 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', () => {
   app.isQuitting = true;
+  killAllBackends();
+});
 
-  // Arrêter proprement le backend Python
-  if (pythonProcess) {
-    try {
-      // Envoyer une commande d'arrêt propre
-      sendToPython('shutdown', []);
-      setTimeout(() => {
-        if (pythonProcess) {
-          pythonProcess.kill('SIGTERM');
-        }
-      }, 3000);
-    } catch (e) {
-      pythonProcess.kill();
-    }
-  }
+app.on('will-quit', () => {
+  killAllBackends();
 });
 
 app.on('window-all-closed', () => {

@@ -233,6 +233,10 @@ def _warmup_model_async(model: str) -> None:
     try:
         import llamacpp_manager
 
+        if llamacpp_manager.should_use_ollama_gpu():
+            matched = _resolve_model_with_fallback(model)
+            llamacpp_manager.warmup_ollama_model(matched)
+            return
         matched = _resolve_model_with_fallback(model)
         llamacpp_manager.start_model_server(matched)
     except Exception as exc:
@@ -832,6 +836,7 @@ PURE_ACTIONS = frozenset({
     "nexus_prompt", "daily_brief", "export_pdf", "focus_mode_on", "focus_mode_off",
     "calendar_today", "calendar_upcoming", "calendar_create", "revision_plan",
     "german_mode_on", "german_mode_off", "run_macro", "smarthome", "social_discord",
+    "switch_user", "nexus_mode",
 }) | ALL_GOOGLE_INTENTS
 
 # Actions that use an external API then summarize with LLM
@@ -1034,6 +1039,25 @@ def _fast_intent(text: str) -> tuple[str, dict] | None:
     # PRIORITY 2.5: « ferme l'onglet » → onglet navigateur, pas une app nommée "onglet"
     if re.search(r"\bferme\b.*\b(onglet|tab)\b", text_lower):
         return "browser_close_tab", {}
+
+    # PRIORITY 2.65: Mode Nexus VRAM (distinct de Nexus IDE)
+    if re.search(r"lib[ée]re\s+(?:la\s+)?vram", text_lower):
+        return "nexus_mode", {"enable": True}
+    if re.search(r"mode\s+[ée]conomie|mode\s+l[ée]ger", text_lower):
+        return "nexus_mode", {"enable": True}
+    if re.search(r"active\s+(?:le\s+)?(?:mode\s+)?nexus\b", text_lower):
+        return "nexus_mode", {"enable": True}
+    if re.search(r"d[ée]sactive\s+nexus|mode\s+normal|r[ée]tablir\s+(?:le\s+)?mode\s+normal", text_lower):
+        return "nexus_mode", {"enable": False}
+
+    # PRIORITY 2.66: Changement de profil utilisateur
+    try:
+        from actions.profiles import match_profile_in_text
+        profile_name = match_profile_in_text(text)
+        if profile_name:
+            return "switch_user", {"name": profile_name}
+    except Exception:
+        pass
 
     # PRIORITY 2.7: Nexus (éditeur de code local) — avant lancer_app/navigateur
     if re.search(
@@ -1313,6 +1337,17 @@ def _build_dynamic_system_prompt() -> str:
             "naturelle et conversationnelle. Pas de listes, pas de markdown, pas de tirets."
         )
     try:
+        from actions import profiles as _profiles
+        prof = _profiles.get_current_profile()
+        extra = str(prof.get("system_prompt_extra") or "").strip()
+        if extra:
+            dynamic_system += "\n\n" + extra
+        firstname = prof.get("firstname") or prof.get("name")
+        if firstname:
+            dynamic_system += f"\n\nProfil actif : {firstname}."
+    except Exception:
+        pass
+    try:
         from actions import agents as _agents
 
         return _agents.build_system_prompt(_agents.get_active_agent(), dynamic_system)
@@ -1402,6 +1437,9 @@ def _llamacpp_available() -> bool:
 def _ensure_llamacpp(model: str) -> str:
     """Démarre le serveur llama.cpp pour le modèle et retourne le nom résolu."""
     import llamacpp_manager
+
+    if llamacpp_manager.should_use_ollama_gpu():
+        raise RuntimeError("ollama-gpu")
 
     matched = _resolve_model_with_fallback(model)
     available = llamacpp_manager.list_available_models()
@@ -4229,6 +4267,27 @@ def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
     if intent == "nexus_open":
         path = params.get("path")
         return nexus_control.open_nexus(path) if path else nexus_control.open_nexus()
+    if intent == "switch_user":
+        from actions import profiles
+        name = params.get("name", original_text)
+        result = profiles.switch_profile(str(name))
+        if result.get("success"):
+            _refresh_system_prompt()
+            return result.get("message") or "Profil chargé."
+        return result.get("error") or "Profil introuvable."
+    if intent == "nexus_mode":
+        import yaml
+        import app_paths
+        with app_paths.config_path().open("r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        current = bool(cfg.get("nexus_mode", False))
+        if "enable" in params:
+            target = bool(params["enable"])
+        else:
+            target = not current
+        import ui_bridge as ui
+        ui.set_nexus_mode(target)
+        return "⚡ Nexus activé — VRAM libérée." if target else "🧠 Mode normal rétabli."
     if intent == "nexus_prompt":
         from actions import nexus
 

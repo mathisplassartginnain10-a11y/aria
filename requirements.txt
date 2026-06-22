@@ -1,4 +1,6 @@
 faster-whisper
+nvidia-cuda-runtime-cu12
+nvidia-cublas-cu12
 SpeechRecognition
 torch
 tiktoken

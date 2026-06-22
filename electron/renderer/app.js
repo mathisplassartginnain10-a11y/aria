@@ -205,6 +205,8 @@ async function init() {
   await loadActiveAgent();
   await loadAgentDropdown();
   await updateAgentsBadge();
+  refreshNexusBadge();
+  startVramPolling();
   setStatus('idle');
   navigate('home');
   updateClock();
@@ -404,6 +406,36 @@ function setupEventListeners() {
   api.on('error', (text) => {
     showToast(text || 'Erreur', 'error');
     setStatus('idle');
+  });
+
+  api.on('profile_changed', (prof) => applyProfileChanged(prof));
+  api.on('nexus_mode_changed', (data) => {
+    refreshNexusBadge();
+    if (data?.enabled) showToast('⚡ Mode Nexus activé', 'info');
+  });
+  api.on('model_install_start', (data) => {
+    const logEl = document.getElementById('model-install-log');
+    if (logEl) {
+      logEl.classList.remove('hidden');
+      logEl.textContent += `\n▶ ${data?.name || data?.model_id}…\n`;
+    }
+  });
+  api.on('model_install_progress', (data) => {
+    const logEl = document.getElementById('model-install-log');
+    if (logEl && data?.line) {
+      logEl.textContent += data.line + '\n';
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+  });
+  api.on('model_install_done', (data) => {
+    const logEl = document.getElementById('model-install-log');
+    if (logEl) logEl.textContent += data?.success ? '\n✅ Terminé\n' : `\n❌ ${data?.error || 'Échec'}\n`;
+    loadModelCatalog();
+    loadModelSettings();
+    showToast(data?.success ? 'Modèle installé' : (data?.error || 'Installation échouée'), data?.success ? 'success' : 'error');
+  });
+  api.on('request_app_quit', () => {
+    setTimeout(() => window.ARIA?.quit?.(), 500);
   });
 
   document.getElementById('messages')?.addEventListener('click', (e) => {
@@ -1382,9 +1414,21 @@ function toggleAccordion(id) {
   if (accordion) accordion.classList.toggle('open', isHidden);
 
   if (isHidden) {
-    if (id === 'modeles') loadModelSettings();
+    if (id === 'modeles') { loadModelSettings(); loadModelCatalog(); }
+    if (id === 'profils') loadProfilesSettings();
+    if (id === 'systeme') { refreshVramWidget(); refreshUpdatePanel(); refreshNexusBadge(); }
     if (id === 'apikeys') loadApiKeys();
   }
+}
+
+function switchModelTab(tab) {
+  document.querySelectorAll('.model-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+  document.getElementById('model-tab-active')?.classList.toggle('hidden', tab !== 'active');
+  document.getElementById('model-tab-catalog')?.classList.toggle('hidden', tab !== 'catalog');
+  if (tab === 'catalog') loadModelCatalog();
+  else loadModelSettings();
 }
 
 async function loadModelSettings() {
@@ -1393,36 +1437,283 @@ async function loadModelSettings() {
   container.innerHTML = '<div class="loading-text">Chargement...</div>';
 
   try {
-    const data = await api.call('get_available_models');
-    if (!data.ollama_running) {
-      container.innerHTML = '<div class="error-text">⚠️ Ollama non disponible</div>';
-      return;
-    }
-    if (!data.local_models?.length) {
-      container.innerHTML = '<div class="info-text">Aucun modèle installé.<br><code>ollama pull llama3.2:1b</code></div>';
+    const [catalog, modelsData] = await Promise.all([
+      api.call('get_model_catalog'),
+      api.call('get_available_models').catch(() => null),
+    ]);
+    const configured = modelsData?.configured || {};
+    const installed = (catalog || []).filter(m => m.installed);
+    if (!installed.length) {
+      container.innerHTML = '<div class="info-text">Aucun modèle installé.<br>Ouvrez l\'onglet Catalogue pour en installer.</div>';
       return;
     }
 
     const roles = [
-      { key: 'intent', label: '⚡ Classification (1B)' },
-      { key: 'fast',   label: '💬 Réponses rapides' },
-      { key: 'heavy',  label: '🧠 Analyse approfondie' },
+      { key: 'intent', label: '⚡ Classification (intent)' },
+      { key: 'fast', label: '💬 Réponses rapides (fast)' },
+      { key: 'heavy', label: '🧠 Analyse approfondie (heavy)' },
       { key: 'vision', label: '👁️ Vision' },
     ];
 
     container.innerHTML = roles.map(r => `
       <div class="model-row">
         <label>${r.label}</label>
-        <select onchange="app.setModel('${r.key}', this.value)">
-          ${data.local_models.map(m => `
-            <option value="${m}" ${m === data.configured[r.key] ? 'selected' : ''}>${m}</option>
+        <select onchange="app.setModelForRole('${r.key}', this.value)">
+          ${installed.map(m => `
+            <option value="${m.id}" ${m.id === configured[r.key] || m.ollama_name === configured[r.key] ? 'selected' : ''}>${m.icon || ''} ${m.name}</option>
           `).join('')}
         </select>
       </div>
     `).join('');
-  } catch(e) {
+  } catch (e) {
     container.innerHTML = `<div class="error-text">Erreur: ${e.message}</div>`;
   }
+}
+
+async function loadModelCatalog() {
+  const container = document.getElementById('model-catalog');
+  if (!container) return;
+  container.innerHTML = '<div class="loading-text">Chargement...</div>';
+  try {
+    const catalog = await api.call('get_model_catalog') || [];
+    if (!catalog.length) {
+      container.innerHTML = '<div class="info-text">Catalogue vide</div>';
+      return;
+    }
+    container.innerHTML = catalog.map(m => `
+      <div class="model-card" data-id="${m.id}">
+        <div class="model-card-head">
+          <span class="model-card-icon">${m.icon || '🤖'}</span>
+          <div>
+            <div class="model-card-name">${m.name}</div>
+            <div class="model-card-desc">${m.description || ''}</div>
+          </div>
+        </div>
+        <div class="model-card-meta">
+          <span>${m.size_gb || '?'} Go</span>
+          <span>${m.use_case || ''}</span>
+          ${m.installed ? '<span class="badge-installed">Installé</span>' : ''}
+          ${m.is_active ? '<span class="badge-active">Actif</span>' : ''}
+        </div>
+        <button type="button" class="settings-btn-outline model-card-btn"
+          onclick="app.${m.installed ? 'uninstallModel' : 'installModel'}('${m.id}')">
+          ${m.installed ? 'Retirer' : `Installer (${m.size_gb || '?'} Go)`}
+        </button>
+      </div>
+    `).join('');
+  } catch (e) {
+    container.innerHTML = `<div class="error-text">Erreur: ${e.message}</div>`;
+  }
+}
+
+async function installModel(modelId) {
+  const logEl = document.getElementById('model-install-log');
+  if (logEl) {
+    logEl.classList.remove('hidden');
+    logEl.textContent = `Installation de ${modelId}…\n`;
+  }
+  try {
+    const result = await api.call('install_model', modelId);
+    if (!result?.success) showToast(result?.error || 'Erreur installation', 'error');
+    else showToast('Installation démarrée', 'info');
+  } catch (e) {
+    showToast('Erreur: ' + e.message, 'error');
+  }
+}
+
+async function uninstallModel(modelId) {
+  if (!confirm(`Retirer le modèle ${modelId} ?`)) return;
+  try {
+    const result = await api.call('uninstall_model', modelId);
+    if (result?.success) {
+      showToast('Modèle retiré', 'success');
+      loadModelCatalog();
+      loadModelSettings();
+    } else showToast(result?.error || 'Erreur', 'error');
+  } catch (e) {
+    showToast('Erreur: ' + e.message, 'error');
+  }
+}
+
+async function setModelForRole(role, modelId) {
+  try {
+    const result = await api.call('set_model_for_role', role, modelId);
+    if (!result?.success) showToast(result?.error || 'Erreur', 'error');
+    else {
+      showToast(`Modèle ${role} mis à jour`, 'success');
+      loadModelCatalog();
+    }
+  } catch (e) {
+    showToast('Erreur set_model_for_role', 'error');
+  }
+}
+
+async function loadProfilesSettings() {
+  const container = document.getElementById('profiles-list');
+  if (!container) return;
+  container.innerHTML = '<div class="loading-text">Chargement...</div>';
+  try {
+    const data = await api.call('get_profiles');
+    const current = data?.current_user;
+    const profiles = data?.profiles || {};
+    const keys = Object.keys(profiles);
+    if (!keys.length) {
+      container.innerHTML = '<div class="info-text">Aucun profil</div>';
+      return;
+    }
+    container.innerHTML = keys.map(key => {
+      const p = profiles[key];
+      const active = key === current;
+      return `
+        <div class="profile-row ${active ? 'active' : ''}">
+          <div>
+            <strong>${p.name || key}</strong>
+            ${active ? '<span class="badge-active">Actif</span>' : ''}
+          </div>
+          <div style="display:flex;gap:6px">
+            ${active ? '' : `<button type="button" class="settings-btn-outline" onclick="app.activateProfile('${key}')">Activer</button>`}
+            ${active || keys.length <= 1 ? '' : `<button type="button" class="settings-btn-outline" onclick="app.deleteProfile('${key}')">Supprimer</button>`}
+          </div>
+        </div>`;
+    }).join('');
+  } catch (e) {
+    container.innerHTML = `<div class="error-text">Erreur: ${e.message}</div>`;
+  }
+}
+
+async function activateProfile(key) {
+  try {
+    const result = await api.call('switch_profile', key);
+    if (!result?.success) showToast(result?.error || 'Erreur', 'error');
+  } catch (e) {
+    showToast('Erreur profil', 'error');
+  }
+}
+
+async function createProfile() {
+  const input = document.getElementById('new-profile-name');
+  const name = input?.value?.trim();
+  if (!name) return showToast('Entrez un nom', 'error');
+  try {
+    const result = await api.call('create_profile', name);
+    if (result?.success) {
+      if (input) input.value = '';
+      showToast('Profil créé', 'success');
+      loadProfilesSettings();
+    } else showToast(result?.error || 'Erreur', 'error');
+  } catch (e) {
+    showToast('Erreur: ' + e.message, 'error');
+  }
+}
+
+async function deleteProfile(key) {
+  if (!confirm(`Supprimer le profil ${key} ?`)) return;
+  try {
+    const result = await api.call('delete_profile', key);
+    if (result?.success) {
+      showToast('Profil supprimé', 'success');
+      loadProfilesSettings();
+    } else showToast(result?.error || 'Erreur', 'error');
+  } catch (e) {
+    showToast('Erreur', 'error');
+  }
+}
+
+function applyProfileChanged(prof) {
+  if (!prof) return;
+  const hello = document.getElementById('home-hello-text');
+  const sub = document.getElementById('home-sub-text');
+  const firstname = prof.firstname || prof.name || '';
+  if (hello) hello.textContent = prof.hello_text || (firstname ? `Bonjour ${firstname}.` : 'Bonjour.');
+  if (sub) sub.textContent = prof.sub_text || 'Comment puis-je vous aider aujourd\'hui ?';
+  if (prof.theme) applyTheme(prof.theme);
+  if (prof.wallpaper) applyWallpaperImmediate(prof.wallpaper);
+  showToast(`Profil ${firstname || prof._key || ''} chargé`, 'success');
+  loadProfilesSettings();
+  loadModelSettings();
+}
+
+async function toggleNexusMode(enabled) {
+  try {
+    await api.call('set_nexus_mode', !!enabled);
+    refreshNexusBadge();
+  } catch (e) {
+    showToast('Erreur Nexus: ' + e.message, 'error');
+  }
+}
+
+function refreshNexusBadge() {
+  api.call('get_nexus_mode').then(data => {
+    const badge = document.getElementById('nexus-badge');
+    const chk = document.getElementById('set-nexus-mode');
+    const on = !!data?.enabled;
+    badge?.classList.toggle('hidden', !on);
+    if (chk) chk.checked = on;
+  }).catch(() => {});
+}
+
+async function refreshVramWidget() {
+  try {
+    const v = await api.call('get_vram_usage');
+    const text = document.getElementById('vram-text');
+    const fill = document.getElementById('vram-bar-fill');
+    if (!text || !fill) return;
+    const used = v?.used_mb || 0;
+    const total = v?.total_mb || 0;
+    text.textContent = total ? `${used} Mo utilisés / ${total} Mo` : 'VRAM — nvidia-smi indisponible';
+    const pct = v?.used_pct || 0;
+    fill.style.width = `${Math.min(100, pct)}%`;
+    fill.className = 'vram-bar-fill' + (pct > 80 ? ' vram-high' : pct > 50 ? ' vram-mid' : ' vram-low');
+  } catch (_) {}
+}
+
+async function refreshUpdatePanel() {
+  try {
+    const ver = await api.call('get_app_version');
+    const label = document.getElementById('app-version-label');
+    if (label) label.textContent = ver ? `v${ver}` : '';
+  } catch (_) {}
+}
+
+async function checkForUpdates() {
+  const statusEl = document.getElementById('update-status');
+  const btn = document.getElementById('btn-apply-update');
+  if (statusEl) statusEl.textContent = 'Vérification…';
+  try {
+    const data = await api.call('check_for_updates');
+    if (data?.error) {
+      if (statusEl) statusEl.textContent = '⚠️ ' + data.error;
+      btn?.classList.add('hidden');
+      return;
+    }
+    if (data?.available) {
+      if (statusEl) statusEl.textContent = `🔄 ${data.commits_behind} commit(s) disponible(s)\n${data.latest_message || ''}`;
+      btn?.classList.remove('hidden');
+    } else {
+      if (statusEl) statusEl.textContent = '✅ À jour';
+      btn?.classList.add('hidden');
+    }
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Erreur: ' + e.message;
+  }
+}
+
+async function applyUpdate() {
+  if (!confirm('ARIA va se fermer pour appliquer la mise à jour. Continuer ?')) return;
+  try {
+    const result = await api.call('apply_update');
+    if (result?.success) showToast('Mise à jour lancée — fermeture dans 3s…', 'info');
+    else showToast(result?.error || 'Erreur', 'error');
+  } catch (e) {
+    showToast('Erreur: ' + e.message, 'error');
+  }
+}
+
+let _vramInterval = null;
+function startVramPolling() {
+  if (_vramInterval) return;
+  refreshVramWidget();
+  _vramInterval = setInterval(refreshVramWidget, 10000);
 }
 
 async function setModel(role, modelName) {
@@ -1950,6 +2241,9 @@ function loadSettingsPage() {
   const lightVramEl = document.getElementById('set-light-vram');
   if (lightVramEl) lightVramEl.checked = !!s.light_vram_mode;
 
+  const nexusEl = document.getElementById('set-nexus-mode');
+  if (nexusEl) nexusEl.checked = !!s.nexus_mode;
+
   loadAppsIndexLabel();
   loadGoogleStatus();
 
@@ -2113,11 +2407,14 @@ async function validateSection(section) {
         const focusEnabled = document.getElementById('set-focus')?.checked;
         const killOllama = document.getElementById('set-kill-ollama')?.checked;
         const lightVram = document.getElementById('set-light-vram')?.checked;
+        const nexusMode = document.getElementById('set-nexus-mode')?.checked;
         try { await api.call('set_focus_mode', !!focusEnabled); } catch (_) {}
         if (focusEnabled != null) await saveSetting('focus_mode', !!focusEnabled);
         if (killOllama != null) await saveSetting('kill_ollama_on_exit', !!killOllama);
         try { await api.call('set_light_vram_mode', !!lightVram); } catch (_) {}
         if (lightVram != null) await saveSetting('light_vram_mode', !!lightVram);
+        try { await api.call('set_nexus_mode', !!nexusMode); } catch (_) {}
+        if (nexusMode != null) await saveSetting('nexus_mode', !!nexusMode);
         if (typeof SettingsAnimations !== 'undefined' && typeof AnimationController !== 'undefined'
             && document.getElementById('set-focus')) {
           AnimationController.play(SettingsAnimations.animFocusMode, { enabled: !!focusEnabled });
@@ -3464,6 +3761,19 @@ function exposeGlobalApp() {
     toggleSettings,
     toggleAccordion,
     loadModelSettings,
+    switchModelTab,
+    loadModelCatalog,
+    installModel,
+    uninstallModel,
+    setModelForRole,
+    loadProfilesSettings,
+    activateProfile,
+    createProfile,
+    deleteProfile,
+    toggleNexusMode,
+    refreshVramWidget,
+    checkForUpdates,
+    applyUpdate,
     setModel,
     setTheme,
     setGlassIntensity,

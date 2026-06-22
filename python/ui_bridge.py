@@ -43,6 +43,20 @@ _splash_scan_scheduled: bool = False
 _loop: asyncio.AbstractEventLoop | None = None
 _pending_finalize_model: str = ""
 _ask_cycle_finalized: bool = False
+_mobile_relay: Callable[[str, Any], None] | None = None
+_shutdown_hook: Callable[[], None] | None = None
+
+
+def set_mobile_relay(callback: Callable[[str, Any], None] | None) -> None:
+    """Enregistre le relais d'événements vers les clients mobile PWA."""
+    global _mobile_relay
+    _mobile_relay = callback
+
+
+def register_shutdown_hook(callback: Callable[[], None]) -> None:
+    """Enregistre un callback d'arrêt (main.py : STT, mémoire, etc.)."""
+    global _shutdown_hook
+    _shutdown_hook = callback
 
 
 # ── API exposée au renderer (anciennement méthodes de la classe UI) ──────────
@@ -97,6 +111,11 @@ def _schedule_client_connected_callbacks() -> None:
 
 def emit(event_name: str, data: Any = None) -> None:
     """Envoie un événement unilatéral à tous les renderers connectés."""
+    if _mobile_relay:
+        try:
+            _mobile_relay(event_name, data)
+        except Exception:
+            logger.debug("Relay mobile échoué pour %s", event_name, exc_info=True)
     if not _connections:
         return
     msg = json.dumps({"id": None, "type": "event", "event": event_name, "data": data})
@@ -1558,6 +1577,217 @@ def set_light_vram_mode(enabled: bool) -> dict:
         keep = {MODELS.get("intent"), MODELS.get("fast")}
         llamacpp_manager.stop_servers_except(keep)
     return {"success": True, "enabled": bool(enabled)}
+
+
+@expose
+def get_model_catalog() -> list:
+    from actions import model_manager
+    return model_manager.get_model_catalog()
+
+
+@expose
+def get_installed_models() -> list:
+    from actions import model_manager
+    return model_manager.get_installed_models()
+
+
+@expose
+def install_model(model_id: str) -> dict:
+    from actions import model_manager
+    return model_manager.install_model(model_id)
+
+
+@expose
+def uninstall_model(model_id: str) -> dict:
+    from actions import model_manager
+    return model_manager.uninstall_model(model_id)
+
+
+@expose
+def set_model_for_role(role: str, model_id: str) -> dict:
+    from actions import model_manager
+    return model_manager.set_model_for_role(role, model_id)
+
+
+@expose
+def get_profiles() -> dict:
+    from actions import profiles
+    return {
+        "current_user": profiles.get_current_user_key(),
+        "profiles": profiles.get_all_profiles(),
+        "current": profiles.get_current_profile(),
+    }
+
+
+@expose
+def switch_profile(name: str) -> dict:
+    from actions import profiles
+    return profiles.switch_profile(name)
+
+
+@expose
+def create_profile(name: str) -> dict:
+    from actions import profiles
+    return profiles.create_profile(name)
+
+
+@expose
+def delete_profile(name: str) -> dict:
+    from actions import profiles
+    return profiles.delete_profile(name)
+
+
+@expose
+def check_for_updates() -> dict:
+    from actions import update_manager
+    return update_manager.check_for_updates()
+
+
+@expose
+def apply_update() -> dict:
+    from actions import update_manager
+    return update_manager.apply_update()
+
+
+@expose
+def get_app_version() -> str:
+    from actions import update_manager
+    return update_manager.get_app_version()
+
+
+@expose
+def set_nexus_mode(enabled: bool) -> dict:
+    """Mode Nexus VRAM — ne garde que llama3.2:1b actif."""
+    import llamacpp_manager
+    import yaml
+    import app_paths
+    from llm import MODELS, set_model_role
+
+    cfg_path = app_paths.config_path()
+    with cfg_path.open("r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f) or {}
+
+    nexus_model = "llama3.2:1b"
+    if enabled:
+        if not cfg.get("models_backup"):
+            cfg["models_backup"] = dict(MODELS)
+        for role in ("intent", "fast", "heavy", "vision"):
+            set_model_role(role, nexus_model)
+        llamacpp_manager.stop_servers_except({nexus_model})
+        show_toast("⚡ Nexus activé — VRAM libérée", "success")
+    else:
+        backup = cfg.get("models_backup") or {}
+        if backup:
+            for role, model in backup.items():
+                if role in MODELS and model:
+                    set_model_role(role, str(model))
+        else:
+            for role in ("intent", "fast", "heavy", "vision"):
+                model = (cfg.get("models") or {}).get(role)
+                if model:
+                    set_model_role(role, str(model))
+        show_toast("🧠 Mode normal rétabli", "info")
+
+    cfg["nexus_mode"] = bool(enabled)
+    with cfg_path.open("w", encoding="utf-8") as f:
+        yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+    emit("nexus_mode_changed", {"enabled": bool(enabled)})
+    return {"success": True, "enabled": bool(enabled)}
+
+
+@expose
+def get_nexus_mode() -> dict:
+    try:
+        import yaml
+        import app_paths
+        with app_paths.config_path().open("r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        return {"enabled": bool(cfg.get("nexus_mode", False))}
+    except Exception:
+        return {"enabled": False}
+
+
+@expose
+def get_vram_usage() -> dict:
+    import shutil
+    import subprocess
+    import sys
+
+    if not shutil.which("nvidia-smi"):
+        return {"used_mb": 0, "total_mb": 0, "free_mb": 0, "used_pct": 0}
+    try:
+        out = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.used,memory.total,memory.free",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+        parts = [p.strip() for p in (out.stdout or "").split(",")]
+        if len(parts) >= 3:
+            used, total, free = int(float(parts[0])), int(float(parts[1])), int(float(parts[2]))
+            pct = round(used / total * 100) if total else 0
+            return {"used_mb": used, "total_mb": total, "free_mb": free, "used_pct": pct}
+    except Exception as exc:
+        logger.debug("nvidia-smi failed: %s", exc)
+    return {"used_mb": 0, "total_mb": 0, "free_mb": 0, "used_pct": 0}
+
+
+@expose
+def shutdown() -> dict:
+    """Arrêt propre du backend ARIA (appelé par Electron)."""
+    import sys
+    import threading
+
+    logger.info("=== Arrêt ARIA demandé par Electron ===")
+
+    try:
+        import stt
+        stt.stop_listening()
+    except Exception:
+        logger.debug("STT stop skipped", exc_info=True)
+
+    try:
+        import tts
+        tts.stop()
+    except Exception:
+        pass
+
+    try:
+        import llamacpp_manager
+        llamacpp_manager.stop_all_servers()
+    except Exception:
+        logger.debug("llama stop skipped", exc_info=True)
+
+    if _shutdown_hook:
+        try:
+            _shutdown_hook()
+        except Exception:
+            logger.exception("Shutdown hook failed")
+
+    try:
+        import yaml
+        import app_paths
+        import subprocess
+
+        with app_paths.config_path().open("r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        if cfg.get("kill_ollama_on_exit", True) and sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/F", "/IM", "ollama.exe"],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+    except Exception:
+        logger.debug("Ollama kill skipped", exc_info=True)
+
+    threading.Timer(0.5, lambda: sys.exit(0)).start()
+    return {"success": True}
 
 
 @expose
