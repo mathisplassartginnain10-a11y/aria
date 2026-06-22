@@ -383,75 +383,152 @@ def speak_text(text: str) -> dict:
     return {"success": True}
 
 
-def _scan_installed_apps() -> tuple[list, dict[str, str]]:
-    """Scan registre + menu démarrer + UWP (nom → AppID)."""
-    import json
-    import os
-    import subprocess
-    import winreg
+_apps_scan_done = False
 
-    apps: set[str] = set()
 
-    keys = [
-        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
-        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
-        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+def scan_apps_with_progress() -> None:
+    """Scan toutes les apps et émet la progression en temps réel (splash)."""
+    global _apps_scan_done
+    import actions.apps as apps_module
+
+    sources: list[tuple[str, str]] = [
+        ("Registre Windows (Win32)", "registry"),
+        ("Menu Démarrer", "start_menu"),
+        ("Apps Microsoft Store (UWP)", "uwp"),
+        ("Steam & Epic Games", "gaming"),
+        ("Program Files", "program_files"),
     ]
-    for hive, path in keys:
-        try:
-            key = winreg.OpenKey(hive, path)
-            for i in range(winreg.QueryInfoKey(key)[0]):
-                try:
-                    sub = winreg.OpenKey(key, winreg.EnumKey(key, i))
-                    try:
-                        name, _ = winreg.QueryValueEx(sub, "DisplayName")
-                        if name and 1 < len(name) < 60:
-                            apps.add(name.strip())
-                    except FileNotFoundError:
-                        pass
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-    for d in [
-        os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs"),
-        r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs",
-    ]:
-        for root, _, files in os.walk(d):
-            for f in files:
-                if f.endswith('.lnk') and 1 < len(f) < 63:
-                    apps.add(f[:-4].strip())
-
+    total = len(sources)
+    all_entries: dict[str, dict] = {}
     uwp_map: dict[str, str] = {}
-    try:
-        ps = subprocess.run(
-            [
-                "powershell", "-NoProfile", "-Command",
-                "Get-StartApps | Select-Object Name, AppID | ConvertTo-Json -Compress",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=20,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        if ps.returncode == 0:
-            raw = ps.stdout.strip()
-            if raw:
-                items = json.loads(raw)
-                if isinstance(items, dict):
-                    items = [items]
-                for item in items or []:
-                    name = (item.get("Name") or "").strip()
-                    app_id = (item.get("AppID") or "").strip()
-                    if 1 < len(name) < 80:
-                        apps.add(name)
-                        if app_id:
-                            uwp_map[name.lower()] = app_id
-    except Exception as exc:
-        logger.debug("UWP scan skipped: %s", exc)
 
-    return sorted(apps, key=str.lower), uwp_map
+    for i, (label, key) in enumerate(sources):
+        emit("splash_scan", {
+            "step": i + 1,
+            "total": total,
+            "label": f"Scan {label}...",
+            "pct": int((i / total) * 100),
+            "count": len(all_entries),
+        })
+        try:
+            if key == "registry":
+                apps_module._merge_entries(all_entries, apps_module._scan_registry())
+            elif key == "start_menu":
+                apps_module._merge_entries(all_entries, apps_module._scan_start_menu())
+            elif key == "uwp":
+                uwp_apps, uwp_map = apps_module._scan_uwp()
+                apps_module._merge_entries(all_entries, uwp_apps)
+            elif key == "gaming":
+                apps_module._merge_entries(all_entries, apps_module._scan_gaming())
+            elif key == "program_files":
+                apps_module._merge_entries(all_entries, apps_module._scan_program_files())
+        except Exception as exc:
+            logger.warning("Scan %s échoué: %s", label, exc)
+
+    apps_module._save_index(all_entries, uwp_map)
+    _apps_scan_done = True
+    emit("splash_scan", {
+        "step": total,
+        "total": total,
+        "label": f"{len(all_entries)} applications trouvées",
+        "pct": 100,
+        "count": len(all_entries),
+        "done": True,
+    })
+    logger.info("Scan apps terminé: %d apps", len(all_entries))
+
+
+def _scan_installed_apps() -> tuple[list, dict[str, str]]:
+    """Scan registre + menu démarrer + UWP + gaming + Program Files."""
+    from actions import apps as apps_module
+
+    all_entries, uwp_map = apps_module.scan_all_apps()
+    names = sorted({str(e.get("name", "")) for e in all_entries.values() if e.get("name")}, key=str.lower)
+    return names, uwp_map
+
+
+@expose
+def get_apps_index() -> list:
+    """Retourne la liste des apps indexées pour l'autocomplete UI."""
+    from actions.apps import load_apps_index
+
+    apps = load_apps_index()
+    return [
+        {
+            "name": v.get("name", k),
+            "type": v.get("type", "unknown"),
+            "key": k,
+        }
+        for k, v in apps.items()
+        if v.get("name")
+    ]
+
+
+@expose
+def search_apps(query: str) -> list:
+    """Recherche dans l'index d'apps — autocomplete temps réel."""
+    from actions.apps import load_apps_index
+
+    apps = load_apps_index()
+    query_lower = (query or "").lower().strip()
+    if not query_lower:
+        return get_apps_index()[:30]
+
+    results = []
+    for k, v in apps.items():
+        name = str(v.get("name", ""))
+        if query_lower in k or query_lower in name.lower():
+            results.append({
+                "name": name or k,
+                "type": v.get("type", ""),
+                "key": k,
+            })
+    return sorted(results, key=lambda x: len(x["name"]))[:20]
+
+
+@expose
+def get_active_doc() -> dict:
+    """Doc Google actif de la session."""
+    from actions.google_workspace import get_session_active_doc
+
+    return get_session_active_doc() or {}
+
+
+@expose
+def web_search(query: str, sources: str = "web,news,wikipedia") -> str:
+    from actions.web_research import search_and_synthesize
+
+    src_list = [s.strip() for s in sources.split(",") if s.strip()]
+    return search_and_synthesize(query, sources=src_list)
+
+
+@expose
+def clear_search_cache() -> dict:
+    from actions.web_research import clear_cache
+
+    clear_cache()
+    return {"success": True}
+
+
+@expose
+def research_and_write_doc(topic: str, title: str = "") -> dict:
+    from actions.google_workspace import research_and_write_doc as _write
+
+    return _write(topic, title or None)
+
+
+@expose
+def research_and_write_sheet(topic: str, title: str = "") -> dict:
+    from actions.google_workspace import research_and_write_sheet as _sheet
+
+    return _sheet(topic, title or None)
+
+
+@expose
+def create_form(topic: str, title: str = "") -> dict:
+    from actions.google_workspace import create_form_from_topic
+
+    return create_form_from_topic(topic, title or None)
 
 
 @expose
@@ -477,8 +554,12 @@ def get_installed_apps() -> list:
 @expose
 def refresh_apps_index() -> dict:
     """Scanne et persiste l'index des applications."""
+    global _apps_scan_done
     import json
     import time
+
+    if _apps_scan_done:
+        return get_apps_index_stats()
 
     apps, uwp = _scan_installed_apps()
     payload = {
@@ -493,6 +574,7 @@ def refresh_apps_index() -> dict:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
+        _apps_scan_done = True
         return {"success": True, **payload}
     except Exception as exc:
         return {"success": False, "error": str(exc), "count": len(apps)}
@@ -643,7 +725,9 @@ def show_gdoc_link(title: str, url: str) -> None:
 
 def notify_active_gdoc(doc: dict | None) -> None:
     """Notifie l'UI du doc Google actif (widget résumé)."""
-    emit("active_gdoc", doc or {})
+    payload = doc or {}
+    emit("active_gdoc", payload)
+    emit("active_doc_changed", payload)
 
 
 def show_search_results(html: str) -> None:

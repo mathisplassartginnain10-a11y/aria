@@ -75,7 +75,9 @@ KNOWN_INTENTS = [
     'math_calculate', 'question_libre', 'browser_open_site',
     'browser_search_in_site', 'preset',
     'recherche_web', 'recherche_actualites', 'recherche_wikipedia',
-    'recherche_youtube', 'recherche_multi', 'gdoc_create', 'gdoc_write_search',
+    'recherche_youtube', 'recherche_multi',
+    'recherche_news', 'recherche_video', 'recherche_opinions', 'recherche_academique',
+    'gdoc_create', 'gdoc_write_search',
     'gdoc_open', 'gdoc_status',
     'gcal_get_events', 'gcal_create_event', 'gmail_read', 'gmail_send',
     'gdrive_search', 'gdrive_recent', 'gsheets_create', 'gsheets_read',
@@ -85,11 +87,11 @@ KNOWN_INTENTS = [
     'gdrive_download', 'gdrive_delete', 'gdrive_create_folder',
     'gmail_send_quick',
     'recherche_et_doc', 'recherche_et_sheet', 'cal_add_smart',
-    'gmail_draft', 'gdoc_append_active', 'google_confirm',
+    'gmail_draft', 'gdoc_append_active', 'google_confirm', 'creer_form',
 ]
 
 GOOGLE_LLM_MODEL = MODELS["fast"]
-GOOGLE_LLM_MAX_TOKENS = 200
+GOOGLE_LLM_MAX_TOKENS = 300
 _pending_action: dict | None = None
 
 MODEL: str = _config.get("model", MODELS["heavy"])
@@ -575,6 +577,10 @@ V20_RESEARCH_INTENTS = frozenset({
     "recherche_wikipedia",
     "recherche_youtube",
     "recherche_multi",
+    "recherche_news",
+    "recherche_video",
+    "recherche_opinions",
+    "recherche_academique",
     "gdoc_create",
     "gdoc_write_search",
     "gdoc_open",
@@ -621,6 +627,7 @@ GOOGLE_SMART_INTENTS = frozenset({
     "gmail_draft",
     "gdoc_append_active",
     "google_confirm",
+    "creer_form",
 })
 
 ALL_GOOGLE_INTENTS = GOOGLE_WORKSPACE_INTENTS | frozenset({
@@ -667,6 +674,11 @@ GOOGLE_SMART_PATTERNS: list[tuple[str, str]] = [
     (
         r"^(?:note|ajoute)\s+(?:dans|au|sur)\s+(?:le\s+)?doc\s*$",
         "gdoc_append_active",
+    ),
+    (
+        r"(?:crée|créer|cree|génère|genere|fais)\s+(?:un\s+)?"
+        r"(?:formulaire|form|sondage|questionnaire)\s+(?:sur\s+)?(.+)",
+        "creer_form",
     ),
 ]
 
@@ -902,6 +914,50 @@ def _fast_intent(text: str) -> tuple[str, dict] | None:
             "site": m.group(2).strip(),
             "browser": m.group(3).strip(),
         }
+
+    # PRIORITY 1.49: Recherche web avancée (sources spécialisées)
+    if any(kw in text_lower for kw in ("actualités", "news", "dernières nouvelles", "quoi de neuf")):
+        topic = re.sub(
+            r"(?:actualités?|news|dernières nouvelles|quoi de neuf)\s+(?:sur\s+)?",
+            "",
+            text_lower,
+        ).strip()
+        return "recherche_news", {"topic": topic or text}
+
+    if any(
+        kw in text_lower
+        for kw in ("vidéo sur", "youtube sur", "trouve une vidéo", "vidéos de")
+    ):
+        topic = re.sub(
+            r"(?:vidéo sur|youtube sur|trouve une? vidéo|vidéos? de)\s+",
+            "",
+            text_lower,
+        ).strip()
+        return "recherche_video", {"topic": topic}
+
+    if any(
+        kw in text_lower
+        for kw in ("avis sur", "opinion sur", "que pensent", "reddit sur", "forum")
+    ):
+        topic = re.sub(
+            r"(?:avis sur|opinion sur|que pensent|reddit sur|forum)\s+",
+            "",
+            text_lower,
+        ).strip()
+        return "recherche_opinions", {"topic": topic}
+
+    if any(
+        kw in text_lower
+        for kw in (
+            "explique moi",
+            "explique-moi",
+            "c'est quoi",
+            "définition de",
+            "qu'est-ce que",
+            "comment fonctionne",
+        )
+    ):
+        return "recherche_academique", {"topic": text}
 
     # PRIORITY 1.5: Recherche web multi-sources + Google Docs (spec v20)
     for pattern, intent in RECHERCHE_PATTERNS:
@@ -2078,11 +2134,8 @@ def _run_google_research(topic: str) -> tuple[dict, str]:
 
 def _flow_recherche_et_doc(text: str) -> str:
     """Recherche web → synthèse FAST → nouveau Google Doc structuré."""
-    from actions import gdocs
-    from actions.web_research import (
-        build_doc_structure_prompt,
-        extract_recherche_et_doc_topic,
-    )
+    from actions import google_workspace
+    from actions.web_research import extract_recherche_et_doc_topic
 
     if not _google_ready():
         return _google_not_configured_msg()
@@ -2092,50 +2145,29 @@ def _flow_recherche_et_doc(text: str) -> str:
         return "Précise le sujet de la recherche et du doc."
 
     ui.update_thinking_action(f"Recherche : {topic}...")
-    results, llm_input = _run_google_research(topic)
-    if not results:
-        return f"Aucun résultat pour « {topic} »."
-
-    ui.update_thinking_action("Structuration du doc...")
-    structured = _google_llm(
-        build_doc_structure_prompt(topic, llm_input),
-        max_tokens=350,
-        temperature=0.25,
-    )
-    if structured.startswith("Erreur"):
-        return structured
-
     title = f"Veille ARIA — {topic[:50]}"
     if re.search(r"rapport", text, re.I):
         title = f"Rapport — {topic[:50]}"
     elif re.search(r"veille", text, re.I):
         title = f"Veille — {topic[:50]}"
 
-    doc_info = gdocs.create_doc(
-        title=title,
-        initial_content=f"Document généré par ARIA le {datetime.now().strftime('%d/%m/%Y à %H:%M')}\n\n",
-    )
-    gdocs.write_markdown_to_doc(doc_info["id"], structured)
-    gdocs.set_active_doc(doc_info["id"], doc_info["title"], doc_info["url"])
+    ui.update_thinking_action("Rédaction du doc...")
+    result = google_workspace.research_and_write_doc(topic, doc_title=title)
     try:
-        ui.show_gdoc_link(doc_info["title"], doc_info["url"])
+        ui.show_gdoc_link(result["doc_title"], result["doc_url"])
     except Exception:
         pass
     return (
-        f"Doc « {title} » créé avec la veille sur « {topic} » ✓\n"
-        f"{doc_info['url']}"
+        f"Doc « {result['doc_title']} » créé avec la veille sur « {topic} » ✓\n"
+        f"{result['doc_url']}\n"
+        f"{result['sections']} sections rédigées depuis Internet ✓"
     )
 
 
 def _flow_recherche_et_sheet(text: str) -> str:
     """Recherche web → tableau FAST → Google Sheet formaté."""
-    from actions import gsheets
-    from actions.web_research import (
-        build_sheet_table_prompt,
-        extract_recherche_et_sheet_topic,
-        extract_sheet_title_from_topic,
-        parse_pipe_csv_table,
-    )
+    from actions import google_workspace
+    from actions.web_research import extract_recherche_et_sheet_topic, extract_sheet_title_from_topic
 
     if not _google_ready():
         return _google_not_configured_msg()
@@ -2145,58 +2177,35 @@ def _flow_recherche_et_sheet(text: str) -> str:
         return "Précise le sujet du tableau."
 
     ui.update_thinking_action(f"Recherche : {topic}...")
-    results, llm_input = _run_google_research(topic)
-    if not results:
-        return f"Aucun résultat pour « {topic} »."
-
     ui.update_thinking_action("Formatage du tableau...")
-    table_raw = _google_llm(
-        build_sheet_table_prompt(llm_input),
-        max_tokens=300,
-        temperature=0.2,
-    )
-    if table_raw.startswith("Erreur"):
-        return table_raw
-
-    rows = parse_pipe_csv_table(table_raw)
-    if not rows:
-        return "Impossible de formater les données en tableau."
-
     title = extract_sheet_title_from_topic(topic)
-    info = gsheets.create_spreadsheet_with_data(title, rows)
-    return f"Tableau « {title} » créé ✓ — {info.get('url', '')}"
+    result = google_workspace.research_and_write_sheet(topic, sheet_title=title)
+    return (
+        f"Tableau « {result['sheet_title']} » créé ✓ — {result['sheet_url']}\n"
+        f"{result['rows']} lignes de données ✓"
+    )
 
 
 def _flow_cal_add_smart(text: str) -> str:
     """Extraction FAST JSON → création événement Calendar."""
-    from actions import gcalendar
+    from actions import google_workspace
 
     if not _google_ready():
         return _google_not_configured_msg()
 
-    prompt = (
-        "Extrait de ce texte : titre, date ISO, heure, lieu. "
-        'Réponds UNIQUEMENT en JSON : {"title":...,"date":...,"time":...,"location":...}. '
-        f"Texte: {text}"
-    )
-    raw = _google_llm(prompt, max_tokens=80, temperature=0.1)
-    if raw.startswith("Erreur"):
-        return raw
-
-    parsed = gcalendar.parse_event_json(raw)
-    title = parsed.get("title") or text.strip()[:80]
-    return gcalendar.create_event_from_fields(
-        title,
-        str(parsed.get("date") or ""),
-        str(parsed.get("time") or ""),
-        str(parsed.get("location") or ""),
-    )
+    result = google_workspace.smart_create_calendar_event(text)
+    if result.get("success"):
+        return (
+            f"Événement ajouté : **{result.get('title')}**\n"
+            f"{result.get('start', '')}\n"
+            f"→ {result.get('url', '')}"
+        )
+    return f"Erreur Calendar : {result.get('error', result.get('message', '?'))}"
 
 
 def _flow_gmail_draft(text: str) -> str:
     """Recherche optionnelle → brouillon FAST → confirmation."""
-    from actions import ggmail
-    from actions.web_research import build_email_draft_prompt
+    from actions import google_workspace
 
     if not _google_ready():
         return _google_not_configured_msg()
@@ -2212,31 +2221,21 @@ def _flow_gmail_draft(text: str) -> str:
     if not to:
         return "Précise le destinataire et le sujet de l'email."
 
-    context = subject_hint
-    if len(subject_hint.split()) <= 3:
-        _, llm_input = _run_google_research(subject_hint)
-        if llm_input:
-            context = llm_input[:800]
-
-    draft_raw = _google_llm(
-        build_email_draft_prompt(subject_hint, to, context),
-        max_tokens=200,
-        temperature=0.3,
+    draft = google_workspace.draft_and_confirm_email(to, subject_hint, context=text)
+    preview = (
+        f"📧 Brouillon prêt :\n"
+        f"**À** : {draft['to']}\n"
+        f"**Objet** : {draft['subject']}\n"
+        f"**Message** : {draft['body']}\n\n"
+        f"Réponds **« oui »** pour envoyer ou **« non »** pour annuler."
     )
-    if draft_raw.startswith("Erreur"):
-        return draft_raw
-
-    subject, body = ggmail.parse_email_draft(draft_raw)
-    if not subject:
-        subject = subject_hint
-    preview = ggmail.format_draft_preview(to, subject, body)
     return _set_pending_google_action(
         "gmail_send",
         to,
         {
-            "to": to,
-            "subject": subject,
-            "body": body,
+            "to": draft["to"],
+            "subject": draft["subject"],
+            "body": draft["body"],
             "preview": preview,
             "verb": "envoyer",
         },
@@ -2244,40 +2243,51 @@ def _flow_gmail_draft(text: str) -> str:
 
 
 def _flow_gdoc_append_active(text: str) -> str:
-    """Ajoute le dernier contenu assistant ou une recherche au doc actif."""
-    from actions import gdocs
-    from actions.web_research import build_doc_structure_prompt
+    """Ajoute le dernier contenu ou une recherche au doc actif."""
+    from actions import google_workspace
 
     if not _google_ready():
         return _google_not_configured_msg()
-
-    active = gdocs.get_active_doc()
-    if not active:
-        return "Aucun doc actif. Dis « crée un doc [titre] » ou lance une veille d'abord."
 
     content = ""
     for msg in reversed(_history):
         if msg.get("role") == "assistant" and msg.get("content", "").strip():
             content = msg["content"].strip()
             break
-    if not content or len(content) < 20:
-        topic = _extract_research_query(text) or "notes"
-        _, llm_input = _run_google_research(topic)
-        if llm_input:
-            content = _google_llm(
-                build_doc_structure_prompt(topic, llm_input),
-                max_tokens=350,
-                temperature=0.25,
-            )
 
-    if not content or content.startswith("Erreur"):
-        return "Je n'ai rien à ajouter. Fais d'abord une recherche ou pose une question."
+    if content and len(content) >= 20 and not re.search(
+        r"note\s+(?:ça|cela|ca)\s+(?:dans|au|sur)", text, re.I
+    ):
+        return google_workspace.write_text_to_active_doc(content)
 
-    gdocs.write_markdown_to_doc(
-        active["id"],
-        f"## Notes — {datetime.now().strftime('%d/%m %H:%M')}\n{content}",
+    topic = _extract_research_query(text) or "notes"
+    return google_workspace.append_research_to_active_doc(topic, fallback_text=content or text)
+
+
+def _flow_creer_form(text: str) -> str:
+    """Crée un Google Form sur un sujet."""
+    from actions import google_workspace
+
+    if not _google_ready():
+        return _google_not_configured_msg()
+
+    m = re.search(
+        r"(?:crée|créer|cree|génère|genere|fais)\s+(?:un\s+)?"
+        r"(?:formulaire|form|sondage|questionnaire)\s+(?:sur\s+)?(.+)",
+        text,
+        re.I,
     )
-    return f"Ajouté au doc « {active['title']} » ✓ — {active['url']}"
+    topic = (m.group(1) if m else text).strip(" :'\"?.")
+    if not topic:
+        return "Précise le sujet du formulaire."
+
+    ui.update_thinking_action(f"Formulaire : {topic}...")
+    result = google_workspace.create_form_from_topic(topic)
+    return (
+        f"Formulaire créé : **{result['form_title']}**\n"
+        f"→ {result['form_url']}\n"
+        f"{result['questions']} questions générées ✓"
+    )
 
 
 def _handle_google_smart_intent(intent: str, params: dict, text: str) -> str:
@@ -2293,6 +2303,8 @@ def _handle_google_smart_intent(intent: str, params: dict, text: str) -> str:
         return _flow_gmail_draft(text)
     if intent == "gdoc_append_active":
         return _flow_gdoc_append_active(text)
+    if intent == "creer_form":
+        return _flow_creer_form(text)
     return ""
 
 
@@ -3079,13 +3091,38 @@ def _handle_v20_intent(
     stream_to_ui: bool = True,
 ) -> str:
     """Dispatch spec v20 — recherche multi-sources et Google Docs."""
-    del params  # réservé pour extensions futures
+
+    if intent == "recherche_news":
+        from actions.web_research import search_and_synthesize
+
+        return search_and_synthesize(
+            params.get("topic", text), sources=["news", "newsapi"]
+        )
+
+    if intent == "recherche_video":
+        from actions.web_research import search_video
+
+        return search_video(params.get("topic", text))
+
+    if intent == "recherche_opinions":
+        from actions.web_research import search_opinions
+
+        return search_opinions(params.get("topic", text))
+
+    if intent == "recherche_academique":
+        from actions.web_research import search_academic
+
+        return search_academic(params.get("topic", text))
 
     if intent == "recherche_web":
-        output = "doc" if _wants_doc_output(text) else "chat"
-        return _do_web_research(
-            text, output=output, stream_to_ui=stream_to_ui, intent_hint=intent
-        )
+        if _wants_doc_output(text) or stream_to_ui:
+            output = "doc" if _wants_doc_output(text) else "chat"
+            return _do_web_research(
+                text, output=output, stream_to_ui=stream_to_ui, intent_hint=intent
+            )
+        from actions.web_research import search_and_synthesize
+
+        return search_and_synthesize(text, sources=["web", "news", "wikipedia"])
 
     if intent == "recherche_actualites":
         output = "doc" if _wants_doc_output(text) else "chat"
@@ -3560,14 +3597,26 @@ def _execute_action(intent: str, params: dict, text: str) -> str | None:
                 for name in app_names:
                     memory_engine.record_app_launch(name)
                 return apps.launch_multiple(app_names)
-            memory_engine.record_app_launch(clean or app)
-            result = apps.launch(clean or app)
-            if "introuvable" in result.lower():
-                return browser.open_site(browser._extract_site_name(text) or clean)
+            query = clean or app
+            entry = apps.find_app(query)
+            if not entry:
+                apps.scan_and_save_apps()
+                entry = apps.find_app(query)
+            if entry:
+                memory_engine.record_app_launch(entry["name"])
+                return apps.launch(entry["name"])
+            memory_engine.record_app_launch(query)
+            result = apps.launch(query)
+            if "introuvable" in result.lower() or "pas trouvé" in result.lower():
+                site = browser._extract_site_name(text) or clean
+                if site:
+                    return browser.open_site(site)
             return result
 
         if intent == "fermer_app":
-            return apps.close(_extract_app_name(params.get("app", text)))
+            query = _extract_app_name(params.get("app", text))
+            entry = apps.find_app(query)
+            return apps.close(entry["name"] if entry else query)
 
         if intent == "volume":
             level = params.get("level", text)
@@ -3798,18 +3847,27 @@ def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
                 memory_engine.record_app_launch(name)
             result = apps.launch_multiple(app_names)
         else:
-            app_name = clean or app_param
-            memory_engine.record_app_launch(app_name)
-            result = apps.launch(app_name)
-            if "introuvable" in result.lower():
-                site = browser._extract_site_name(original_text) or app_name
+            query = clean or app_param
+            entry = apps.find_app(query)
+            if not entry:
+                apps.scan_and_save_apps()
+                entry = apps.find_app(query)
+            if entry:
+                memory_engine.record_app_launch(entry["name"])
+                result = apps.launch(entry["name"])
+            else:
+                memory_engine.record_app_launch(query)
+                result = apps.launch(query)
+            if "introuvable" in result.lower() or "pas trouvé" in result.lower():
+                site = browser._extract_site_name(original_text) or query
                 result = browser.open_site(site)
 
         ui.show_toast(result, toast_type="success")
         return result
     if intent == "fermer_app":
-        app_name = _extract_app_name(params.get("app", original_text))
-        result = apps.close(app_name)
+        query = _extract_app_name(params.get("app", original_text))
+        entry = apps.find_app(query)
+        result = apps.close(entry["name"] if entry else query)
         ui.show_toast(result, toast_type="success" if "fermé" in result.lower() else "info")
         return result
     if intent == "volume":

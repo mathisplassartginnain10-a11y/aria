@@ -38,7 +38,7 @@
     <!-- Logo + nom -->
     <div id="sidebar-brand">
       <div id="sidebar-logo-wrap" class="sidebar-orbe-wrap">
-        <img src="../assets/icon.png" id="sidebar-logo-img" alt="ARIA"
+        <img data-aria-logo id="sidebar-logo-img" alt="ARIA"
           style="width:40px;height:40px;border-radius:10px;object-fit:cover;
                  position:relative;z-index:2;
                  box-shadow:0 0 12px rgba(80,120,255,0.5),0 0 30px rgba(60,100,220,0.3)">
@@ -149,7 +149,7 @@
             <div class="scan scan-blue sc1"></div>
             <div class="crosshair cross"></div>
             <div class="orbe-core core" id="orbe-core">
-              <img id="orbe-logo-img" src="../assets/icon.png" alt="ARIA"
+              <img data-aria-logo id="orbe-core-img" alt="ARIA"
                 style="width:100%;height:100%;object-fit:cover;border-radius:50%;
                        filter:brightness(1.05) contrast(1.05)">
             </div>
@@ -611,7 +611,7 @@
 <div id="mode-select-overlay" class="hidden">
   <div id="mode-select-card">
     <div id="msc-logo">
-      <img src="../assets/icon.png" alt="ARIA"
+      <img data-aria-logo id="msc-logo-img" alt="ARIA"
         style="width:64px;height:64px;border-radius:16px;
                box-shadow:0 0 20px rgba(80,120,255,0.5)">
     </div>
@@ -748,14 +748,17 @@
       </div>
               <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
                 <label class="agent-label">Apps à ouvrir (virgules)</label>
-                <input type="text" id="preset-apps-open" class="agent-input" placeholder="vscode, chrome"
-                  list="installed-apps-list">
+                <input type="text" id="preset-apps-open" class="agent-input app-autocomplete"
+                  placeholder="Discord, Cursor…" list="apps-datalist"
+                  oninput="app.searchAppsLive(this)">
               </div>
               <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
                 <label class="agent-label">Apps à fermer (virgules)</label>
-                <input type="text" id="preset-apps-close" class="agent-input" placeholder="discord, steam"
-                  list="installed-apps-list">
+                <input type="text" id="preset-apps-close" class="agent-input app-autocomplete"
+                  placeholder="Steam, Spotify…" list="apps-datalist"
+                  oninput="app.searchAppsLive(this)">
               </div>
+              <datalist id="apps-datalist"></datalist>
               <datalist id="installed-apps-list"></datalist>
       <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
         <label class="agent-label">Message de confirmation</label>
@@ -775,20 +778,5 @@
 
 <script src="settings-animations.js"></script>
 <script src="app.js"></script>
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-  const fixIcons = () => {
-    const url = window.ARIA_ASSETS?.iconUrl || window.ARIA_ICON_URL;
-    if (!url) {
-      setTimeout(fixIcons, 50);
-      return;
-    }
-    document.querySelectorAll('img[src*="icon.png"], img[src*="assets/icon"]').forEach((img) => {
-      img.src = url;
-    });
-  };
-  fixIcons();
-});
-</script>
 </body>
 </html>

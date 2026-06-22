@@ -564,16 +564,120 @@ CLOSE_ALIASES: dict[str, str] = {
 
 
 def _load_custom_apps() -> None:
+    """Obsolète — les apps viennent de data/apps_index.json."""
+    return
+
+
+def _merge_entries(target: dict[str, dict], source: dict[str, dict]) -> None:
+    for key, entry in source.items():
+        if key not in target:
+            target[key] = entry
+            continue
+        if not target[key].get("path") and entry.get("path"):
+            target[key] = entry
+
+
+def _make_entry(name: str, app_type: str, path: str = "") -> dict[str, dict]:
+    label = str(name).strip()
+    if not label:
+        return {}
+    return {label.lower(): {"name": label, "type": app_type, "path": path}}
+
+
+def load_apps_index() -> dict[str, dict]:
+    """Charge l'index scanné data/apps_index.json."""
+    import json
+
+    path = app_paths.data_dir() / "apps_index.json"
+    if not path.is_file():
+        return {}
     try:
-        with app_paths.config_path().open("r", encoding="utf-8") as f:
-            config = yaml.safe_load(f)
-        for key, path in config.get("apps", {}).items():
-            KNOWN_APPS[key.lower()] = str(path)
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f) or {}
     except Exception:
-        logger.debug("Custom apps non chargés", exc_info=True)
+        logger.debug("Lecture apps_index.json impossible", exc_info=True)
+        return {}
+
+    entries = data.get("entries")
+    if isinstance(entries, dict) and entries:
+        return {
+            str(k).lower(): v
+            for k, v in entries.items()
+            if isinstance(v, dict) and v.get("name")
+        }
+
+    result: dict[str, dict] = {}
+    uwp = data.get("uwp") or {}
+    for name in data.get("apps") or []:
+        label = str(name).strip()
+        if not label:
+            continue
+        key = label.lower()
+        entry = {"name": label, "type": "unknown", "path": ""}
+        app_id = uwp.get(key) or uwp.get(label)
+        if app_id:
+            entry["type"] = "uwp"
+            entry["path"] = f"shell:AppsFolder\\{app_id}"
+        result[key] = entry
+    return result
 
 
-_load_custom_apps()
+def find_app(query: str, apps_index: dict[str, dict] | None = None) -> dict | None:
+    """Recherche une app dans l'index (clé ou nom affiché, correspondance partielle)."""
+    apps = apps_index if apps_index is not None else load_apps_index()
+    if not apps or not query:
+        return None
+
+    q = query.lower().strip()
+    q = re.sub(
+        r"^(lance(?:-moi)?|ouvre(?:-moi)?|d[ée]marre(?:-moi)?|mets?|ferme(?:-moi)?|quitte)\s+",
+        "",
+        q,
+        flags=re.I,
+    ).strip()
+    q = re.sub(r"\s+en route$", "", q).strip()
+    if not q:
+        return None
+
+    if q in apps:
+        return apps[q]
+
+    for entry in apps.values():
+        if entry.get("name", "").lower() == q:
+            return entry
+
+    best: dict | None = None
+    best_score = 0
+    for key, entry in apps.items():
+        name = entry.get("name", "").lower()
+        if q == key or q == name:
+            return entry
+        if q in key or q in name or key in q or name in q:
+            score = max(len(q), len(key), len(name))
+            if score > best_score:
+                best_score = score
+                best = entry
+    return best
+
+
+def scan_and_save_apps() -> dict[str, dict]:
+    """Scan complet + persistance — utilisé si l'index est absent ou obsolète."""
+    entries, uwp = scan_all_apps()
+    _save_index(entries, uwp)
+    return entries
+
+
+def _resolve_entry_path(entry: dict) -> str | None:
+    """Résout le chemin lançable depuis une entrée d'index."""
+    path = str(entry.get("path") or "").strip()
+    if path and _target_is_launchable(path):
+        return path
+    name = str(entry.get("name") or "").lower()
+    if name:
+        uwp_path = _search_apps_index(name)
+        if uwp_path and _target_is_launchable(uwp_path):
+            return uwp_path
+    return None
 
 
 def _resolve_path_candidate(path: str) -> str | None:
@@ -783,24 +887,11 @@ def _target_is_launchable(target: str) -> bool:
 
 
 def resolve_known(name: str) -> str | None:
-    """Résolution RAPIDE : KNOWN_APPS + config uniquement, AUCUN scan disque.
-
-    Sert à savoir si « ouvre X » désigne une app installée sans payer le crawl
-    multi-secondes de `_search_everywhere`. Retourne un chemin lançable ou None.
-    """
-    _load_custom_apps()
-    n = name.lower().strip()
-    path = _resolve_app(n)
-    if path and _target_is_launchable(path):
-        return path
-    for key in KNOWN_APPS:
-        if len(key) < 3:
-            continue
-        if key == n or re.search(rf"\b{re.escape(key)}\b", n):
-            candidate = _resolve_app(key)
-            if candidate and _target_is_launchable(candidate):
-                return candidate
-    return None
+    """Résolution rapide via l'index scanné uniquement."""
+    entry = find_app(name)
+    if not entry:
+        return None
+    return _resolve_entry_path(entry)
 
 
 # Cache de résolution : évite de re-crawler le disque (plusieurs secondes) à
@@ -823,26 +914,11 @@ def _resolve_launch_target(name_lower: str) -> str | None:
 
 
 def _resolve_launch_target_uncached(name_lower: str) -> str | None:
-    _load_custom_apps()
-
-    path = _resolve_app(name_lower)
-    if not path:
-        for key in KNOWN_APPS:
-            if key in name_lower or name_lower in key:
-                path = _resolve_app(key)
-                if path:
-                    break
-
-    if not path:
-        path = (
-            _find_in_registry(name_lower.replace(" ", ""))
-            or _search_start_menu(name_lower)
-            or _search_everywhere(name_lower)
-            or _search_apps_index(name_lower)
-        )
-
-    if path and _target_is_launchable(path):
-        return path
+    entry = find_app(name_lower)
+    if entry:
+        path = _resolve_entry_path(entry)
+        if path:
+            return path
     return None
 
 
@@ -904,19 +980,18 @@ def _resolve_close_process_names(name_lower: str) -> list[str]:
             seen.add(key)
             candidates.append(key)
 
+    entry = find_app(name_lower)
+    if entry:
+        path = str(entry.get("path") or "")
+        if path.endswith(".lnk"):
+            add(f"{Path(path).stem}.exe")
+        elif path.lower().endswith(".exe"):
+            add(Path(path).name)
+        add(str(entry.get("name", "")).replace(" ", ""))
+
     for alias, exe in CLOSE_ALIASES.items():
         if alias == name_lower or alias in name_lower or name_lower in alias:
             add(exe)
-
-    target = _resolve_app_target(name_lower)
-    if target:
-        if isinstance(target, str):
-            if target.endswith(".lnk"):
-                add(f"{Path(target).stem}.exe")
-            elif target.lower().endswith(".exe"):
-                add(Path(target).name)
-            elif not target.endswith(":"):
-                add(Path(target).name)
 
     compact = name_lower.replace(" ", "")
     add(compact if compact.endswith(".exe") else f"{compact}.exe")
@@ -944,7 +1019,7 @@ def _process_matches_close(proc_name: str, candidates: list[str], name_lower: st
 
 
 def launch(app_name: str) -> str:
-    """Lance une application. Cherche dans KNOWN_APPS puis fallback."""
+    """Lance une application depuis l'index scanné (data/apps_index.json)."""
     name_lower = app_name.lower().strip()
     name_lower = re.sub(
         r"^(lance(?:-moi)?|ouvre(?:-moi)?|d[ée]marre(?:-moi)?|mets?)\s+",
@@ -954,11 +1029,21 @@ def launch(app_name: str) -> str:
     ).strip()
     name_lower = re.sub(r"\s+en route$", "", name_lower).strip()
 
-    path = _resolve_launch_target(name_lower)
-    if not path:
+    entry = find_app(name_lower)
+    if not entry:
+        scan_and_save_apps()
+        entry = find_app(name_lower)
+    if not entry:
         return f"Application '{app_name}' introuvable sur ce PC"
 
-    return _execute_launch(path, app_name.strip())
+    path = _resolve_entry_path(entry)
+    if not path:
+        return (
+            f"Je n'ai pas trouvé '{entry.get('name', app_name)}' sur ton PC. "
+            "Vérifie le nom exact dans l'index des applications."
+        )
+
+    return _execute_launch(path, str(entry.get("name") or app_name).strip())
 
 
 def launch_multiple(app_names: list[str]) -> str:
@@ -990,6 +1075,10 @@ def close(app_name: str) -> str:
     name_lower = _normalize_close_query(app_name)
     if not name_lower:
         return "Quelle application veux-tu fermer ?"
+
+    entry = find_app(name_lower)
+    if entry:
+        name_lower = entry.get("name", name_lower).lower()
 
     candidates = _resolve_close_process_names(name_lower)
     targets: list[psutil.Process] = []
@@ -1030,12 +1119,13 @@ def close(app_name: str) -> str:
 
 
 def close_all_except(keep_list: list[str]) -> str:
-    keep_lower = [k.lower() for k in keep_list]
+    keep_lower = {k.lower() for k in keep_list}
     closed = 0
-    for key in list(KNOWN_APPS.keys()):
+    for key, entry in load_apps_index().items():
         if key in keep_lower:
             continue
-        result = close(key)
+        name = str(entry.get("name") or key)
+        result = close(name)
         if "fermé" in result.lower():
             closed += 1
     return f"{closed} applications fermées."
@@ -1044,18 +1134,12 @@ def close_all_except(keep_list: list[str]) -> str:
 def list_running() -> list[str]:
     running: list[str] = []
     known_exes: set[str] = set()
-    for val in KNOWN_APPS.values():
-        if isinstance(val, str):
-            if val.endswith(".exe"):
-                known_exes.add(Path(val).name.lower())
-            elif val in KNOWN_APPS:
-                nested = KNOWN_APPS[val]
-                if isinstance(nested, str) and nested.endswith(".exe"):
-                    known_exes.add(Path(nested).name.lower())
-        elif isinstance(val, list):
-            for entry in val:
-                if isinstance(entry, str) and entry.endswith(".exe"):
-                    known_exes.add(Path(entry).name.lower())
+    for entry in load_apps_index().values():
+        path = str(entry.get("path") or "")
+        if path.lower().endswith(".exe"):
+            known_exes.add(Path(path).name.lower())
+        elif path.endswith(".lnk") and os.path.exists(path):
+            known_exes.add(f"{Path(path).stem}.exe".lower())
 
     for proc in psutil.process_iter(["name"]):
         try:
@@ -1066,6 +1150,208 @@ def list_running() -> list[str]:
             pass
 
     return list(set(running))
+
+
+# ── Scan d'applications installées (index splash + ui_bridge) ─────────────────
+
+def _scan_registry() -> dict[str, dict]:
+    """Scan registre Windows (Uninstall + App Paths)."""
+    import winreg
+
+    entries: dict[str, dict] = {}
+    uninstall_keys = [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+    ]
+    for hive, key_path in uninstall_keys:
+        try:
+            key = winreg.OpenKey(hive, key_path)
+            for i in range(winreg.QueryInfoKey(key)[0]):
+                try:
+                    sub = winreg.OpenKey(key, winreg.EnumKey(key, i))
+                    try:
+                        name, _ = winreg.QueryValueEx(sub, "DisplayName")
+                        if not name or not (1 < len(str(name)) < 60):
+                            continue
+                        path = ""
+                        try:
+                            loc, _ = winreg.QueryValueEx(sub, "InstallLocation")
+                            if loc and os.path.isdir(str(loc)):
+                                exes = sorted(glob.glob(os.path.join(str(loc), "*.exe")))
+                                if exes:
+                                    path = exes[0]
+                        except FileNotFoundError:
+                            pass
+                        _merge_entries(entries, _make_entry(str(name), "registry", path))
+                    except FileNotFoundError:
+                        pass
+                except OSError:
+                    pass
+        except OSError:
+            pass
+
+    app_path_keys = [
+        r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths",
+        r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths",
+    ]
+    for key_path in app_path_keys:
+        try:
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path)
+            for i in range(winreg.QueryInfoKey(key)[0]):
+                try:
+                    exe_name = winreg.EnumKey(key, i)
+                    sub = winreg.OpenKey(key, exe_name)
+                    try:
+                        val, _ = winreg.QueryValueEx(sub, "")
+                        path = str(val).strip() if val else ""
+                    except FileNotFoundError:
+                        path = ""
+                    label = Path(exe_name).stem.strip()
+                    if 1 < len(label) < 60:
+                        _merge_entries(entries, _make_entry(label, "registry", path))
+                except OSError:
+                    pass
+        except OSError:
+            pass
+
+    return entries
+
+
+def _scan_start_menu() -> dict[str, dict]:
+    """Scan menu Démarrer (.lnk)."""
+    entries: dict[str, dict] = {}
+    for start_dir in (
+        os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs"),
+        r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs",
+    ):
+        if not os.path.isdir(start_dir):
+            continue
+        for root, _, files in os.walk(start_dir):
+            for filename in files:
+                if filename.lower().endswith(".lnk") and 1 < len(filename) < 63:
+                    lnk = os.path.join(root, filename)
+                    _merge_entries(entries, _make_entry(filename[:-4], "start_menu", lnk))
+    return entries
+
+
+def _scan_uwp() -> tuple[dict[str, dict], dict[str, str]]:
+    """Scan apps Microsoft Store (UWP) via PowerShell."""
+    import json
+
+    entries: dict[str, dict] = {}
+    uwp_map: dict[str, str] = {}
+    try:
+        ps = subprocess.run(
+            [
+                "powershell", "-NoProfile", "-Command",
+                "Get-StartApps | Select-Object Name, AppID | ConvertTo-Json -Compress",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            creationflags=CREATE_NO_WINDOW,
+        )
+        if ps.returncode == 0:
+            raw = ps.stdout.strip()
+            if raw:
+                items = json.loads(raw)
+                if isinstance(items, dict):
+                    items = [items]
+                for item in items or []:
+                    name = (item.get("Name") or "").strip()
+                    app_id = (item.get("AppID") or "").strip()
+                    if 1 < len(name) < 80:
+                        shell_path = f"shell:AppsFolder\\{app_id}" if app_id else ""
+                        _merge_entries(entries, _make_entry(name, "uwp", shell_path))
+                        if app_id:
+                            uwp_map[name.lower()] = app_id
+    except Exception as exc:
+        logger.debug("UWP scan skipped: %s", exc)
+    return entries, uwp_map
+
+
+def _scan_gaming() -> dict[str, dict]:
+    """Scan bibliothèques Steam et dossiers Epic Games."""
+    entries: dict[str, dict] = {}
+    steam_libs = [
+        Path(r"C:\Program Files (x86)\Steam\steamapps\common"),
+        Path(r"C:\Program Files\Steam\steamapps\common"),
+        Path(LOCALAPPDATA) / "Programs" / "Steam" / "steamapps" / "common",
+    ]
+    for lib in steam_libs:
+        if not lib.is_dir():
+            continue
+        try:
+            for game_dir in lib.iterdir():
+                if not game_dir.is_dir():
+                    continue
+                exes = sorted(game_dir.rglob("*.exe"))
+                path = str(exes[0]) if exes else ""
+                _merge_entries(entries, _make_entry(game_dir.name, "gaming", path))
+        except OSError:
+            pass
+
+    epic_root = Path(r"C:\Program Files\Epic Games")
+    if epic_root.is_dir():
+        try:
+            for child in epic_root.iterdir():
+                if not child.is_dir() or child.name.lower() in ("launcher", "directxredist"):
+                    continue
+                exes = sorted(child.rglob("*.exe"))
+                path = str(exes[0]) if exes else ""
+                _merge_entries(entries, _make_entry(child.name, "gaming", path))
+        except OSError:
+            pass
+    return entries
+
+
+def _scan_program_files() -> dict[str, dict]:
+    """Scan dossiers Program Files / LocalAppData."""
+    entries: dict[str, dict] = {}
+    for root in (PROGRAMFILES, PROGRAMFILES86, LOCALAPPDATA):
+        base = Path(root)
+        if not base.is_dir():
+            continue
+        try:
+            for child in base.iterdir():
+                if child.is_dir():
+                    exes = sorted(child.glob("*.exe"))
+                    path = str(exes[0]) if exes else ""
+                    _merge_entries(entries, _make_entry(child.name, "program_files", path))
+        except OSError:
+            pass
+    return entries
+
+
+def _save_index(all_entries: dict[str, dict], uwp: dict[str, str] | None = None) -> None:
+    """Sauvegarde l'index dans data/apps_index.json."""
+    import json
+
+    apps_list = sorted({str(e.get("name", "")) for e in all_entries.values() if e.get("name")}, key=str.lower)
+    payload = {
+        "count": len(apps_list),
+        "updated_at": time.time(),
+        "apps": apps_list,
+        "entries": all_entries,
+        "uwp": uwp or {},
+    }
+    path = app_paths.data_dir() / "apps_index.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+
+def scan_all_apps() -> tuple[dict[str, dict], dict[str, str]]:
+    """Scan complet sans événements UI."""
+    all_entries: dict[str, dict] = {}
+    _merge_entries(all_entries, _scan_registry())
+    _merge_entries(all_entries, _scan_start_menu())
+    uwp_apps, uwp_map = _scan_uwp()
+    _merge_entries(all_entries, uwp_apps)
+    _merge_entries(all_entries, _scan_gaming())
+    _merge_entries(all_entries, _scan_program_files())
+    return all_entries, uwp_map
 
 
 def focus(app_name: str) -> str:

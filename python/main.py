@@ -317,6 +317,17 @@ def main() -> None:
 
     ui_bridge.start()
     _logger.info("WebSocket serveur démarré")
+
+    def _startup_scan() -> None:
+        """Scan lancé pendant le splash screen."""
+        time.sleep(1.5)
+        try:
+            ui_bridge.scan_apps_with_progress()
+        except Exception:
+            _logger.debug("Scan apps splash échoué", exc_info=True)
+
+    threading.Thread(target=_startup_scan, daemon=True, name="ARIA-Splash-Scan").start()
+
     time.sleep(0.5)
 
     def _load_llm() -> None:
@@ -362,11 +373,6 @@ def main() -> None:
         ui_bridge.apply_wake_word(_config.get("wake_word_enabled", False))
     except Exception:
         _logger.exception("Wake word init failed")
-
-    try:
-        ui_bridge.refresh_apps_index()
-    except Exception:
-        _logger.debug("Apps index scan skipped", exc_info=True)
 
     if _config.get("light_vram_mode"):
         try:

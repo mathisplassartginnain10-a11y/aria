@@ -5,7 +5,6 @@
 
 const { app, BrowserWindow, Tray, Menu, ipcMain, shell, screen, dialog, nativeImage } = require('electron');
 const path = require('path');
-const { pathToFileURL } = require('url');
 const os = require('os');
 const { spawn } = require('child_process');
 const WebSocket = require('ws');
@@ -24,6 +23,14 @@ const APP_ICON_PNG = path.join(__dirname, 'assets', 'icon.png');
 const APP_ICON_ICO = path.join(__dirname, 'assets', 'icon.ico');
 const TRAY_ICON_PNG = path.join(__dirname, 'assets', 'tray-icon.png');
 
+let ICON_BASE64 = '';
+try {
+  const iconBuffer = fs.readFileSync(APP_ICON_PNG);
+  ICON_BASE64 = `data:image/png;base64,${iconBuffer.toString('base64')}`;
+} catch (e) {
+  console.error('Erreur lecture icon.png:', e.message);
+}
+
 function resolveAppIcon() {
   if (process.platform === 'win32' && fs.existsSync(APP_ICON_ICO)) {
     return APP_ICON_ICO;
@@ -41,18 +48,12 @@ function resolveTrayIcon() {
   return APP_ICON_ICO;
 }
 
-function getIconFileUrl() {
-  return pathToFileURL(APP_ICON_PNG).href;
-}
-
-function injectRendererIconUrls(webContents) {
-  const iconUrl = getIconFileUrl();
-  const assetsPath = pathToFileURL(path.join(__dirname, 'assets')).href;
+function injectAriaIcon(webContents) {
+  if (!ICON_BASE64) return Promise.resolve();
   return webContents.executeJavaScript(`
-    window.ARIA_ICON_URL = ${JSON.stringify(iconUrl)};
-    window.ARIA_ASSETS_PATH = ${JSON.stringify(assetsPath)};
-    document.querySelectorAll('img[src*="icon.png"], img[src*="assets/icon"]').forEach(img => {
-      img.src = window.ARIA_ICON_URL;
+    window.__ARIA_ICON__ = ${JSON.stringify(ICON_BASE64)};
+    document.querySelectorAll('[data-aria-logo]').forEach(img => {
+      img.src = window.__ARIA_ICON__;
     });
   `);
 }
@@ -166,9 +167,12 @@ function connectWebSocket(retries = 15, port = DEFAULT_WS_PORT) {
         micTrayActive = !!msg.data;
         rebuildTrayMenu();
       }
-      // Relayer le message au renderer
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('ws-message', msg);
+      // Relayer le message au renderer (fenêtre principale + splash)
+      const targets = [mainWindow, splashWindow].filter(
+        (w) => w && !w.isDestroyed()
+      );
+      for (const win of targets) {
+        win.webContents.send('ws-message', msg);
       }
     } catch (e) {
       console.error('[Electron] Erreur parse WS:', e);
@@ -247,18 +251,22 @@ ipcMain.handle('pick-gguf-file', async () => {
 function createSplashWindow() {
   splashWindow = new BrowserWindow({
     width: 480,
-    height: 620,
+    height: 700,
     frame: false,
     transparent: false,
     resizable: false,
     center: true,
     alwaysOnTop: true,
     backgroundColor: '#04080F',
-    webPreferences: { contextIsolation: true },
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.js'),
+    },
   });
   splashWindow.loadFile(path.join(__dirname, 'renderer', 'splash.html'));
   splashWindow.webContents.on('did-finish-load', () => {
-    injectRendererIconUrls(splashWindow.webContents).catch(() => {});
+    injectAriaIcon(splashWindow.webContents).catch(() => {});
   });
   splashWindow.once('ready-to-show', () => splashWindow.show());
 }
@@ -316,7 +324,7 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
   mainWindow.webContents.on('did-finish-load', () => {
-    injectRendererIconUrls(mainWindow.webContents).catch(() => {});
+    injectAriaIcon(mainWindow.webContents).catch(() => {});
   });
 
   mainWindow.once('ready-to-show', () => {

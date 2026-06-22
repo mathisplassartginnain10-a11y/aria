@@ -34,25 +34,29 @@ const state = {
   _generating: false,
 };
 
-/** Logo ARIA — URL file:// exposée par preload.js (Electron) */
-function getIconUrl() {
-  if (window.ARIA_ASSETS?.iconUrl) return window.ARIA_ASSETS.iconUrl;
-  if (window.ARIA_ICON_URL) return window.ARIA_ICON_URL;
-  return '../assets/icon.png';
+/** Logo ARIA — data URL injectée par main.js (window.__ARIA_ICON__) */
+function ariaIconSrc() {
+  return window.__ARIA_ICON__
+    || window.ARIA_ASSETS?.iconUrl
+    || window.ARIA_ICON_URL
+    || '';
 }
 
-function applyAriaIconUrls() {
-  const url = getIconUrl();
-  if (!url || url.includes('../assets/')) return;
-  document.querySelectorAll('img[src*="icon.png"], img[src*="assets/icon"]').forEach((img) => {
-    img.src = url;
+function applyAriaLogo() {
+  const src = ariaIconSrc();
+  if (!src) {
+    setTimeout(applyAriaLogo, 100);
+    return;
+  }
+  document.querySelectorAll('[data-aria-logo]').forEach((img) => {
+    img.src = src;
   });
 }
 
 function ariaAvatarHtml(size = 28) {
   const radius = size >= 64 ? 16 : 8;
-  return `<img src="${getIconUrl()}" alt="ARIA"
-    style="width:${size}px;height:${size}px;border-radius:${radius}px;object-fit:cover">`;
+  return `<img src="${ariaIconSrc()}" data-aria-logo alt="ARIA"
+    style="width:${size}px;height:${size}px;border-radius:${radius}px;object-fit:cover;flex-shrink:0">`;
 }
 
 const AGENT_COLORS = [
@@ -315,7 +319,11 @@ function setupEventListeners() {
   });
 
   api.on('gdoc_link', ({ title, url }) => showGdocLinkCard(title, url));
-  api.on('active_gdoc', () => { loadDaySummary(); });
+  api.on('active_gdoc', (doc) => {
+    updateActiveDocWidget(doc);
+    loadDaySummary();
+  });
+  api.on('active_doc_changed', (doc) => updateActiveDocWidget(doc));
 
   api.on('search_results', (html) => showSearchResultsCard(html));
 
@@ -1436,6 +1444,23 @@ async function initWidgets() {
   updateBattery();
 }
 
+function updateActiveDocWidget(doc) {
+  const gdocVal = document.getElementById('wval-gdoc');
+  if (!gdocVal) return;
+  if (doc?.title && doc?.url) {
+    gdocVal.innerHTML = `<a href="#" class="widget-gdoc-link" data-url="${esc(doc.url)}">${esc(doc.title)}</a>`;
+    const link = gdocVal.querySelector('.widget-gdoc-link');
+    if (link) {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        api.openExternal(doc.url);
+      });
+    }
+  } else {
+    gdocVal.textContent = '—';
+  }
+}
+
 async function loadDaySummary() {
   try {
     const data = await api.call('get_day_summary') || {};
@@ -1451,14 +1476,7 @@ async function loadDaySummary() {
     if (gdocVal) {
       const gdoc = data.active_gdoc;
       if (gdoc?.title && gdoc?.url) {
-        gdocVal.innerHTML = `<a href="#" class="widget-gdoc-link" data-url="${gdoc.url}">${gdoc.title}</a>`;
-        const link = gdocVal.querySelector('.widget-gdoc-link');
-        if (link) {
-          link.addEventListener('click', (e) => {
-            e.preventDefault();
-            api.openExternal(gdoc.url);
-          });
-        }
+        updateActiveDocWidget(gdoc);
       } else {
         gdocVal.textContent = '—';
       }
@@ -1694,7 +1712,10 @@ function navigate(page) {
     updateAgentsBadge();
   }
   if (page === 'memory') loadMemoryPage();
-  if (page === 'routines') loadPresetsPage();
+  if (page === 'routines') {
+    loadPresetsPage();
+    loadAppsForAutocomplete();
+  }
 }
 
 function showHomeConversation() {
@@ -2054,7 +2075,7 @@ async function openPresetEditorImpl(presetId) {
 
   updatePresetPreview();
   initPresetEmojiPicker();
-  refreshInstalledAppsDatalist();
+  await loadAppsForAutocomplete();
   const modal = document.getElementById('preset-editor-modal');
   modal?.classList.remove('hidden');
   requestAnimationFrame(() => modal?.classList.add('modal-open'));
@@ -2103,15 +2124,44 @@ function selectPresetEmoji(emoji) {
   updatePresetPreview();
 }
 
-async function refreshInstalledAppsDatalist() {
-  const list = document.getElementById('installed-apps-list');
-  if (!list) return;
+async function loadAppsForAutocomplete() {
   try {
-    const apps = await api.call('get_installed_apps') || [];
-    list.innerHTML = apps.slice(0, 500).map(a =>
-      `<option value="${esc(a)}"></option>`
-    ).join('');
-  } catch (_) {}
+    const apps = await api.call('get_apps_index') || [];
+    const sorted = [...apps].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    const html = sorted
+      .map((app) => `<option value="${esc(app.name)}" data-type="${esc(app.type || '')}"></option>`)
+      .join('');
+
+    for (const id of ['apps-datalist', 'installed-apps-list', 'agent-apps-datalist']) {
+      const datalist = document.getElementById(id);
+      if (datalist) datalist.innerHTML = html;
+    }
+    return apps;
+  } catch (e) {
+    console.error('Erreur chargement apps index:', e);
+    return [];
+  }
+}
+
+async function searchAppsLive(inputEl) {
+  if (!inputEl) return;
+  const query = inputEl.value.trim();
+  if (query.length < 2) return;
+  try {
+    const results = await api.call('search_apps', query) || [];
+    const datalist = document.getElementById('apps-datalist')
+      || document.getElementById('installed-apps-list');
+    if (!datalist) return;
+    datalist.innerHTML = results
+      .map((app) => `<option value="${esc(app.name)}" data-type="${esc(app.type || '')}"></option>`)
+      .join('');
+  } catch (e) {
+    console.debug('searchAppsLive:', e);
+  }
+}
+
+async function refreshInstalledAppsDatalist() {
+  return loadAppsForAutocomplete();
 }
 
 async function refreshAppsIndex() {
@@ -3044,6 +3094,8 @@ function exposeGlobalApp() {
     selectPresetEmoji,
     refreshAppsIndex,
     refreshInstalledAppsDatalist,
+    loadAppsForAutocomplete,
+    searchAppsLive,
     registerLocalModel,
     pickAndRegisterLocalModel,
     loadGoogleStatus,
@@ -3070,7 +3122,7 @@ function exposeGlobalApp() {
 }
 
 function boot() {
-  applyAriaIconUrls();
+  applyAriaLogo();
   cleanupBlockingOverlays();
   bindTitleBarButtons();
   bindMainUiButtons();

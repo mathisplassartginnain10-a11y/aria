@@ -222,7 +222,9 @@ def activate(key: str) -> str:
             to_close.append(app)
     for app in to_close:
         try:
-            apps.close(app)
+            entry = apps.find_app(app)
+            target = entry["name"] if entry else app
+            apps.close(target)
         except Exception:
             logger.debug("Fermeture %s impossible", app, exc_info=True)
 
@@ -231,11 +233,16 @@ def activate(key: str) -> str:
     failed: list[str] = []
     for app in new_open:
         try:
-            res = apps.launch(app)
+            entry = apps.find_app(app)
+            if not entry:
+                failed.append(app)
+                continue
+            res = apps.launch(entry["name"])
         except Exception:
             res = "erreur"
             logger.debug("Lancement %s impossible", app, exc_info=True)
-        (opened_ok if "lancé" in res.lower() else failed).append(app)
+        label = entry["name"] if entry else app
+        (opened_ok if "lancé" in res.lower() else failed).append(label)
 
     if preset.get("volume") not in (None, ""):
         try:

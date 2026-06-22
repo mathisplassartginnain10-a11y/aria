@@ -169,6 +169,10 @@ html,body{
   from{opacity:0;transform:translateY(16px)}
   to{opacity:1;transform:translateY(0)}
 }
+@keyframes fadeIn{
+  from{opacity:0}
+  to{opacity:1}
+}
 
 #title{
   font-size:52px;font-weight:900;
@@ -289,7 +293,7 @@ html,body{
     <div class="scan sc1"></div>
     <div class="cross"></div>
     <div class="core">
-      <img id="splash-orbe-logo" src="../assets/icon.png" alt="ARIA"
+      <img data-aria-logo id="splash-logo-img" alt="ARIA"
         style="width:100%;height:100%;object-fit:cover;border-radius:50%">
     </div>
   </div>
@@ -305,6 +309,60 @@ html,body{
       <div id="loader-scan"></div>
     </div>
     <div id="loader-text">Initialisation...</div>
+  </div>
+
+  <div id="scan-section" style="
+    margin-top: 24px;
+    width: 340px;
+    opacity: 0;
+    animation: textFadeIn 0.5s ease 2.5s forwards;
+  ">
+    <div style="
+      font-size: 10px;
+      color: rgba(255,255,255,0.25);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      text-align: center;
+      margin-bottom: 10px;
+    ">Scan des applications</div>
+
+    <div style="
+      width: 100%; height: 1px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 999px;
+      overflow: hidden;
+      margin-bottom: 8px;
+    ">
+      <div id="scan-bar" style="
+        height: 100%; width: 0%;
+        background: linear-gradient(90deg, rgba(108,142,255,0.6), rgba(167,139,250,0.6));
+        border-radius: 999px;
+        transition: width 0.4s ease;
+        box-shadow: 0 0 6px rgba(108,142,255,0.4);
+      "></div>
+    </div>
+
+    <div id="scan-log" style="
+      height: 80px;
+      overflow: hidden;
+      position: relative;
+    ">
+      <div id="scan-log-inner" style="
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        transition: transform 0.3s ease;
+      "></div>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;margin-top:6px">
+      <div id="scan-label" style="font-size:10px;color:rgba(255,255,255,0.28);letter-spacing:0.5px">
+        Initialisation...
+      </div>
+      <div id="scan-count" style="font-size:10px;color:rgba(108,142,255,0.5);font-weight:600">
+        0 apps
+      </div>
+    </div>
   </div>
 </div>
 
@@ -365,19 +423,66 @@ if (textEl) {
 //   setTimeout(()=>{document.getElementById('finish-overlay').classList.add('active')},800);
 // },5200);
 
-window.addEventListener('load', () => {
-  const fixSplashIcon = () => {
-    const iconPath = window.ARIA_ASSETS?.iconUrl || window.ARIA_ICON_URL;
-    if (!iconPath) {
-      setTimeout(fixSplashIcon, 50);
-      return;
-    }
-    document.querySelectorAll('img[src*="icon"], img[src*="assets/icon"]').forEach((img) => {
-      img.src = iconPath;
+function applySplashLogo() {
+  if (window.__ARIA_ICON__) {
+    document.querySelectorAll('[data-aria-logo]').forEach((img) => {
+      img.src = window.__ARIA_ICON__;
     });
-  };
-  fixSplashIcon();
-});
+  } else {
+    setTimeout(applySplashLogo, 100);
+  }
+}
+applySplashLogo();
+
+const scanLines = [];
+const MAX_VISIBLE_LINES = 5;
+
+function bindSplashScanEvents() {
+  if (!window.ARIA) {
+    setTimeout(bindSplashScanEvents, 150);
+    return;
+  }
+  window.ARIA.on('splash_scan', (data) => {
+    const bar = document.getElementById('scan-bar');
+    const label = document.getElementById('scan-label');
+    const count = document.getElementById('scan-count');
+    const inner = document.getElementById('scan-log-inner');
+    if (!bar || !label || !count || !inner) return;
+
+    bar.style.width = (data.pct || 0) + '%';
+    label.textContent = data.label || '';
+    count.textContent = (data.count || 0) + ' apps';
+
+    const line = document.createElement('div');
+    line.style.cssText = `
+      font-size: 10px;
+      color: rgba(108,142,255,${data.done ? '0.8' : '0.45'});
+      font-family: monospace;
+      letter-spacing: 0.3px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      animation: fadeIn 0.2s ease;
+      padding: 1px 0;
+    `;
+    const prefix = data.done ? '✓ ' : '→ ';
+    line.textContent = prefix + (data.label || '');
+    inner.appendChild(line);
+
+    scanLines.push(line);
+    if (scanLines.length > MAX_VISIBLE_LINES) {
+      const overflow = scanLines.length - MAX_VISIBLE_LINES;
+      inner.style.transform = `translateY(-${overflow * 18}px)`;
+    }
+
+    if (data.done) {
+      bar.style.background =
+        'linear-gradient(90deg, rgba(74,222,128,0.6), rgba(52,211,153,0.6))';
+      count.style.color = 'rgba(74,222,128,0.7)';
+    }
+  });
+}
+bindSplashScanEvents();
 </script>
 </body>
 </html>

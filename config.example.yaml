@@ -57,21 +57,8 @@ openweather_api_key: ""
 newsapi_key: ""
 avwx_api_key: ""
 
-# Applications (chemins personnalisés)
-apps:
-  msfs: "C:/Program Files/WindowsApps/Microsoft.FlightSimulator_*/FlightSimulator.exe"
-  spotify: "C:/Users/USERNAME/AppData/Roaming/Spotify/Spotify.exe"
-  chrome: "C:/Program Files/Google/Chrome/Application/chrome.exe"
-  firefox: "C:/Program Files/Mozilla Firefox/firefox.exe"
-  vscode: "C:/Users/USERNAME/AppData/Local/Programs/Microsoft VS Code/Code.exe"
-  cursor: "C:/Users/USERNAME/AppData/Local/Programs/cursor/Cursor.exe"
-  discord: "C:/Users/USERNAME/AppData/Local/Discord/app-*/Discord.exe"
-  steam: "C:/Program Files (x86)/Steam/Steam.exe"
-  obs: "C:/Program Files/obs-studio/bin/64bit/obs64.exe"
-  notepad: "notepad.exe"
-  explorer: "explorer.exe"
-  calculator: "calc.exe"
-  taskmgr: "taskmgr.exe"
+# Les chemins d'applications sont dans data/apps_index.json (scan au démarrage).
+# Ne pas définir de section `apps:` ici — elle est ignorée.
 
 # Aviation
 default_icao: LFRS
