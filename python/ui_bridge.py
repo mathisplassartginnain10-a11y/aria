@@ -849,6 +849,58 @@ def export_current_conversation() -> dict:
 
 
 @expose
+def get_audio_devices() -> list:
+    """Retourne la liste des devices audio disponibles (PyAudio)."""
+    import stt
+
+    return stt.get_available_devices()
+
+
+@expose
+def test_microphone(device_index: int | None = None) -> dict:
+    """Test rapide du microphone — ~2 secondes d'enregistrement."""
+    try:
+        import numpy as np
+        import pyaudio
+
+        pa = pyaudio.PyAudio()
+        chunk = 1024
+        idx = int(device_index) if device_index is not None else None
+        stream = pa.open(
+            format=pyaudio.paFloat32,
+            channels=1,
+            rate=16000,
+            input=True,
+            input_device_index=idx,
+            frames_per_buffer=chunk,
+        )
+        rms_values: list[float] = []
+        for _ in range(20):
+            data = stream.read(chunk, exception_on_overflow=False)
+            samples = np.frombuffer(data, dtype=np.float32)
+            rms_values.append(float(np.sqrt(np.mean(samples**2))))
+        stream.stop_stream()
+        stream.close()
+        pa.terminate()
+        avg_rms = sum(rms_values) / len(rms_values) if rms_values else 0.0
+        active = avg_rms > 0.001
+        return {
+            "success": True,
+            "avg_rms": avg_rms,
+            "is_active": active,
+            "message": "Microphone détecté ✓" if active else "Aucun son détecté",
+        }
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@expose
+def set_stt_device(device_index: int) -> dict:
+    """Change le device microphone utilisé par STT."""
+    return set_stt_device_index(device_index)
+
+
+@expose
 def run_mic_diagnostic() -> dict:
     import stt
     try:
@@ -954,12 +1006,19 @@ def set_model(role: str, model_name: str) -> dict:
 
 @expose
 def stop_generation() -> dict:
-    """Signale au LLM de s'arrêter."""
+    """Arrête immédiatement la génération LLM en cours."""
     import llm
+    import tts
 
     llm.request_stop()
+    try:
+        tts.stop()
+    except Exception:
+        pass
     hide_thinking()
     logger.info("Génération arrêtée par l'utilisateur")
+    finalize_assistant_message()
+    set_status("idle")
     return {"success": True}
 
 

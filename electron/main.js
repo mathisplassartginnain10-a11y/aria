@@ -3,7 +3,7 @@
  * Lance le backend Python, gère la fenêtre, le tray icon.
  */
 
-const { app, BrowserWindow, Tray, Menu, ipcMain, shell, screen, dialog, nativeImage } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, shell, screen, dialog, nativeImage, session, systemPreferences } = require('electron');
 const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
@@ -427,12 +427,43 @@ function sendToPython(action, args = [], kwargs = {}) {
   }
 }
 
+// ── Permissions microphone (Windows / macOS) ─────────────────────────────────
+
+function setupMediaPermissions() {
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    if (permission === 'media' || permission === 'microphone') {
+      callback(true);
+    } else {
+      callback(false);
+    }
+  });
+
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => {
+    return permission === 'media' || permission === 'microphone';
+  });
+}
+
+async function ensureMicrophoneAccess() {
+  try {
+    const micStatus = systemPreferences.getMediaAccessStatus('microphone');
+    console.log('[ARIA] Statut microphone:', micStatus);
+    if (process.platform === 'darwin' && micStatus !== 'granted') {
+      const granted = await systemPreferences.askForMediaAccess('microphone');
+      console.log('[ARIA] Permission microphone accordée:', granted);
+    }
+  } catch (e) {
+    console.log('[ARIA] Demande permission micro:', e.message);
+  }
+}
+
 // ── Cycle de vie de l'application ─────────────────────────────────────────────
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   if (process.platform === 'win32') {
     app.setAppUserModelId('com.aria.assistant');
   }
+  setupMediaPermissions();
+  await ensureMicrophoneAccess();
   try { fs.unlinkSync(PORT_FILE); } catch (e) {}
   createSplashWindow();
   createWindow();

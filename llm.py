@@ -383,6 +383,11 @@ def clear_stop() -> None:
     _stop_stream.clear()
 
 
+def reset_stop() -> None:
+    """Alias de clear_stop() — réinitialise le signal d'arrêt."""
+    clear_stop()
+
+
 def is_stop_requested() -> bool:
     return _stop_stream.is_set()
 _REASONING_RE = re.compile(
@@ -1475,10 +1480,12 @@ def _generate_llamacpp(
             with requests.post(endpoint, json=payload, stream=True, timeout=120) as resp:
                 resp.raise_for_status()
                 for line in resp.iter_lines():
-                    if not line or _stop_stream.is_set():
-                        if _stop_stream.is_set():
-                            logger.info("Stream llama.cpp interrompu")
+                    if _stop_stream.is_set():
+                        logger.info("Stream llama.cpp interrompu")
+                        resp.close()
                         break
+                    if not line:
+                        continue
                     try:
                         token, done = _parse_stream_chunk(line)
                         if token:
@@ -1488,6 +1495,7 @@ def _generate_llamacpp(
                             break
                     except StopIteration:
                         logger.info("Stream llama.cpp interrompu — StopIteration")
+                        resp.close()
                         break
             result = "".join(parts)
         else:
@@ -1588,10 +1596,12 @@ def _generate_ollama(
             ) as resp:
                 resp.raise_for_status()
                 for line in resp.iter_lines():
-                    if not line or _stop_stream.is_set():
-                        if _stop_stream.is_set():
-                            logger.info("Stream Ollama interrompu")
+                    if _stop_stream.is_set():
+                        logger.info("Stream Ollama interrompu")
+                        resp.close()
                         break
+                    if not line:
+                        continue
                     try:
                         data = json.loads(line)
                         token = data.get("response", "")
@@ -1602,6 +1612,7 @@ def _generate_ollama(
                             break
                     except StopIteration:
                         logger.info("Stream interrompu — StopIteration")
+                        resp.close()
                         break
                     except json.JSONDecodeError:
                         continue
@@ -2980,7 +2991,7 @@ def _do_web_research(
     if stream_to_ui:
         def on_token(token: str) -> None:
             if _stop_stream.is_set():
-                return
+                raise StopIteration("Arrêté par l'utilisateur")
             ui.append_assistant_text(token)
 
         synthesis = generate(
@@ -3570,7 +3581,7 @@ def _conversation_via_generate(
 
         def on_token(token: str) -> None:
             if _stop_stream.is_set():
-                return
+                raise StopIteration("Arrêté par l'utilisateur")
             nonlocal sentence_buffer
             ui.append_assistant_text(token)
             sentence_buffer += token
@@ -4331,10 +4342,15 @@ def _stream_and_speak(response: requests.Response, stream_to_ui: bool = True) ->
 
     try:
         for line in response.iter_lines():
-            if not line or _stop_stream.is_set():
-                if _stop_stream.is_set():
-                    logger.info("Stream interrompu — arrêt utilisateur")
+            if _stop_stream.is_set():
+                logger.info("Stream interrompu — arrêt utilisateur")
+                try:
+                    response.close()
+                except Exception:
+                    pass
                 break
+            if not line:
+                continue
             content, done = _parse_stream_chunk(line)
             if content:
                 full_response += content
@@ -4660,6 +4676,7 @@ def generate_daily_brief() -> str:
 def ask(text: str, *, show_user: bool = True) -> None:
     """Point d'entrée principal — route vers le bon handler selon l'intent."""
     global _pending_action
+    clear_stop()
     if not text or not text.strip():
         return
 

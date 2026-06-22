@@ -1,4 +1,5 @@
 faster-whisper
+SpeechRecognition
 torch
 tiktoken
 numba

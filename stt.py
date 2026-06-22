@@ -843,7 +843,42 @@ def _transcribe(audio_16k: np.ndarray) -> str:
             else:
                 logger.error("%s erreur: %s", label, exc)
 
+    sr_text = _transcribe_speech_recognition(audio_16k)
+    if sr_text:
+        logger.info("Fallback SpeechRecognition: '%s'", sr_text)
+        return sr_text
+
     return ""
+
+
+def _transcribe_speech_recognition(audio_16k: np.ndarray) -> str:
+    """Fallback Google SpeechRecognition (nécessite Internet)."""
+    try:
+        import io
+        import wave
+
+        import speech_recognition as sr
+    except ImportError:
+        return ""
+
+    try:
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(16000)
+            pcm = (np.clip(audio_16k, -1.0, 1.0) * 32767).astype(np.int16)
+            wf.writeframes(pcm.tobytes())
+        buf.seek(0)
+
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(buf) as source:
+            audio_data = recognizer.record(source)
+        text = recognizer.recognize_google(audio_data, language="fr-FR")
+        return _clean_transcription(text.strip())
+    except Exception as exc:
+        logger.debug("SpeechRecognition échoué: %s", exc)
+        return ""
 
 
 def _transcribe_audio(audio_np: np.ndarray, actual_rate: int) -> str:
@@ -1391,9 +1426,46 @@ def run_diagnostic() -> str:
     except Exception as exc:
         lines.append(f"Capture test: ERREUR — {exc}")
 
+    lines.append("Devices d'entrée:")
+    for dev in get_available_devices():
+        lines.append(
+            f"  [{dev['index']}] {dev['name']} ({dev['sample_rate']}Hz, {dev['channels']}ch)"
+        )
+
     report = "\n".join(lines)
     logger.info(report)
     return report
+
+
+def get_available_devices() -> list[dict]:
+    """Liste les périphériques d'entrée audio PyAudio."""
+    devices: list[dict] = []
+    try:
+        pa = _get_pa()
+        for i in range(pa.get_device_count()):
+            try:
+                info = pa.get_device_info_by_index(i)
+                if int(info.get("maxInputChannels", 0)) < 1:
+                    continue
+                devices.append({
+                    "index": i,
+                    "name": str(info.get("name", "")),
+                    "channels": int(info.get("maxInputChannels", 1)),
+                    "sample_rate": int(info.get("defaultSampleRate", 16000)),
+                })
+            except Exception:
+                pass
+    except Exception as exc:
+        logger.debug("get_available_devices: %s", exc)
+    return devices
+
+
+def load_whisper_model(model_name: str | None = None) -> None:
+    """API publique — charge le modèle STT (appelée au boot)."""
+    global WHISPER_MODEL
+    if model_name:
+        WHISPER_MODEL = str(model_name)
+    _load_whisper_model()
 
 
 def toggle() -> None:

@@ -995,14 +995,39 @@ body {
 }
 
 @keyframes fadeInUp {
-  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  from { opacity: 0; transform: translateX(-50%) translateY(10px); }
   to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
+#stop-btn {
+  position: fixed !important;
+  bottom: 130px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999 !important;
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 22px;
+  background: rgba(239,68,68,0.12);
+  border: 1px solid rgba(239,68,68,0.35);
+  border-radius: 999px;
+  color: #F87171;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  backdrop-filter: blur(20px);
+  box-shadow: 0 4px 24px rgba(239,68,68,0.18);
+  transition: all 0.2s;
+  pointer-events: all !important;
+  white-space: nowrap;
+}
+
 #stop-btn:hover {
-  background: rgba(239,68,68,0.22) !important;
-  box-shadow: 0 4px 24px rgba(239,68,68,0.25) !important;
-  transform: translateX(-50%) scale(1.03) !important;
+  background: rgba(239,68,68,0.22);
+  transform: translateX(-50%) scale(1.03);
+  box-shadow: 0 6px 30px rgba(239,68,68,0.28);
 }
 
 .home-inp-zone,

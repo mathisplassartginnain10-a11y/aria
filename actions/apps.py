@@ -18,6 +18,52 @@ logger = logging.getLogger(__name__)
 
 CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
+
+def _decode_subprocess_output(data: bytes) -> str:
+    if not data:
+        return ""
+    for enc in ("utf-8", "cp1252", "latin-1", "utf-16"):
+        try:
+            return data.decode(enc, errors="ignore")
+        except Exception:
+            continue
+    return data.decode("latin-1", errors="replace")
+
+
+def _run_ps(command: str, timeout: int = 10) -> str:
+    """Exécute PowerShell en gérant tous les encodages Windows."""
+    try:
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-OutputEncoding",
+                "UTF8",
+                "-Command",
+                f"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; {command}",
+            ],
+            capture_output=True,
+            timeout=timeout,
+            creationflags=CREATE_NO_WINDOW,
+        )
+        stdout = _decode_subprocess_output(result.stdout or b"")
+        if stdout.strip():
+            return stdout
+        return _decode_subprocess_output(result.stderr or b"")
+    except subprocess.TimeoutExpired:
+        logger.warning("PowerShell timeout: %s", command[:50])
+        return ""
+    except Exception as exc:
+        logger.warning("PowerShell error: %s", exc)
+        return ""
+
+
+def _safe_str(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value).encode("utf-8", errors="ignore").decode("utf-8").strip()
+
 USER = os.environ.get("USERNAME", "User")
 LOCALAPPDATA = os.environ.get("LOCALAPPDATA", f"C:/Users/{USER}/AppData/Local")
 APPDATA = os.environ.get("APPDATA", f"C:/Users/{USER}/AppData/Roaming")
@@ -1064,36 +1110,16 @@ def _launch_shell_uri(uri: str) -> bool:
 def _launch_uwp(package_name: str, app_name: str) -> bool:
     try:
         pkg_filter = package_name or app_name
-        result = subprocess.run(
-            [
-                "powershell",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                f'(Get-AppxPackage | Where-Object {{$_.Name -like "*{pkg_filter}*"}} | '
-                f"Select-Object -First 1).PackageFamilyName",
-            ],
-            capture_output=True,
-            text=True,
+        family_name = _run_ps(
+            f'(Get-AppxPackage | Where-Object {{$_.Name -like "*{pkg_filter}*"}} | '
+            f"Select-Object -First 1).PackageFamilyName",
             timeout=8,
-            creationflags=CREATE_NO_WINDOW,
-        )
-        family_name = result.stdout.strip()
-        result2 = subprocess.run(
-            [
-                "powershell",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                f'(Get-StartApps | Where-Object {{$_.Name -like "*{app_name}*"}} | '
-                f"Select-Object -First 1).AppId",
-            ],
-            capture_output=True,
-            text=True,
+        ).strip()
+        app_id = _run_ps(
+            f'(Get-StartApps | Where-Object {{$_.Name -like "*{app_name}*"}} | '
+            f"Select-Object -First 1).AppId",
             timeout=8,
-            creationflags=CREATE_NO_WINDOW,
-        )
-        app_id = result2.stdout.strip()
+        ).strip()
         if app_id:
             return _launch_shell_apps_folder(app_id)
         if family_name:
@@ -1136,20 +1162,11 @@ def _launch_via_uri(app_name: str) -> bool:
 
 def _launch_via_powershell_start(app_name: str) -> bool:
     try:
-        result = subprocess.run(
-            [
-                "powershell",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                f'Start-Process "{app_name}" -ErrorAction SilentlyContinue; $?',
-            ],
-            capture_output=True,
-            text=True,
+        output = _run_ps(
+            f'Start-Process "{app_name}" -ErrorAction SilentlyContinue; $?',
             timeout=6,
-            creationflags=CREATE_NO_WINDOW,
         )
-        if result.returncode == 0 and "True" in result.stdout:
+        if "True" in output:
             logger.info("Lancé via PowerShell Start-Process: %s", app_name)
             return True
     except Exception as exc:
@@ -1292,23 +1309,14 @@ def _launch_via_start_apps(app_name: str) -> bool:
     import json
 
     try:
-        result = subprocess.run(
-            [
-                "powershell",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                f'Get-StartApps | Where-Object {{$_.Name -like "*{app_name}*"}} | '
-                f"Select-Object -First 3 Name,AppId | ConvertTo-Json -Compress",
-            ],
-            capture_output=True,
-            text=True,
+        raw = _run_ps(
+            f'Get-StartApps | Where-Object {{$_.Name -like "*{app_name}*"}} | '
+            f"Select-Object -First 3 Name,AppId | ConvertTo-Json -Compress",
             timeout=10,
-            creationflags=CREATE_NO_WINDOW,
         )
-        if result.returncode != 0 or not result.stdout.strip():
+        if not raw.strip():
             return False
-        data = json.loads(result.stdout.strip())
+        data = json.loads(raw.strip().lstrip("\ufeff"))
         if isinstance(data, dict):
             data = [data]
         for app in data:
@@ -1666,7 +1674,8 @@ def _scan_registry() -> dict[str, dict]:
                     sub = winreg.OpenKey(key, winreg.EnumKey(key, i))
                     try:
                         name, _ = winreg.QueryValueEx(sub, "DisplayName")
-                        if not name or not (1 < len(str(name)) < 60):
+                        name = _safe_str(name)
+                        if not name or not (1 < len(name) < 60):
                             continue
                         path = ""
                         try:
@@ -1677,7 +1686,7 @@ def _scan_registry() -> dict[str, dict]:
                                     path = exes[0]
                         except FileNotFoundError:
                             pass
-                        _merge_entries(entries, _make_entry(str(name), "registry", path))
+                        _merge_entries(entries, _make_entry(name, "registry", path))
                     except FileNotFoundError:
                         pass
                 except OSError:
@@ -1701,7 +1710,7 @@ def _scan_registry() -> dict[str, dict]:
                         path = str(val).strip() if val else ""
                     except FileNotFoundError:
                         path = ""
-                    label = Path(exe_name).stem.strip()
+                    label = _safe_str(Path(exe_name).stem)
                     if 1 < len(label) < 60:
                         _merge_entries(entries, _make_entry(label, "registry", path))
                 except OSError:
@@ -1730,36 +1739,31 @@ def _scan_start_menu() -> dict[str, dict]:
 
 
 def _scan_uwp() -> tuple[dict[str, dict], dict[str, str]]:
-    """Scan apps Microsoft Store (UWP) via PowerShell."""
+    """Scan apps Microsoft Store (UWP) via PowerShell — encodage robuste."""
     import json
 
     entries: dict[str, dict] = {}
     uwp_map: dict[str, str] = {}
     try:
-        ps = subprocess.run(
-            [
-                "powershell", "-NoProfile", "-Command",
-                "Get-StartApps | Select-Object Name, AppID | ConvertTo-Json -Compress",
-            ],
-            capture_output=True,
-            text=True,
+        raw = _run_ps(
+            "Get-StartApps | Select-Object Name, AppID | ConvertTo-Json -Compress",
             timeout=20,
-            creationflags=CREATE_NO_WINDOW,
         )
-        if ps.returncode == 0:
-            raw = ps.stdout.strip()
-            if raw:
-                items = json.loads(raw)
-                if isinstance(items, dict):
-                    items = [items]
-                for item in items or []:
-                    name = (item.get("Name") or "").strip()
-                    app_id = (item.get("AppID") or "").strip()
-                    if 1 < len(name) < 80:
-                        shell_path = f"shell:AppsFolder\\{app_id}" if app_id else ""
-                        _merge_entries(entries, _make_entry(name, "uwp", shell_path))
-                        if app_id:
-                            uwp_map[name.lower()] = app_id
+        raw = raw.strip().lstrip("\ufeff")
+        if raw:
+            items = json.loads(raw)
+            if isinstance(items, dict):
+                items = [items]
+            for item in items or []:
+                name = _safe_str(item.get("Name") or "")
+                app_id = _safe_str(item.get("AppID") or "")
+                if 1 < len(name) < 80:
+                    shell_path = f"shell:AppsFolder\\{app_id}" if app_id else ""
+                    _merge_entries(entries, _make_entry(name, "uwp", shell_path))
+                    if app_id:
+                        uwp_map[name.lower()] = app_id
+    except json.JSONDecodeError as exc:
+        logger.warning("UWP JSON parse error: %s", exc)
     except Exception as exc:
         logger.debug("UWP scan skipped: %s", exc)
     return entries, uwp_map

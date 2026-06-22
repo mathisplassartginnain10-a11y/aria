@@ -7,9 +7,28 @@
     content="default-src 'self'; script-src 'self' 'unsafe-inline';
              style-src 'self' 'unsafe-inline';
              img-src 'self' data: blob: http://127.0.0.1:*;
+             media-src 'self' blob: mediastream:;
              connect-src ws://127.0.0.1:* http://127.0.0.1:*;">
   <title>ARIA</title>
   <link rel="stylesheet" href="styles.css">
+  <script>
+  // Enregistre ARIA auprès de Windows (Paramètres → Confidentialité → Microphone)
+  async function requestMicrophonePermission() {
+    if (!navigator.mediaDevices?.getUserMedia) return false;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log('[ARIA] Microphone autorisé par Windows ✓');
+      stream.getTracks().forEach((track) => track.stop());
+      return true;
+    } catch (err) {
+      console.warn('[ARIA] Permission microphone refusée:', err.name, err.message);
+      return false;
+    }
+  }
+  window.addEventListener('DOMContentLoaded', () => {
+    requestMicrophonePermission();
+  });
+  </script>
 </head>
 <body>
 
@@ -165,20 +184,8 @@
         </div>
 
         <div id="input-area" class="home-inp-area inp-area-wrapper">
-          <button id="stop-btn" type="button" onclick="app.stopGeneration()"
-            style="display:none;position:absolute;bottom:calc(100% + 8px);left:50%;
-                   transform:translateX(-50%);
-                   align-items:center;gap:6px;
-                   padding:7px 18px;
-                   background:rgba(239,68,68,0.12);
-                   border:1px solid rgba(239,68,68,0.3);
-                   border-radius:999px;
-                   color:#F87171;font-family:inherit;font-size:12px;
-                   cursor:pointer;backdrop-filter:blur(20px);
-                   box-shadow:0 4px 20px rgba(239,68,68,0.15);
-                   transition:all 0.2s;white-space:nowrap;
-                   z-index:100">
-            ⏹ Arrêter la génération
+          <button id="stop-btn" type="button" onclick="app.stopGeneration()">
+            ⏹ Arrêter
           </button>
           <div id="input-zone" class="home-inp-zone">
             <div class="input-row input-row-main inp-r1">
@@ -458,11 +465,36 @@
           <div class="settings-accordion" id="acc-micro">
             <div class="acc-header" onclick="app.toggleAccordion('micro')">🎤 Micro <span class="acc-chevron">▸</span></div>
             <div class="acc-body hidden">
-              <div class="setting-row">
-                <label>Device index</label>
-                <input type="number" id="set-device-index" placeholder="auto"
-                  class="agent-input" style="width:70px"
-                  onchange="app.saveSetting('stt.device_index', parseInt(this.value) || null)">
+              <div id="mic-permission-status" style="
+                padding:8px 12px;
+                background:rgba(239,68,68,0.08);
+                border:1px solid rgba(239,68,68,0.2);
+                border-radius:8px;
+                font-size:11px;color:#F87171;
+                margin-bottom:8px;
+                display:none;
+              ">
+                ⚠️ Microphone non autorisé par Windows.
+                <a onclick="window.ARIA?.openExternal?.('ms-settings:privacy-microphone');return false"
+                   href="#" style="color:#F87171;text-decoration:underline;cursor:pointer">
+                  Ouvrir les paramètres microphone →
+                </a>
+              </div>
+              <div class="setting-row" style="flex-direction:column;gap:8px;align-items:stretch">
+                <label>Device microphone</label>
+                <select id="set-audio-device" class="agent-select" style="width:100%"
+                  onchange="app.setAudioDevice(this.value)">
+                  <option value="-1">Auto (recommandé)</option>
+                </select>
+                <button type="button" class="settings-btn-outline" id="btn-refresh-audio-devices"
+                  onclick="app.refreshAudioDevices()">
+                  🔄 Actualiser les devices
+                </button>
+                <button type="button" class="settings-btn-outline" id="btn-test-microphone"
+                  onclick="app.testMicrophone()">
+                  🎤 Tester le microphone
+                </button>
+                <div id="mic-test-result" style="font-size:11px;color:var(--text3);margin-top:4px"></div>
               </div>
               <div class="setting-row">
                 <label>Modèle Whisper</label>

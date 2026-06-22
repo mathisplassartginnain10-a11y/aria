@@ -120,6 +120,38 @@ def get_local_ip() -> str:
         sock.close()
 
 
+def _find_free_port(start: int = 5000, max_tries: int = 20) -> int:
+    """Trouve un port libre en partant de start."""
+    for port in range(start, start + max_tries):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            try:
+                sock.bind(("0.0.0.0", port))
+                return port
+            except OSError:
+                continue
+    raise RuntimeError(f"Aucun port libre entre {start} et {start + max_tries - 1}")
+
+
+def _save_mobile_ports(port: int) -> None:
+    try:
+        ip = get_local_ip()
+        port_file = app_paths.data_dir() / "mobile_ports.json"
+        port_file.parent.mkdir(parents=True, exist_ok=True)
+        port_file.write_text(
+            json.dumps(
+                {
+                    "http": port,
+                    "local_ip": ip,
+                    "http_url": f"http://{ip}:{port}",
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        logger.warning("Impossible de sauvegarder mobile_ports.json: %s", exc)
+
+
 def check_auth(req) -> bool:
     token = req.headers.get("X-Token", "")
     return token in SESSIONS and SESSIONS[token].get("authenticated")
@@ -542,7 +574,7 @@ def start_mobile_server(
     banner: bool = True,
 ) -> bool:
     """Démarre le serveur mobile (thread daemon ou bloquant)."""
-    global _server_thread
+    global _server_thread, MOBILE_PORT
 
     if is_server_running():
         return True
@@ -556,6 +588,20 @@ def start_mobile_server(
         available = llamacpp_manager.list_available_models()
         if available:
             llamacpp_manager.start_model_server(available[0])
+
+    requested_port = MOBILE_PORT
+    try:
+        MOBILE_PORT = _find_free_port(requested_port)
+        if MOBILE_PORT != requested_port:
+            logger.warning(
+                "Port mobile %d occupé — utilisation du port %d",
+                requested_port,
+                MOBILE_PORT,
+            )
+        _save_mobile_ports(MOBILE_PORT)
+    except RuntimeError as exc:
+        logger.error("Impossible de démarrer le serveur mobile: %s", exc)
+        return False
 
     port = MOBILE_PORT
 
@@ -572,6 +618,21 @@ def start_mobile_server(
         target=_run, daemon=True, name="aria-mobile-server"
     )
     _server_thread.start()
+    logger.info("ARIA Mobile: http://%s:%d", get_local_ip(), port)
+
+    try:
+        from ui_bridge import emit
+
+        emit(
+            "mobile_server_started",
+            {
+                "http_url": f"http://{get_local_ip()}:{port}",
+                "port": port,
+            },
+        )
+    except Exception:
+        pass
+
     return True
 
 

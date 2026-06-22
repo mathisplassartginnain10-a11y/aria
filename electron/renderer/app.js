@@ -32,6 +32,7 @@ const state = {
   _activeAgentIcon: '🤖',
   _activeAgentName: 'ARIA',
   _generating: false,
+  _currentRequestId: null,
 };
 
 /** Logo ARIA — data URL injectée par main.js (window.__ARIA_ICON__) */
@@ -200,6 +201,7 @@ async function init() {
   }
 
   setupEventListeners();
+  await checkMicPermission();
   await loadActiveAgent();
   await loadAgentDropdown();
   await updateAgentsBadge();
@@ -264,7 +266,13 @@ function setupEventListeners() {
   });
 
   // Statut ARIA
-  api.on('status_change', (status) => setStatus(status));
+  api.on('status_change', (status) => {
+    setStatus(status);
+    if (status === 'idle') {
+      state._generating = false;
+      hideStopButton();
+    }
+  });
 
   api.on('thinking_start', (payload) => {
     const data = payload && typeof payload === 'object' ? payload : {};
@@ -296,10 +304,15 @@ function setupEventListeners() {
   });
 
   // Token LLM streaming
-  api.on('assistant_token', (token) => appendStreamToken(token));
+  api.on('assistant_token', (token) => {
+    if (!state._generating) return;
+    appendStreamToken(token);
+    setStatus('speaking');
+  });
 
   // Fin du message ARIA
   api.on('assistant_done', (modelName) => {
+    console.log('[ARIA] assistant_done reçu');
     state._generating = false;
     hideStopButton();
     hideThinkingBubble();
@@ -558,6 +571,7 @@ function addAriaBubble(text, scroll = true, modelName = '') {
 }
 
 function appendStreamToken(token) {
+  if (!token) return;
   hideThinkingBubble();
   if (!state._streamingMessage) {
     const messages = document.getElementById('messages');
@@ -582,7 +596,8 @@ function appendStreamToken(token) {
 
   state._streamingContent += token;
   state._streamingMessage.innerHTML =
-    renderMarkdown(state._streamingContent) + '<span class="cursor-blink">▋</span>';
+    renderMarkdown(state._streamingContent) +
+    '<span class="cursor-blink" style="display:inline-block;width:2px;height:14px;background:var(--accent);margin-left:2px;animation:blink 1s step-end infinite;vertical-align:middle">▋</span>';
   scrollToBottom();
 }
 
@@ -591,7 +606,9 @@ function finalizeAssistantMessage(modelName = '') {
   if (state._streamingMessage) {
     const cursor = state._streamingMessage.querySelector('.cursor-blink');
     if (cursor) cursor.remove();
-    state._streamingMessage.innerHTML = renderMarkdown(state._streamingContent);
+    if (state._streamingContent) {
+      state._streamingMessage.innerHTML = renderMarkdown(state._streamingContent);
+    }
     if (label && state._streamingOuter) {
       const badge = document.createElement('div');
       badge.className = 'model-badge';
@@ -865,11 +882,19 @@ async function handleFiles(files) {
 // ── Envoi de messages ─────────────────────────────────────────────────────────
 
 function showStopButton() {
-  const btn = document.getElementById('stop-btn');
-  if (btn) {
-    btn.style.display = 'flex';
-    btn.style.animation = 'fadeInUp 0.2s ease';
+  let btn = document.getElementById('stop-btn');
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.id = 'stop-btn';
+    btn.type = 'button';
+    btn.innerHTML = '⏹ Arrêter';
+    btn.onclick = () => stopGeneration();
+    document.body.appendChild(btn);
+  } else if (btn.parentElement !== document.body) {
+    document.body.appendChild(btn);
   }
+  btn.style.display = 'flex';
+  btn.style.animation = 'fadeInUp 0.2s ease';
 }
 
 function hideStopButton() {
@@ -878,15 +903,18 @@ function hideStopButton() {
 }
 
 async function stopGeneration() {
+  console.log('[ARIA] stopGeneration() appelé, generating=', state._generating);
   if (!state._generating) return;
+
+  state._generating = false;
 
   try {
     await api.call('stop_generation');
+    console.log('[ARIA] stop_generation envoyé au backend');
   } catch (e) {
-    console.error('stop_generation error:', e);
+    console.error('[ARIA] Erreur stop_generation:', e);
   }
 
-  state._generating = false;
   hideStopButton();
   hideThinkingBubble();
   finalizeAssistantMessage();
@@ -904,7 +932,11 @@ async function stopGeneration() {
 async function sendMessage() {
   const input = document.getElementById('text-input');
   const text = input?.value?.trim();
-  if (!text || state._generating) return;
+  if (!text) return;
+  if (state._generating) {
+    showToast('Génération en cours...', 'info');
+    return;
+  }
 
   input.value = '';
   input.style.height = 'auto';
@@ -917,31 +949,46 @@ async function sendMessage() {
   addUserBubble(text);
 
   state._generating = true;
+  state._streamingContent = '';
+  state._streamingMessage = null;
+  state._streamingOuter = null;
   setStatus('thinking');
   input.disabled = true;
   showStopButton();
 
+  console.log('[ARIA] Envoi message, generating=true');
+
   try {
-    await api.call('ask', text, state.conversationMode);
+    await api.call('ask', text, state.conversationMode || 'ecrit');
   } catch (e) {
-    if (!e.message?.includes('stopped')) {
-      console.error('Erreur sendMessage:', e);
+    if (!e.message?.includes('stopped') && !e.message?.includes('abort')) {
+      console.error('[ARIA] Erreur ask:', e);
       showToast('Erreur: ' + e.message, 'error');
     }
     finalizeAssistantMessage();
-    setStatus('idle');
   } finally {
     state._generating = false;
     hideStopButton();
+    setStatus('idle');
     input.disabled = false;
     input.focus();
+    console.log('[ARIA] Message terminé, generating=false');
   }
 }
 
 function handleInputKeydown(e) {
+  if (e.key === 'Escape' && state._generating) {
+    e.preventDefault();
+    stopGeneration();
+    return;
+  }
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     const input = document.getElementById('text-input');
+    if (state._generating) {
+      showToast('Appuie sur Échap pour arrêter', 'info');
+      return;
+    }
     if (input && !input.disabled) {
       sendMessage();
     }
@@ -1674,12 +1721,28 @@ async function quickAction(text) {
     }
   }
   hideModeSelector();
+  state._generating = true;
+  state._streamingContent = '';
+  state._streamingMessage = null;
   setStatus('thinking');
+  showStopButton();
+  const input = document.getElementById('text-input');
+  if (input) input.disabled = true;
   try {
-    await api.call('ask', text, state.conversationMode);
+    await api.call('ask', text, state.conversationMode || 'ecrit');
   } catch (e) {
-    showToast('Erreur: ' + e.message, 'error');
+    if (!e.message?.includes('stopped') && !e.message?.includes('abort')) {
+      showToast('Erreur: ' + e.message, 'error');
+    }
+    finalizeAssistantMessage();
+  } finally {
+    state._generating = false;
+    hideStopButton();
     setStatus('idle');
+    if (input) {
+      input.disabled = false;
+      input.focus();
+    }
   }
 }
 
@@ -1795,9 +1858,13 @@ function loadSettingsPage() {
   loadAppsIndexLabel();
   loadGoogleStatus();
 
-  const di = document.getElementById('set-device-index');
+  const di = document.getElementById('set-audio-device');
   const deviceIdx = s.stt?.device_index ?? s['stt.device_index'];
-  if (di) di.value = deviceIdx != null ? deviceIdx : '';
+  if (di && deviceIdx != null) {
+    const pyVal = `py_${deviceIdx}`;
+    const opt = di.querySelector(`option[value="${pyVal}"]`);
+    if (opt) di.value = pyVal;
+  }
 
   const wm = document.getElementById('set-whisper-model');
   if (wm) wm.value = s.stt?.model || s['stt.model'] || s.whisper_model || 'small';
@@ -1926,8 +1993,11 @@ async function validateSection(section) {
         break;
       }
       case 'micro': {
-        const deviceVal = document.getElementById('set-device-index')?.value;
-        const deviceIdx = deviceVal === '' || deviceVal == null ? null : parseInt(deviceVal, 10);
+        const deviceVal = document.getElementById('set-audio-device')?.value;
+        let deviceIdx = null;
+        if (deviceVal && deviceVal.startsWith('py_')) {
+          deviceIdx = parseInt(deviceVal.replace('py_', ''), 10);
+        }
         const whisperModel = document.getElementById('set-whisper-model')?.value;
         try { await api.call('set_stt_device_index', deviceIdx ?? ''); } catch (_) {}
         try { await api.call('set_whisper_model', whisperModel); } catch (_) {}
@@ -3004,12 +3074,19 @@ function bindMainUiButtons() {
   const loadModelsBtn = document.querySelector('#acc-modeles .settings-btn-outline');
   loadModelsBtn?.addEventListener('click', () => loadModelSettings());
 
-  const micDiagBtn = document.querySelector('#acc-micro .settings-btn-outline');
-  micDiagBtn?.addEventListener('click', () => window.app?.runMicDiagnostic?.());
-
   const textInput = document.getElementById('text-input');
   textInput?.addEventListener('keydown', handleInputKeydown);
   textInput?.addEventListener('input', function onInput() { adjustTextarea(this); });
+
+  if (!document.body._ariaStopKeyBound) {
+    document.body._ariaStopKeyBound = true;
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && state._generating) {
+        e.preventDefault();
+        stopGeneration();
+      }
+    });
+  }
 
   const inputZone = document.getElementById('input-zone');
   if (inputZone && !inputZone._dropBound) {
@@ -3021,6 +3098,119 @@ function bindMainUiButtons() {
       inputZone.classList.remove('drag-over');
       if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files);
     });
+  }
+}
+
+async function checkMicPermission() {
+  try {
+    if (!navigator.permissions?.query) return;
+    const result = await navigator.permissions.query({ name: 'microphone' });
+    const el = document.getElementById('mic-permission-status');
+    if (el) el.style.display = result.state === 'denied' ? 'block' : 'none';
+    result.onchange = () => {
+      if (el) el.style.display = result.state === 'denied' ? 'block' : 'none';
+    };
+  } catch (_) {}
+}
+
+async function refreshAudioDevices() {
+  const select = document.getElementById('set-audio-device');
+  if (!select) return;
+
+  try {
+    await checkMicPermission();
+
+    if (navigator.mediaDevices?.getUserMedia) {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop());
+    }
+
+    const audioInputs = navigator.mediaDevices
+      ? (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput')
+      : [];
+
+    let pyDevices = [];
+    try {
+      pyDevices = await api.call('get_audio_devices') || [];
+      if (typeof pyDevices === 'string') pyDevices = JSON.parse(pyDevices);
+    } catch (_) {}
+
+    const saved = state.settings?.stt?.device_index ?? state.settings?.['stt.device_index'];
+    select.innerHTML = '<option value="-1">Auto (recommandé)</option>';
+
+    audioInputs.forEach((d) => {
+      const opt = document.createElement('option');
+      opt.value = d.deviceId;
+      opt.textContent = `🌐 ${d.label || 'Microphone ' + d.deviceId.slice(0, 8)}`;
+      select.appendChild(opt);
+    });
+
+    pyDevices.forEach((d) => {
+      const opt = document.createElement('option');
+      opt.value = `py_${d.index}`;
+      opt.textContent = `🐍 [${d.index}] ${d.name}`;
+      if (saved != null && String(d.index) === String(saved)) opt.selected = true;
+      select.appendChild(opt);
+    });
+
+    showToast(`${audioInputs.length + pyDevices.length} devices trouvés`, 'success');
+  } catch (e) {
+    showToast('Erreur: ' + e.message, 'error');
+  }
+}
+
+async function testMicrophone() {
+  const resultEl = document.getElementById('mic-test-result');
+  const deviceSelect = document.getElementById('set-audio-device');
+  const deviceVal = deviceSelect?.value;
+
+  if (resultEl) resultEl.textContent = '🎤 Test en cours (2 secondes)...';
+
+  try {
+    const deviceIndex = deviceVal?.startsWith('py_')
+      ? parseInt(deviceVal.replace('py_', ''), 10)
+      : null;
+
+    const result = await api.call('test_microphone', deviceIndex);
+
+    if (resultEl) {
+      if (result?.success && result.is_active) {
+        const bars = Math.round((result.avg_rms || 0) * 1000);
+        resultEl.style.color = '#4ADE80';
+        resultEl.textContent = `✅ ${result.message} (niveau: ${bars}/10)`;
+      } else if (result?.success) {
+        resultEl.style.color = '#F59E0B';
+        resultEl.textContent = '⚠️ Microphone détecté mais aucun son — parle dans le micro';
+      } else {
+        resultEl.style.color = '#F87171';
+        resultEl.textContent = `❌ Erreur: ${result?.error || 'inconnue'}`;
+      }
+    }
+  } catch (e) {
+    if (resultEl) {
+      resultEl.style.color = '#F87171';
+      resultEl.textContent = '❌ Erreur: ' + e.message;
+    }
+  }
+}
+
+async function setAudioDevice(value) {
+  if (!value || value === '-1') {
+    try { await api.call('set_stt_device_index', ''); } catch (_) {}
+    await saveSetting('stt.device_index', null);
+    showToast('Device audio : auto', 'success');
+    return;
+  }
+  if (value.startsWith('py_')) {
+    const idx = parseInt(value.replace('py_', ''), 10);
+    try { await api.call('set_stt_device', idx); } catch (_) {
+      await api.call('set_stt_device_index', idx);
+    }
+    await saveSetting('stt.device_index', idx);
+    showToast(`Device PyAudio [${idx}] sélectionné`, 'success');
+  } else {
+    await saveSetting('stt.device_id_browser', value);
+    showToast('Device navigateur mis à jour', 'success');
   }
 }
 
@@ -3107,6 +3297,10 @@ function exposeGlobalApp() {
     showApiKeyInput,
     exportConversation: () => api.call('export_current_conversation'),
     runMicDiagnostic: () => api.call('run_mic_diagnostic'),
+    refreshAudioDevices,
+    testMicrophone,
+    setAudioDevice,
+    checkMicPermission,
     handleFiles,
     askFilePrompt,
   };
