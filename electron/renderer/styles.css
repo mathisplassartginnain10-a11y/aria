@@ -1495,6 +1495,28 @@ body {
   color: var(--text);
 }
 
+.md-h2 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 8px 0 6px;
+  color: var(--text);
+}
+
+.md-bullet {
+  margin: 2px 0 2px 4px;
+  line-height: 1.5;
+}
+
+a.md-link {
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+a.md-link:hover {
+  opacity: 0.85;
+}
+
 .bubble-avatar {
   width: 28px;
   height: 28px;

@@ -157,6 +157,11 @@ def _timer_loop() -> None:
         for timer in triggered:
             msg = f"Minuteur {timer.get('label', '')} terminé !"
             logger.info(msg)
+            try:
+                import ui_bridge as ui
+                ui.show_toast(msg, toast_type="info")
+            except Exception:
+                pass
             tts.speak(msg)
 
         time.sleep(1)

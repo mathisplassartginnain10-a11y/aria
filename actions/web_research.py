@@ -7,6 +7,7 @@ Recherche parallèle, déduplication, scoring par pertinence, cache 10min.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import pickle
 import re
@@ -767,6 +768,134 @@ def warmup_cache(queries: list[str] | None = None) -> None:
     ).start()
 
 
+# ── Synthèse structurée (Sprint questions + résumés) ───────────────────────────
+
+def select_sources_for_query(
+    query: str,
+    sources: list[str] | None = None,
+) -> list[str]:
+    """Choisit les sources selon le type de question."""
+    if sources is not None:
+        return sources
+    q = query.lower()
+    if any(kw in q for kw in ("jeu", "gaming", "steam", "fortnite", "minecraft", "valorant", "gta")):
+        return ["web"]
+    if any(kw in q for kw in ("metar", "taf", "notam", "aéroport", "aeroport", "aviation", "ppl", "vfr")):
+        return ["web", "wikipedia"]
+    if any(kw in q for kw in ("actu", "news", "aujourd'hui", "cette semaine", "récent", "recent")):
+        return ["news", "newsapi", "web"]
+    return ["web", "news", "wikipedia"]
+
+
+def parse_synthesis_json(raw: str) -> dict | None:
+    if not raw or not raw.strip():
+        return None
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict) and data.get("synthese"):
+            return data
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r"\{[\s\S]*\}", text)
+    if match:
+        try:
+            data = json.loads(match.group(0))
+            if isinstance(data, dict) and data.get("synthese"):
+                return data
+        except json.JSONDecodeError:
+            pass
+    return None
+
+
+def format_structured_summary(data: dict) -> str:
+    """Convertit le JSON de synthèse en markdown lisible dans le chat."""
+    titre = str(data.get("titre") or data.get("title") or "Résultats").strip()
+    synthese = str(data.get("synthese") or data.get("summary") or "").strip()
+    points = data.get("points_cles") or data.get("points") or []
+    sources = data.get("sources") or []
+
+    lines = [f"## 🔍 {titre}", "", synthese]
+    if points:
+        lines.extend(["", "**Points clés :**"])
+        for point in points[:5]:
+            p = str(point).strip()
+            if p:
+                lines.append(f"• {p}")
+    if sources:
+        src_links: list[str] = []
+        for src in sources[:3]:
+            if not isinstance(src, dict):
+                continue
+            title = str(src.get("titre") or src.get("title") or "Source").strip()
+            url = str(src.get("url") or src.get("href") or "").strip()
+            if url:
+                src_links.append(f"[{title}]({url})")
+        if src_links:
+            lines.extend(["", "**Sources :** " + " · ".join(src_links)])
+    body = "\n".join(lines).strip()
+    words = body.split()
+    if len(words) > 280:
+        body = " ".join(words[:280]) + "…"
+    return body
+
+
+def build_synthesis_json_prompt(query: str, raw_results: str) -> str:
+    return (
+        f'Tu es ARIA, assistant français. Synthétise pour répondre à : « {query} ».\n'
+        f"Réponds UNIQUEMENT en JSON valide (pas de markdown, pas de texte autour) :\n"
+        f'{{"titre":"titre court","synthese":"2-3 phrases directes","points_cles":["point 1","point 2","point 3"],'
+        f'"sources":[{{"titre":"nom","url":"https://..."}}]}}\n'
+        f"Règles : max 250 mots au total, français, 2-3 sources, commence par la réponse directe.\n"
+        f"Si les sources se contredisent, mentionne-le dans synthese.\n"
+        f"Pour l'actualité, indique la date si disponible.\n\n"
+        f"RÉSULTATS:\n{raw_results[:2500]}"
+    )
+
+
+def extract_definition_term(text: str) -> str:
+    t = text.strip()
+    for pattern in (
+        r"(?:c'est quoi|qu'est-ce que|quest ce que|définition de|definition de|explique(?:-moi)?)\s+(.+)",
+        r"(?:c est quoi)\s+(.+)",
+    ):
+        m = re.search(pattern, t, re.I)
+        if m:
+            term = m.group(1).strip().strip("?.!")
+            for noise in ("l'application", "le mot", "le terme", "stp", "s'il te plaît"):
+                term = term.replace(noise, "").strip()
+            return term
+    return t
+
+
+def try_wikipedia_definition(text: str) -> str | None:
+    """Définition rapide via Wikipedia — sans LLM heavy si le résumé est suffisant."""
+    term = extract_definition_term(text)
+    if not term or len(term) < 2:
+        return None
+    summary = wikipedia_summary(term)
+    if not summary or len(summary) < 100:
+        return None
+    slug = urllib.parse.quote(term.replace(" ", "_"))
+    return format_structured_summary({
+        "titre": term.capitalize(),
+        "synthese": summary[:450].rstrip() + ("…" if len(summary) > 450 else ""),
+        "points_cles": [],
+        "sources": [{"titre": "Wikipedia", "url": f"https://fr.wikipedia.org/wiki/{slug}"}],
+    })
+
+
+def search_definition_quick(query: str) -> str:
+    """Définition : Wikipedia d'abord, sinon synthèse structurée."""
+    wiki = try_wikipedia_definition(query)
+    if wiki:
+        return wiki
+    return search_and_synthesize(query, sources=["wikipedia", "web"], max_results=6)
+
+
 def search_and_synthesize(
     query: str,
     output_format: str = "chat",
@@ -774,13 +903,12 @@ def search_and_synthesize(
     max_results: int = 8,
 ) -> str:
     """
-    Recherche multi-sources + synthèse LLM fast.
+    Recherche multi-sources + synthèse LLM fast en markdown structuré.
     output_format: 'chat' ou 'doc' (structuré pour Google Doc).
     """
     import llm as _llm
 
-    if sources is None:
-        sources = ["web", "news", "wikipedia"]
+    sources = select_sources_for_query(query, sources)
 
     t0 = time.time()
     raw = search_multi_fast(query, max_results=max_results, sources=sources)
@@ -795,26 +923,34 @@ Inclure toujours une section ## Sources avec les URLs.
 RÉSULTATS:
 {raw[:3000]}"""
         max_tokens = 600
-    else:
-        prompt = f"""Tu es ARIA, assistant français. Réponds à "{query}" en synthétisant ces résultats.
-Sois concis, factuel, en français. Maximum 200 mots.
-Cite 2-3 sources pertinentes à la fin avec leurs URLs.
-Format: réponse naturelle puis "Sources: [url1], [url2]"
+        response = _llm.generate(
+            prompt,
+            model=_llm.MODELS["fast"],
+            max_tokens=max_tokens,
+            temperature=0.3,
+            stream=False,
+        )
+        t2 = time.time()
+        logger.info("Synthèse LLM doc: %.2fs — total: %.2fs", t2 - t1, t2 - t0)
+        return response
 
-RÉSULTATS:
-{raw[:2000]}"""
-        max_tokens = 300
-
+    prompt = build_synthesis_json_prompt(query, raw)
     response = _llm.generate(
         prompt,
         model=_llm.MODELS["fast"],
-        max_tokens=max_tokens,
-        temperature=0.3,
+        max_tokens=400,
+        temperature=0.25,
         stream=False,
     )
-    t2 = time.time()
-    logger.info("Synthèse LLM: %.2fs — total: %.2fs", t2 - t1, t2 - t0)
-    return response
+    parsed = parse_synthesis_json(response)
+    if parsed:
+        formatted = format_structured_summary(parsed)
+        t2 = time.time()
+        logger.info("Synthèse structurée: %.2fs — total: %.2fs", t2 - t1, t2 - t0)
+        return formatted
+
+    logger.warning("JSON synthèse invalide — fallback texte brut")
+    return response or raw[:1200]
 
 
 def search_news(query: str, days_back: int = 7) -> str:
@@ -824,12 +960,14 @@ def search_news(query: str, days_back: int = 7) -> str:
 
 
 def search_academic(query: str) -> str:
-    """Recherche académique — Wikipedia + web enrichi."""
-    return search_multi(
+    """Recherche académique — Wikipedia rapide puis synthèse structurée."""
+    quick = try_wikipedia_definition(query)
+    if quick:
+        return quick
+    return search_and_synthesize(
         query,
         max_results=6,
         sources=["wikipedia", "web"],
-        include_page_content=True,
     )
 
 

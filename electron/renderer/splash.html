@@ -252,6 +252,13 @@ html,body{
   animation:textFadeIn 0.5s ease 2s forwards;
 }
 
+#scan-section {
+  opacity: 0;
+  animation: textFadeIn 0.5s ease 1.5s forwards;
+  margin-top: 20px;
+  width: 320px;
+}
+
 /* ══ FADE OUT FINAL ══ */
 #splash.fadeout{
   animation:splashOut 0.8s cubic-bezier(0.4,0,1,1) forwards;
@@ -311,12 +318,7 @@ html,body{
     <div id="loader-text">Initialisation...</div>
   </div>
 
-  <div id="scan-section" style="
-    margin-top: 24px;
-    width: 340px;
-    opacity: 0;
-    animation: textFadeIn 0.5s ease 2.5s forwards;
-  ">
+  <div id="scan-section">
     <div style="
       font-size: 10px;
       color: rgba(255,255,255,0.25);
@@ -434,55 +436,43 @@ function applySplashLogo() {
 }
 applySplashLogo();
 
-const scanLines = [];
-const MAX_VISIBLE_LINES = 5;
+window.addEventListener('splash_scan', (e) => {
+  const data = e.detail || {};
 
-function bindSplashScanEvents() {
-  if (!window.ARIA) {
-    setTimeout(bindSplashScanEvents, 150);
-    return;
-  }
-  window.ARIA.on('splash_scan', (data) => {
-    const bar = document.getElementById('scan-bar');
-    const label = document.getElementById('scan-label');
-    const count = document.getElementById('scan-count');
-    const inner = document.getElementById('scan-log-inner');
-    if (!bar || !label || !count || !inner) return;
+  const bar = document.getElementById('scan-bar');
+  if (bar) bar.style.width = (data.pct || 0) + '%';
 
-    bar.style.width = (data.pct || 0) + '%';
-    label.textContent = data.label || '';
-    count.textContent = (data.count || 0) + ' apps';
+  const label = document.getElementById('scan-label');
+  const count = document.getElementById('scan-count');
+  if (label) label.textContent = data.label || '';
+  if (count) count.textContent = (data.count || 0) + ' apps';
 
+  const inner = document.getElementById('scan-log-inner');
+  if (inner) {
     const line = document.createElement('div');
     line.style.cssText = `
-      font-size: 10px;
-      color: rgba(108,142,255,${data.done ? '0.8' : '0.45'});
-      font-family: monospace;
-      letter-spacing: 0.3px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      animation: fadeIn 0.2s ease;
-      padding: 1px 0;
+      font-size:10px;
+      color:rgba(${data.done ? '74,222,128' : '108,142,255'},${data.done ? '0.9' : '0.5'});
+      font-family:monospace;
+      padding:1px 0;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
     `;
-    const prefix = data.done ? '✓ ' : '→ ';
-    line.textContent = prefix + (data.label || '');
+    line.textContent = (data.done ? '✓ ' : '→ ') + (data.label || '');
     inner.appendChild(line);
 
-    scanLines.push(line);
-    if (scanLines.length > MAX_VISIBLE_LINES) {
-      const overflow = scanLines.length - MAX_VISIBLE_LINES;
-      inner.style.transform = `translateY(-${overflow * 18}px)`;
+    const lines = inner.children;
+    if (lines.length > 5) {
+      inner.style.transform = `translateY(-${(lines.length - 5) * 16}px)`;
     }
+  }
 
-    if (data.done) {
-      bar.style.background =
-        'linear-gradient(90deg, rgba(74,222,128,0.6), rgba(52,211,153,0.6))';
-      count.style.color = 'rgba(74,222,128,0.7)';
-    }
-  });
-}
-bindSplashScanEvents();
+  if (data.done && bar) {
+    bar.style.background = 'linear-gradient(90deg, #22C55E, #16A34A)';
+    if (count) count.style.color = 'rgba(74,222,128,0.7)';
+  }
+});
 </script>
 </body>
 </html>

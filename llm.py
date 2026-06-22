@@ -32,6 +32,7 @@ from actions import (
     files,
     git,
     math_expert,
+    math_helper,
     news,
     presets,
     system,
@@ -493,14 +494,21 @@ DRIVE_INTENTS = frozenset({
 })
 
 FAST_REGEX: dict[str, str] = {
-    r"\b(lance|démarre|demarre|start|exécute|run|joue à|jouer à)\b.+": "lancer_app",
+    r"\b(lance|démarre|demarre|start|exécute|run|joue à|jouer à|joue)\b.+": "lancer_app",
     r"\b(ouvre|ouvre-moi|met en marche|active|allume)\b.+": "lancer_app",
+    r"\b(je veux utiliser|je veux lancer|je voudrais utiliser|je voudrais lancer)\b.+": "lancer_app",
     r"\b(ferme|quitte|stop|arrête|arrete|kill|tue|coupe|éteins|désactive)\b.+": "fermer_app",
     r"\b(applications? ouvertes?|apps ouvertes?|qu'est-ce qui tourne)\b": "apps_ouvertes",
     r"\b(volume|son)\b.+(up|down|monte|baisse|\d+)": "volume",
-    r"\b(météo|meteo|température|temperature|temps)\b": "meteo",
-    r"\b(quelle heure|quelle date|l'heure|heure qu'il|quel jour)\b": "heure_date",
-    r"\b(minuteur|timer|dans \d+ min)\b": "minuteur",
+    r"\b(météo|meteo|température|temperature|temps fait|quel temps|va-t-il pleuvoir|il fait (?:chaud|froid))\b": "meteo",
+    r"\b(quelle heure|quelle date|l'heure|heure qu'il|quel jour|on est quel jour|quel mois|quelle année)\b": "heure_date",
+    r"\b(minuteur|timer|alarme dans|rappelle-moi dans|dans \d+ min)\b": "minuteur",
+    r"\b(batterie|niveau de charge|charge restante)\b": "system_info",
+    r"\b(ram|mémoire|memoire|utilisation cpu|cpu)\b": "system_info",
+    r"\b(convertis|conversion|combien de .+ en )\b": "conversion",
+    r"\b(combien font|combien ça fait|calcule)\b": "math_calculate",
+    r"\b(raconte.*blague|une blague|quelque chose d'amusant)\b": "blague",
+    r"\b(qui suis-je|parle[- ]moi de moi|qu'est-ce que tu sais de moi)\b": "profil_utilisateur",
 }
 
 FAST_BROWSER_REGEX: list[tuple[str, str]] = [
@@ -517,9 +525,9 @@ FAST_BROWSER_REGEX: list[tuple[str, str]] = [
 ]
 
 LAUNCH_PATTERNS = [
-    r"(?:lance|ouvre|démarre|start|exécute|run|joue à|jouer à)\s+(.+)",
+    r"(?:lance|ouvre|démarre|start|exécute|run|joue à|jouer à|joue)\s+(.+)",
     r"(?:met en marche|active|allume)\s+(.+)",
-    r"(?:je veux|je voudrais)\s+(?:ouvrir|utiliser|lancer)\s+(.+)",
+    r"(?:je veux|je voudrais)\s+(?:ouvrir|utiliser|lancer|jouer à)\s+(.+)",
     r"(?:ouvre moi|lance moi)\s+(.+)",
 ]
 
@@ -976,7 +984,7 @@ def _fast_intent(text: str) -> tuple[str, dict] | None:
             "comment fonctionne",
         )
     ):
-        return "recherche_academique", {"topic": text}
+        return "definition_rapide", {"query": text}
 
     # PRIORITY 1.5: Recherche web multi-sources + Google Docs (spec v20)
     for pattern, intent in RECHERCHE_PATTERNS:
@@ -1112,7 +1120,167 @@ def _fast_intent_params(intent: str, text: str) -> dict:
         return {"city": text}
     if intent == "minuteur":
         return {"text": text}
+    if intent == "system_info":
+        return {"text": text}
+    if intent == "conversion":
+        return {"text": text}
+    if intent == "definition_rapide":
+        return {"query": text}
+    if intent == "profil_utilisateur":
+        return {}
     return {}
+
+
+_DAYS_FR = (
+    "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche",
+)
+_MONTHS_FR = (
+    "janvier", "février", "mars", "avril", "mai", "juin",
+    "juillet", "août", "septembre", "octobre", "novembre", "décembre",
+)
+
+
+def _format_datetime_fr(now: datetime | None = None) -> str:
+    now = now or datetime.now()
+    day_name = _DAYS_FR[now.weekday()]
+    month_name = _MONTHS_FR[now.month - 1]
+    return (
+        f"Il est {now.strftime('%H')} h {now.strftime('%M')}, "
+        f"nous sommes {day_name} {now.day} {month_name} {now.year}."
+    )
+
+
+def _select_answer_strategy(text: str) -> tuple[str, dict]:
+    """
+    Décide comment répondre sans LLM heavy quand possible.
+    Retourne (stratégie, params) — stratégie 'llm' = routage classique.
+    """
+    t = text.lower().strip()
+    if not t:
+        return "llm", {}
+
+    if re.search(
+        r"\b(quelle heure|quelle date|l'heure|heure qu'il|quel jour|"
+        r"on est quel jour|quel mois|quelle année)\b",
+        t,
+    ):
+        return "datetime", {}
+
+    if re.search(
+        r"\b(météo|meteo|température|temperature|quel temps|temps fait|"
+        r"va-t-il pleuvoir|il fait chaud|il fait froid)\b",
+        t,
+    ):
+        city = None
+        for c in ("couëron", "coueron", "nantes", "paris"):
+            if c in t:
+                city = "Couëron" if "cou" in c else c.capitalize()
+                break
+        return "weather", {"city": city}
+
+    if re.search(r"\b(batterie|charge restante|niveau de charge)\b", t):
+        return "system", {"kind": "battery"}
+    if re.search(r"\b(ram|mémoire|memoire)\b", t):
+        return "system", {"kind": "ram"}
+    if re.search(r"\b(cpu|processeur|utilisation cpu)\b", t):
+        return "system", {"kind": "cpu"}
+
+    if re.search(r"\b(convertis|conversion|combien de .+ en )\b", t):
+        return "conversion", {"text": text}
+
+    if re.search(r"\b(combien font|combien ça fait|calcule)\b", t):
+        return "calc", {"text": text}
+
+    if re.search(
+        r"\b(c'est quoi|qu'est-ce que|définition de|explique(?:-moi)?)\b",
+        t,
+    ):
+        return "definition", {"query": text}
+
+    if re.search(r"\b(minuteur|timer|alarme dans|rappelle-moi dans)\b", t):
+        return "timer", {"text": text}
+
+    if re.search(r"\b(raconte.*blague|une blague|quelque chose d'amusant)\b", t):
+        return "joke", {}
+
+    if re.search(r"\b(qui suis-je|parle[- ]moi de moi|qu'est-ce que tu sais de moi)\b", t):
+        return "profile", {}
+
+    if re.search(r"\b(actu|actualités|news|quoi de neuf)\b", t) and not re.search(
+        r"\b(cherche|recherche|sur le web)\b", t
+    ):
+        return "news", {"text": text}
+
+    return "llm", {}
+
+
+def _answer_quick_strategy(text: str, strategy: str, params: dict) -> str | None:
+    """Réponses instantanées pour questions du quotidien."""
+    try:
+        if strategy == "datetime":
+            return _format_datetime_fr()
+
+        if strategy == "weather":
+            return weather.answer_local(params.get("city"))
+
+        if strategy == "system":
+            kind = params.get("kind", "")
+            t = text.lower()
+            if kind == "battery" or "batterie" in t or "charge" in t:
+                return system.get_battery()
+            if kind == "ram" or "ram" in t or "mémoire" in t or "memoire" in t:
+                return system.get_ram_usage()
+            if kind == "cpu" or "cpu" in t or "processeur" in t:
+                import psutil
+                pct = psutil.cpu_percent(interval=0.15)
+                return f"Le processeur est utilisé à {pct:.0f}%."
+            return system.get_ram_usage()
+
+        if strategy == "calc":
+            simple = math_helper.calculate(params.get("text", text))
+            if simple and "non reconnue" not in simple.lower():
+                return simple
+            return math_expert.handle(text)
+
+        if strategy == "conversion":
+            conv = math_helper.parse_conversion(params.get("text", text))
+            if conv and "non reconnue" not in conv.lower():
+                return conv
+            return math_helper.handle(text)
+
+        if strategy == "definition":
+            from actions.web_research import search_definition_quick
+            return search_definition_quick(params.get("query", text))
+
+        if strategy == "timer":
+            return timer.parse_and_set(params.get("text", text))
+
+        if strategy == "joke":
+            joke = generate(
+                "Raconte une blague courte et drôle en une phrase, en français.",
+                model=MODELS["fast"],
+                stream=False,
+                max_tokens=80,
+                temperature=0.9,
+            )
+            return joke if joke and not joke.startswith("Erreur") else "Je n'ai pas de blague pour l'instant."
+
+        if strategy == "profile":
+            ctx = memory_engine.get_engine().build_personalized_system_prompt()
+            snippet = (ctx or BASE_SYSTEM_PROMPT)[:600].strip()
+            return (
+                "Voici ce que je sais de toi : "
+                + snippet
+                + " Dis-moi si tu veux que je retienne autre chose."
+            )
+
+        if strategy == "news":
+            articles = news.get_top_headlines()
+            return news.format_briefing(articles[:5])
+    except Exception as exc:
+        logger.warning("Réponse rapide échouée (%s): %s", strategy, exc)
+        return None
+    return None
 
 
 def _build_dynamic_system_prompt() -> str:
@@ -2804,7 +2972,7 @@ def _extract_app_name(text: str) -> str:
             break
     text_clean = re.sub(
         r"^(lance(?:-moi)?|ouvre(?:-moi)?|d[ée]marre(?:-moi)?|mets?|ferme(?:-moi)?|"
-        r"quitte(?:-moi)?|arr[êe]te(?:-moi)?|start|exécute|run)\s+",
+        r"quitte(?:-moi)?|arr[êe]te(?:-moi)?|start|exécute|run|joue à|jouer à|joue)\s+",
         "",
         text_clean,
         flags=re.I,
@@ -2814,13 +2982,26 @@ def _extract_app_name(text: str) -> str:
         text_clean = re.sub(rf"\b{word}\b", "", text_clean, flags=re.I)
     noise = [
         "l'application", "le logiciel", "le programme", "le jeu",
-        "s'il te plaît", "stp", "merci", "maintenant", "vite",
+        "s'il te plaît", "stp", "merci", "maintenant", "vite", "pour moi",
         "application", "logiciel", "programme",
+        "ouvre", "lance", "démarre", "demarre", "exécute", "execute", "joue à", "jouer à",
     ]
     lower = text_clean.lower()
     for n in noise:
-        lower = lower.replace(n, "").strip()
-    return lower.strip() or text.strip()
+        lower = re.sub(rf"\b{re.escape(n)}\b", "", lower).strip()
+    lower = re.sub(r"\s+", " ", lower).strip()
+    return lower or text.strip()
+
+
+def _resolve_launch_app(text: str) -> tuple[str, dict | None]:
+    """Extrait et résout le nom d'app depuis l'index scanné."""
+    clean = _extract_app_name(text)
+    if not clean:
+        return "", None
+    entry = apps.find_app(clean, apps.load_apps_index())
+    if entry:
+        return str(entry.get("name") or clean), entry
+    return clean, None
 
 
 def _extract_search_query(text: str) -> str:
@@ -3150,9 +3331,9 @@ def _handle_v20_intent(
         return search_opinions(params.get("topic", text))
 
     if intent == "recherche_academique":
-        from actions.web_research import search_academic
+        from actions.web_research import search_definition_quick
 
-        return search_academic(params.get("topic", text))
+        return search_definition_quick(params.get("topic", text))
 
     if intent == "recherche_web":
         if _wants_doc_output(text) or stream_to_ui:
@@ -3342,7 +3523,12 @@ def _is_current_info_query(text: str) -> bool:
 
 
 def _resolve_intent_for_routing(text: str) -> tuple[str, dict, float]:
-    """Résout l'intent : regex rapide puis détection complète."""
+    """Résout l'intent : stratégie rapide, regex, puis détection complète."""
+    strategy, sparams = _select_answer_strategy(text)
+    if strategy != "llm":
+        logger.info("Quick strategy: %s", strategy)
+        return f"quick_{strategy}", sparams, 0.98
+
     fast = _fast_intent(text)
     if fast:
         intent, params = fast
@@ -3632,13 +3818,21 @@ def _execute_action(intent: str, params: dict, text: str) -> str | None:
                 return "Quelle application veux-tu lancer ?"
             app_names = [a.strip() for a in re.split(r"\bet\b|,|&", app_query) if a.strip()]
             if len(app_names) > 1:
+                resolved = []
                 for name in app_names:
+                    entry = apps.find_app(name, apps.load_apps_index())
+                    resolved.append(str(entry.get("name") or name) if entry else name)
+                for name in resolved:
                     memory_engine.record_app_launch(name)
-                return apps.launch_multiple(app_names)
-            if apps.is_running(app_query):
-                return f"{app_query} est déjà ouvert."
-            memory_engine.record_app_launch(app_query)
-            result = apps.launch(app_query)
+                return apps.launch_multiple(resolved)
+            launch_name, entry = _resolve_launch_app(text if not params.get("app") else params.get("app", ""))
+            if not launch_name:
+                return "Quelle application veux-tu lancer ?"
+            if apps.is_running(launch_name):
+                label = str((entry or {}).get("name") or launch_name)
+                return f"{label} est déjà ouvert."
+            memory_engine.record_app_launch(launch_name)
+            result = apps.launch(launch_name)
             if "introuvable" in result.lower() or "pas trouvé" in result.lower() or "pas pu lancer" in result.lower():
                 site = browser._extract_site_name(text) or app_query
                 if site:
@@ -3681,8 +3875,7 @@ def _execute_action(intent: str, params: dict, text: str) -> str | None:
             return system.screenshot()
 
         if intent == "heure_date":
-            now = datetime.now()
-            return f"Il est {now.strftime('%H:%M')}, le {now.strftime('%d/%m/%Y')}"
+            return _format_datetime_fr()
 
         if intent in ("browser_open_site", "browser_open_url", "ouvrir_site"):
             site = params.get("site") or _extract_site_for_browser(params, text)
@@ -3809,6 +4002,48 @@ def _route_with_intelligence(
     *,
     stream_to_ui: bool = True,
 ) -> str:
+    if intent.startswith("quick_"):
+        strategy = intent.replace("quick_", "", 1)
+        result = _answer_quick_strategy(text, strategy, params)
+        if result:
+            if stream_to_ui:
+                _present_action_result(result)
+            logger.warning("═══ Quick→UI (%s): '%s' ═══", strategy, str(result)[:200])
+            return result
+        intent = "question_libre"
+
+    if intent == "definition_rapide":
+        from actions.web_research import search_definition_quick
+        result = search_definition_quick(params.get("query", text))
+        if stream_to_ui:
+            _present_action_result(result)
+        return result
+
+    if intent == "system_info":
+        strategy = "system"
+        kind = "ram" if re.search(r"\b(ram|mémoire|memoire)\b", text.lower()) else "cpu"
+        if re.search(r"\b(batterie|charge)\b", text.lower()):
+            kind = "battery"
+        result = _answer_quick_strategy(text, strategy, {"kind": kind})
+        if result:
+            if stream_to_ui:
+                _present_action_result(result)
+            return result
+
+    if intent == "conversion":
+        result = _answer_quick_strategy(text, "conversion", {"text": text})
+        if result:
+            if stream_to_ui:
+                _present_action_result(result)
+            return result
+
+    if intent == "profil_utilisateur":
+        result = _answer_quick_strategy(text, "profile", {})
+        if result:
+            if stream_to_ui:
+                _present_action_result(result)
+            return result
+
     if intent in V20_RESEARCH_INTENTS:
         result = _handle_v20_intent(intent, params, text, stream_to_ui=stream_to_ui)
         if not result:
@@ -3882,16 +4117,23 @@ def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
         app_names = [a.strip() for a in re.split(r"\bet\b|,|&", clean) if a.strip()]
 
         if len(app_names) > 1:
+            resolved = []
             for name in app_names:
+                entry = apps.find_app(name, apps.load_apps_index())
+                resolved.append(str(entry.get("name") or name) if entry else name)
+            for name in resolved:
                 memory_engine.record_app_launch(name)
-            result = apps.launch_multiple(app_names)
+            result = apps.launch_multiple(resolved)
         else:
-            query = clean or app_param
-            if apps.is_running(query):
-                result = f"{query} est déjà ouvert."
+            launch_name, entry = _resolve_launch_app(app_param)
+            if not launch_name:
+                launch_name = clean or app_param
+            if apps.is_running(launch_name):
+                label = str((entry or {}).get("name") or launch_name)
+                result = f"{label} est déjà ouvert."
             else:
-                memory_engine.record_app_launch(query)
-                result = apps.launch(query)
+                memory_engine.record_app_launch(launch_name)
+                result = apps.launch(launch_name)
             if "introuvable" in result.lower() or "pas trouvé" in result.lower() or "pas pu lancer" in result.lower():
                 site = browser._extract_site_name(original_text) or query
                 result = browser.open_site(site)
@@ -3936,10 +4178,9 @@ def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
         city = None
         for c in ("nantes", "couëron", "coueron", "paris"):
             if c in original_text.lower():
-                city = c.capitalize()
+                city = "Couëron" if "cou" in c else c.capitalize()
                 break
-        data = weather.get_current(city)
-        return weather.format_for_speech(data)
+        return weather.answer_local(city)
     if intent == "aviation_metar":
         metar_match = re.search(r"METAR\s+[A-Z]{4}\s+.*", original_text.upper())
         if metar_match:
@@ -4172,11 +4413,16 @@ def _dispatch_action(intent: str, params: dict, original_text: str) -> str:
             return calendar_action.get_today_events()
         return calendar_action.get_upcoming()
     if intent == "heure_date":
-        now = datetime.now()
-        return f"Il est {now.strftime('%H:%M')}, nous sommes le {now.strftime('%A %d %B %Y')}."
+        return _format_datetime_fr()
     if intent == "blague":
-        joke, _ = _conversation("Raconte une blague courte en une phrase.", stream_to_ui=False)
-        return joke
+        joke = generate(
+            "Raconte une blague courte en une phrase, en français.",
+            model=MODELS["fast"],
+            stream=False,
+            max_tokens=80,
+            temperature=0.9,
+        )
+        return joke if joke and not joke.startswith("Erreur") else "Pas de blague pour le moment."
     if intent == "memoire":
         memory.extract_from_conversation(original_text)
         return "C'est noté, je m'en souviendrai."

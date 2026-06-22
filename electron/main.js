@@ -167,6 +167,14 @@ function connectWebSocket(retries = 15, port = DEFAULT_WS_PORT) {
         micTrayActive = !!msg.data;
         rebuildTrayMenu();
       }
+      if (msg.type === 'event' && msg.event === 'splash_scan' && splashWindow && !splashWindow.isDestroyed()) {
+        const payload = JSON.stringify(msg.data ?? {});
+        splashWindow.webContents.executeJavaScript(`
+          window.dispatchEvent(new CustomEvent('splash_scan', {
+            detail: ${payload}
+          }));
+        `).catch(() => {});
+      }
       // Relayer le message au renderer (fenêtre principale + splash)
       const targets = [mainWindow, splashWindow].filter(
         (w) => w && !w.isDestroyed()

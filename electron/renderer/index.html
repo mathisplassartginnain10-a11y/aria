@@ -142,7 +142,7 @@
               <div onclick="app.setPrivacyMode('cloud')">☁️ Cloud uniquement</div>
             </div>
           </div>
-          <button id="mic-visual-btn" class="mic-hdr-btn" onclick="app.toggleMic()" title="Micro" type="button">
+          <button id="mic-visual-btn" class="mic-hdr-btn" title="Micro (Ctrl+Shift+A)" type="button">
             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6">
               <rect x="9" y="2" width="6" height="12" rx="3"/>
               <path d="M5 10a7 7 0 0014 0"/>
@@ -210,7 +210,7 @@
               <div id="mic-btn-wrap">
                 <div class="mic-ring" id="mic-ring-1"></div>
                 <div class="mic-ring" id="mic-ring-2"></div>
-                <button id="mic-btn" onclick="app.toggleMic()" class="mic-inp mic-idle" type="button">
+                <button id="mic-btn" class="mic-inp mic-idle" type="button" title="Parler (Ctrl+Shift+A)">
                   <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8">
                     <rect x="9" y="2" width="6" height="12" rx="3"/>
                     <path d="M5 10a7 7 0 0014 0"/>
@@ -778,20 +778,22 @@
         <label class="agent-label">Volume (%)</label>
         <input type="range" id="preset-volume" min="0" max="100" value="50" class="agent-input">
       </div>
-              <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
-                <label class="agent-label">Apps à ouvrir (virgules)</label>
-                <input type="text" id="preset-apps-open" class="agent-input app-autocomplete"
-                  placeholder="Discord, Cursor…" list="apps-datalist"
-                  oninput="app.searchAppsLive(this)">
-              </div>
-              <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
-                <label class="agent-label">Apps à fermer (virgules)</label>
-                <input type="text" id="preset-apps-close" class="agent-input app-autocomplete"
-                  placeholder="Steam, Spotify…" list="apps-datalist"
-                  oninput="app.searchAppsLive(this)">
-              </div>
-              <datalist id="apps-datalist"></datalist>
-              <datalist id="installed-apps-list"></datalist>
+      <div class="preset-section setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
+        <label class="agent-label">Apps à ouvrir</label>
+        <div class="app-tags" id="preset-apps-open-tags" style="display:flex;flex-wrap:wrap;min-height:24px;width:100%"></div>
+        <input type="text" class="agent-input app-autocomplete"
+          placeholder="Rechercher une app..."
+          oninput="app.searchAppsLive(this)"
+          onblur="setTimeout(()=>app.hideAppSuggestions(this), 200)">
+      </div>
+      <div class="preset-section setting-row" style="flex-direction:column;align-items:flex-start;gap:6px;margin-top:10px">
+        <label class="agent-label">Apps à fermer</label>
+        <div class="app-tags" id="preset-apps-close-tags" style="display:flex;flex-wrap:wrap;min-height:24px;width:100%"></div>
+        <input type="text" class="agent-input app-autocomplete"
+          placeholder="Rechercher une app..."
+          oninput="app.searchAppsLive(this)"
+          onblur="setTimeout(()=>app.hideAppSuggestions(this), 200)">
+      </div>
       <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:6px">
         <label class="agent-label">Message de confirmation</label>
         <input type="text" id="preset-message" class="agent-input" placeholder="Mode activé !">
@@ -807,6 +809,10 @@
 
 <!-- Toast container -->
 <div id="toast-container"></div>
+
+<datalist id="apps-datalist"></datalist>
+<datalist id="installed-apps-list"></datalist>
+<datalist id="agent-apps-datalist"></datalist>
 
 <script src="settings-animations.js"></script>
 <script src="app.js"></script>

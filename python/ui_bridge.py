@@ -36,6 +36,9 @@ def _find_free_port(start: int = 9999) -> int:
 _event_handlers: dict[str, list[Callable]] = {}
 # Référence à toutes les connexions WebSocket actives
 _connections: set = set()
+# Callbacks appelés à la première connexion Electron (splash scan, etc.)
+_client_connected_callbacks: list[Callable[[], None]] = []
+_splash_scan_scheduled: bool = False
 # Boucle asyncio du serveur WS
 _loop: asyncio.AbstractEventLoop | None = None
 _pending_finalize_model: str = ""
@@ -71,6 +74,25 @@ def _is_stt_debug() -> bool:
     except Exception:
         _stt_debug = False
     return _stt_debug
+
+
+def on_client_connected(callback: Callable[[], None]) -> None:
+    """Enregistre un callback invoqué à la première connexion WebSocket."""
+    _client_connected_callbacks.append(callback)
+    if _connections:
+        _schedule_client_connected_callbacks()
+
+
+def _schedule_client_connected_callbacks() -> None:
+    global _splash_scan_scheduled
+    if _splash_scan_scheduled or not _client_connected_callbacks:
+        return
+    _splash_scan_scheduled = True
+    for cb in list(_client_connected_callbacks):
+        try:
+            cb()
+        except Exception:
+            logger.exception("Callback client connecté échoué")
 
 
 def emit(event_name: str, data: Any = None) -> None:
@@ -153,6 +175,22 @@ def show_partial_transcription(text: str) -> None:
 def show_final_transcription(text: str) -> None:
     """Affiche la transcription finale."""
     emit("stt_result", text)
+    emit("show_transcription", text)
+
+
+def _on_stt_result(text: str) -> None:
+    """Callback interne STT → Electron."""
+    logger.info("STT résultat → UI: '%s'", text)
+    show_final_transcription(text)
+
+
+def _on_stt_status(status: str, value=None) -> None:
+    """Callback interne statut STT → Electron (complément waveform / erreurs)."""
+    logger.debug("STT status callback: %s", status)
+    if status == "waveform" and value is not None:
+        emit("waveform_data", {"rms": value})
+    elif status == "error":
+        show_toast("Erreur microphone", "error")
 
 
 # ── Fonctions exposées au renderer ────────────────────────────────────────────
@@ -208,17 +246,59 @@ def _ask_spec(text: str, conv_mode: str = 'ecrit', request_id: str = None) -> st
 
 @expose
 def start_mic() -> dict:
+    """Démarre l'écoute du microphone."""
     import stt
-    if not stt.is_listening():
-        stt.start_listening()
-    return {"success": True}
+    import yaml
+    import app_paths
+
+    logger.info("=== start_mic() appelé ===")
+    if stt.is_listening():
+        emit("mic_active", True)
+        return {"success": True, "message": "Micro déjà actif"}
+
+    try:
+        with app_paths.config_path().open("r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        stt_cfg = cfg.get("stt") or {}
+        device_index = stt_cfg.get("device_index")
+        language = stt_cfg.get("language", cfg.get("language", "fr"))
+
+        logger.info("Config STT: device=%s lang=%s", device_index, language)
+
+        stt.start_listening(
+            device_index=device_index,
+            language=language,
+            on_result=_on_stt_result,
+            on_status=_on_stt_status,
+        )
+        emit("mic_active", True)
+        return {"success": True, "message": "Micro démarré"}
+    except Exception as e:
+        logger.error("Erreur start_mic: %s", e, exc_info=True)
+        return {"success": False, "error": str(e)}
 
 
 @expose
 def stop_mic() -> dict:
+    """Arrête l'écoute du microphone."""
     import stt
+
+    logger.info("=== stop_mic() appelé ===")
     stt.stop_listening()
+    emit("mic_active", False)
+    set_status("idle")
     return {"success": True}
+
+
+@expose
+def toggle_mic() -> dict:
+    """Bascule le microphone ON/OFF."""
+    import stt
+
+    logger.info("=== toggle_mic() appelé (listening=%s) ===", stt.is_listening())
+    if stt.is_listening():
+        return stop_mic()
+    return start_mic()
 
 
 @expose
@@ -391,25 +471,31 @@ def scan_apps_with_progress() -> None:
     global _apps_scan_done
     import actions.apps as apps_module
 
-    sources: list[tuple[str, str]] = [
-        ("Registre Windows (Win32)", "registry"),
-        ("Menu Démarrer", "start_menu"),
-        ("Apps Microsoft Store (UWP)", "uwp"),
-        ("Steam & Epic Games", "gaming"),
-        ("Program Files", "program_files"),
+    steps: list[tuple[str, str]] = [
+        ("Scan registre Windows...", "registry"),
+        ("Scan menu Démarrer...", "start_menu"),
+        ("Scan Microsoft Store...", "uwp"),
+        ("Scan Steam et Epic...", "gaming"),
+        ("Scan Program Files...", "program_files"),
+        ("Finalisation de l'index...", "finalize"),
     ]
-    total = len(sources)
+    total = len(steps)
     all_entries: dict[str, dict] = {}
     uwp_map: dict[str, str] = {}
 
-    for i, (label, key) in enumerate(sources):
+    def _emit_progress(step: int, label: str, *, done: bool = False) -> None:
+        pct = 100 if done else int(((step - 1) / total) * 100)
         emit("splash_scan", {
-            "step": i + 1,
+            "step": step,
             "total": total,
-            "label": f"Scan {label}...",
-            "pct": int((i / total) * 100),
+            "label": label,
+            "pct": pct,
             "count": len(all_entries),
+            "done": done,
         })
+
+    for i, (label, key) in enumerate(steps, start=1):
+        _emit_progress(i, label)
         try:
             if key == "registry":
                 apps_module._merge_entries(all_entries, apps_module._scan_registry())
@@ -422,19 +508,17 @@ def scan_apps_with_progress() -> None:
                 apps_module._merge_entries(all_entries, apps_module._scan_gaming())
             elif key == "program_files":
                 apps_module._merge_entries(all_entries, apps_module._scan_program_files())
+            elif key == "finalize":
+                apps_module._save_index(all_entries, uwp_map)
         except Exception as exc:
             logger.warning("Scan %s échoué: %s", label, exc)
 
-    apps_module._save_index(all_entries, uwp_map)
     _apps_scan_done = True
-    emit("splash_scan", {
-        "step": total,
-        "total": total,
-        "label": f"{len(all_entries)} applications trouvées",
-        "pct": 100,
-        "count": len(all_entries),
-        "done": True,
-    })
+    _emit_progress(
+        total,
+        f"{len(all_entries)} applications trouvées",
+        done=True,
+    )
     logger.info("Scan apps terminé: %d apps", len(all_entries))
 
 
@@ -497,21 +581,29 @@ def search_apps(query: str) -> list:
     """Recherche dans l'index d'apps — autocomplete temps réel."""
     from actions.apps import load_apps_index
 
-    apps = load_apps_index()
-    query_lower = (query or "").lower().strip()
-    if not query_lower:
-        return get_apps_index()[:30]
+    idx = load_apps_index()
+    q = (query or "").lower().strip()
+    if not q:
+        return [
+            {
+                "name": v.get("name", k),
+                "type": v.get("type", "unknown"),
+                "key": k,
+            }
+            for k, v in sorted(idx.items(), key=lambda item: str(item[1].get("name", item[0])).lower())
+            if v.get("name")
+        ][:15]
 
     results = []
-    for k, v in apps.items():
-        name = str(v.get("name", ""))
-        if query_lower in k or query_lower in name.lower():
+    for k, v in idx.items():
+        name = str(v.get("name", k))
+        if q in k or q in name.lower():
             results.append({
-                "name": name or k,
-                "type": v.get("type", ""),
+                "name": name,
+                "type": v.get("type", "unknown"),
                 "key": k,
             })
-    return sorted(results, key=lambda x: len(x["name"]))[:20]
+    return sorted(results, key=lambda x: len(x["name"]))[:15]
 
 
 @expose
@@ -641,6 +733,7 @@ async def _handle_connection(websocket) -> None:
     """Gère une connexion WebSocket entrante."""
     _connections.add(websocket)
     logger.info("Electron connecté (total: %d)", len(_connections))
+    _schedule_client_connected_callbacks()
     try:
         async for message in websocket:
             await _handle_message(websocket, message)

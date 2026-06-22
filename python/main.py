@@ -193,16 +193,20 @@ def _on_hotkey(_event=None) -> None:
     if now - _last_hotkey_time < _HOTKEY_DEBOUNCE_S:
         return
     _last_hotkey_time = now
-    stt.toggle()
-    with _mic_lock:
-        _mic_active = stt.is_listening()
-    if _mic_active:
-        sounds.play("activate")
-        ui_bridge.set_status("listening")
-    else:
-        sounds.play("deactivate")
-        ui_bridge.set_status("idle")
-    ui_bridge.notify_mic_state(_mic_active)
+    log = _logger or logging.getLogger(__name__)
+    log.info("Hotkey pressé — toggle micro")
+    try:
+        result = ui_bridge.toggle_mic()
+        with _mic_lock:
+            _mic_active = stt.is_listening()
+        if _mic_active:
+            sounds.play("activate")
+        else:
+            sounds.play("deactivate")
+        if not result.get("success") and result.get("error"):
+            ui_bridge.show_toast(f"Erreur micro: {result['error']}", "error")
+    except Exception as e:
+        log.error("Erreur hotkey: %s", e, exc_info=True)
 
 
 def _start_llamacpp() -> None:
@@ -324,15 +328,21 @@ def main() -> None:
     ui_bridge.start()
     _logger.info("WebSocket serveur démarré")
 
-    def _startup_scan() -> None:
-        """Scan lancé pendant le splash screen."""
-        time.sleep(1.5)
+    def _start_splash_scan() -> None:
+        """Scan lancé une fois Electron connecté au WebSocket."""
+        time.sleep(1.0)
         try:
             ui_bridge.scan_apps_with_progress()
         except Exception:
             _logger.debug("Scan apps splash échoué", exc_info=True)
 
-    threading.Thread(target=_startup_scan, daemon=True, name="ARIA-Splash-Scan").start()
+    ui_bridge.on_client_connected(
+        lambda: threading.Thread(
+            target=_start_splash_scan,
+            daemon=True,
+            name="ARIA-Splash-Scan",
+        ).start()
+    )
 
     try:
         from actions.web_research import warmup_cache

@@ -156,6 +156,7 @@ _record_thread: threading.Thread | None = None
 _record_lock = threading.Lock()
 _transcript_queue: queue.Queue[str] = queue.Queue()
 _responding = threading.Event()
+_stt_callbacks: dict[str, Any] = {"on_result": None, "on_status": None}
 VOICE_AUTO_SEND: bool = str(_config.get("voice_mode", "auto")).lower() in (
     "auto", "conversation", "live",
 )
@@ -227,6 +228,37 @@ def get_audio_level() -> float:
         return _current_rms
 
 
+def _stt_notify_status(status: str, value: Any = None) -> None:
+    """Relaie le statut STT vers l'UI et les callbacks optionnels."""
+    if status == "listening":
+        ui.set_status("listening")
+        ui.notify_mic_state(True)
+    elif status == "transcribing":
+        ui.set_status("transcribing")
+    elif status == "idle":
+        ui.set_status("idle")
+        if not is_listening():
+            ui.notify_mic_state(False)
+    elif status == "error":
+        ui.show_toast("Erreur microphone", toast_type="error")
+        ui.set_status("idle")
+        ui.notify_mic_state(False)
+    elif status == "waveform" and value is not None:
+        ui.update_waveform(float(value))
+
+    cb = _stt_callbacks.get("on_status")
+    if cb:
+        try:
+            if value is not None:
+                cb(status, value)
+            else:
+                cb(status)
+        except TypeError:
+            cb(status)
+        except Exception as exc:
+            logger.debug("on_status callback: %s", exc)
+
+
 def _safe_js(script: str) -> None:
     """Compat — remplacé par ui_bridge WebSocket."""
     del script
@@ -235,6 +267,12 @@ def _safe_js(script: str) -> None:
 def _present_transcription(text: str) -> None:
     """Affiche la transcription dans l'input."""
     ui.show_final_transcription(text)
+    cb = _stt_callbacks.get("on_result")
+    if cb:
+        try:
+            cb(text)
+        except Exception as exc:
+            logger.debug("on_result callback: %s", exc)
 
 
 def _show_partial_transcription(text: str) -> None:
@@ -254,9 +292,17 @@ def _chunk_rms(flat: np.ndarray) -> float:
 
 
 def _maybe_update_waveform(level: float) -> None:
-    """Émet la waveform UI uniquement en mode debug STT."""
-    if STT_DEBUG:
+    """Émet le niveau micro vers l'UI pendant l'écoute."""
+    if _is_recording or STT_DEBUG:
         ui.update_waveform(level)
+        cb = _stt_callbacks.get("on_status")
+        if cb and _is_recording:
+            try:
+                cb("waveform", level)
+            except TypeError:
+                pass
+            except Exception:
+                pass
 
 
 def _waveform_level(flat: np.ndarray) -> float:
@@ -1130,7 +1176,7 @@ def _record_loop_realtime() -> None:
                                     speaking = False
                                     silence_frames = 0
                                     continue
-                                ui.set_status("transcribing")
+                                _stt_notify_status("transcribing")
                                 text = _transcribe_audio(audio_np, actual_rate)
                                 _handle_transcription_result(text)
                             except Exception as exc:
@@ -1156,7 +1202,7 @@ def _record_loop() -> None:
         _record_loop_realtime()
         return
 
-    logger.info("Démarrage _record_loop (spec v17)")
+    logger.info("Démarrage _record_loop (spec v17) — device_index=%s", device_index)
     stream: Any | None = None
     actual_rate = ACTUAL_RATE
     blocksize = ACTUAL_BLOCKSIZE
@@ -1196,6 +1242,7 @@ def _record_loop() -> None:
         )
 
         ui.set_status("listening")
+        _stt_notify_status("listening")
         ui.show_toast(
             f"Micro actif · Whisper {WHISPER_MODEL} ({actual_rate}Hz)",
             toast_type="info",
@@ -1293,7 +1340,7 @@ def _record_loop() -> None:
                                         "=== STT DIAGNOSTIC ===\nFrames: %d, durée: %.2fs",
                                         len(buffer), len(buffer) * blocksize / actual_rate,
                                     )
-                                ui.set_status("transcribing")
+                                _stt_notify_status("transcribing")
                                 text = _transcribe_audio(audio_np, actual_rate)
                                 _handle_transcription_result(text)
                             except Exception as exc:
@@ -1331,53 +1378,77 @@ def is_listening() -> bool:
     return _record_thread is not None and _record_thread.is_alive()
 
 
-def start_listening() -> None:
-    """Démarre le pipeline STT. Ignore si déjà actif."""
-    global _record_thread
+def start_listening(
+    device_index: int | None = None,
+    language: str | None = None,
+    on_result=None,
+    on_status=None,
+) -> None:
+    """Démarre le pipeline STT."""
+    global _record_thread, STT_DEVICE_INDEX, STT_LANGUAGE
+
+    logger.info("=== start_listening() appelé ===")
+    logger.info(
+        "Backend configuré: %s, modèle chargé: %s",
+        _active_backend or _effective_backend(),
+        _whisper_model is not None,
+    )
+
+    if device_index is not None:
+        STT_DEVICE_INDEX = int(device_index)
+    if language:
+        STT_LANGUAGE = str(language)
+    if on_result is not None:
+        _stt_callbacks["on_result"] = on_result
+    if on_status is not None:
+        _stt_callbacks["on_status"] = on_status
 
     with _record_lock:
         if _record_thread is not None and _record_thread.is_alive():
-            logger.warning("STT déjà actif — démarrage ignoré (évite double instance)")
-            return
+            logger.warning("Déjà en écoute — arrêt puis redémarrage")
+            _stop_event.set()
+            _record_thread.join(timeout=3)
+            _record_thread = None
+            time.sleep(0.3)
 
         _stop_event.clear()
 
-        def _bootstrap() -> None:
-            try:
-                _load_whisper_model()
-                logger.info(
-                    "Whisper prêt pour STT: %s sur %s",
-                    WHISPER_MODEL,
-                    _whisper_device,
-                )
-            except Exception as exc:
-                logger.error("Whisper non chargé: %s", exc)
-                ui.show_toast(f"Whisper indisponible: {exc}", toast_type="error")
+        try:
+            _load_whisper_model()
+            logger.info(
+                "Whisper prêt pour STT: %s sur %s (backend=%s)",
+                WHISPER_MODEL,
+                _whisper_device,
+                _active_backend or _effective_backend(),
+            )
+        except Exception as exc:
+            logger.error("AUCUN backend STT disponible: %s", exc, exc_info=True)
+            ui.show_toast(f"Whisper indisponible: {exc}", toast_type="error")
+            _stt_notify_status("error")
+            return
 
-        threading.Thread(target=_bootstrap, daemon=True, name="STT-WhisperBootstrap").start()
         sounds.play("listening")
 
         _record_thread = threading.Thread(
             target=_record_loop,
             daemon=True,
-            name="STT-RecordLoop",
+            name="ARIA-STT-RecordLoop",
         )
         _record_thread.start()
-        logger.info(
-            "Listening for speech… (backend=%s, modèle=%s)",
-            STT_BACKEND,
-            _config.get("stt", {}).get("model", WHISPER_MODEL),
-        )
+        logger.info("Thread STT démarré: %s", _record_thread.name)
+        _stt_notify_status("listening")
 
 
 def stop_listening() -> None:
     """Arrête l'écoute sans détruire l'instance PyAudio."""
     global _record_thread
 
+    logger.info("=== stop_listening() appelé ===")
     _stop_event.set()
     if _record_thread is not None and _record_thread.is_alive():
         _record_thread.join(timeout=5)
     _record_thread = None
+    _stt_notify_status("idle")
     logger.info("STT arrêté")
 
 

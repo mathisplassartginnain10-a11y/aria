@@ -668,49 +668,162 @@ def load_apps_index() -> dict[str, dict]:
     return result
 
 
+def _levenshtein(a: str, b: str) -> int:
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cost = 0 if ca == cb else 1
+            cur.append(min(cur[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost))
+        prev = cur
+    return prev[-1]
+
+
+def _normalize_match_text(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
+
+
 def find_app(query: str, apps_index: dict[str, dict] | None = None) -> dict | None:
-    """Recherche une app dans l'index (clé ou nom affiché, correspondance partielle)."""
+    """Recherche une app dans l'index — exact, partiel, mots, Levenshtein."""
     apps = apps_index if apps_index is not None else load_apps_index()
     if not apps or not query:
         return None
 
-    q = query.lower().strip()
-    q = re.sub(
-        r"^(lance(?:-moi)?|ouvre(?:-moi)?|d[ée]marre(?:-moi)?|mets?|ferme(?:-moi)?|quitte)\s+",
-        "",
-        q,
-        flags=re.I,
-    ).strip()
-    q = re.sub(r"\s+en route$", "", q).strip()
+    q = _normalize_launch_query(query)
     if not q:
         return None
 
-    if q in apps:
-        return apps[q]
-
-    for entry in apps.values():
-        if entry.get("name", "").lower() == q:
-            return entry
+    q_compact = _normalize_match_text(q)
+    q_words = set(re.findall(r"[a-z0-9]+", q))
 
     best: dict | None = None
     best_score = 0
+
     for key, entry in apps.items():
-        name = entry.get("name", "").lower()
-        if q == key or q == name:
+        name = str(entry.get("name", "")).strip()
+        name_lower = name.lower()
+        key_lower = key.lower()
+        name_compact = _normalize_match_text(name_lower)
+        key_compact = _normalize_match_text(key_lower)
+
+        score = 0
+        if q == key_lower or q == name_lower:
             return entry
-        if q in key or q in name or key in q or name in q:
-            score = max(len(q), len(key), len(name))
-            if score > best_score:
-                best_score = score
-                best = entry
-    return best
+        if q_compact and (q_compact == key_compact or q_compact == name_compact):
+            score = 100
+        elif q_compact and (q_compact in key_compact or q_compact in name_compact):
+            score = 90 - abs(len(name_compact) - len(q_compact))
+        elif key_compact in q_compact or name_compact in q_compact:
+            score = 80 - abs(len(name_compact) - len(q_compact))
+        else:
+            entry_words = set(re.findall(r"[a-z0-9]+", name_lower))
+            common = q_words & entry_words
+            if common:
+                score = 50 + 10 * len(common)
+            elif q_compact and name_compact:
+                dist = _levenshtein(q_compact, name_compact)
+                max_len = max(len(q_compact), len(name_compact), 1)
+                ratio = 1 - dist / max_len
+                if ratio >= 0.72:
+                    score = int(35 * ratio)
+
+        if score > best_score:
+            best_score = score
+            best = entry
+
+    return best if best_score >= 35 else None
+
+
+def search_apps_index(query: str, limit: int = 20) -> list[dict]:
+    """Recherche floue dans l'index pour l'autocomplete UI."""
+    apps = load_apps_index()
+    if not query or not str(query).strip():
+        return [
+            {"name": v.get("name", k), "type": v.get("type", ""), "key": k}
+            for k, v in sorted(apps.items(), key=lambda item: item[1].get("name", item[0]).lower())
+            if v.get("name")
+        ][:limit]
+
+    q = _normalize_launch_query(str(query))
+    q_words = set(re.findall(r"[a-z0-9]+", q))
+    scored: list[tuple[int, str, dict]] = []
+
+    for key, entry in apps.items():
+        name = str(entry.get("name", "")).strip()
+        if not name:
+            continue
+        name_lower = name.lower()
+        key_lower = key.lower()
+        score = 0
+        if q == key_lower or q == name_lower:
+            score = 100
+        elif q in key_lower or q in name_lower:
+            score = 85
+        elif key_lower in q or name_lower in q:
+            score = 75
+        else:
+            common = q_words & set(re.findall(r"[a-z0-9]+", name_lower))
+            if common:
+                score = 40 + 15 * len(common)
+            else:
+                dist = _levenshtein(_normalize_match_text(q), _normalize_match_text(name_lower))
+                if dist <= 3:
+                    score = 30 - dist
+
+        if score > 0:
+            scored.append((score, name_lower, entry))
+
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    results: list[dict] = []
+    for score, _sort_name, entry in scored[:limit]:
+        if not entry.get("name"):
+            continue
+        key = ""
+        for k, v in apps.items():
+            if v is entry:
+                key = k
+                break
+        results.append({
+            "name": entry.get("name", key),
+            "type": entry.get("type", ""),
+            "key": key,
+        })
+    return results
 
 
 def scan_and_save_apps() -> dict[str, dict]:
     """Scan complet + persistance — utilisé si l'index est absent ou obsolète."""
-    entries, uwp = scan_all_apps()
-    _save_index(entries, uwp)
-    return entries
+    all_entries: dict[str, dict] = {}
+    uwp_map: dict[str, str] = {}
+
+    _merge_entries(all_entries, _scan_registry())
+    _merge_entries(all_entries, _scan_start_menu())
+    uwp_apps, uwp_map = _scan_uwp()
+    _merge_entries(all_entries, uwp_apps)
+    _merge_entries(all_entries, _scan_gaming())
+    _merge_entries(all_entries, _scan_program_files())
+    _save_index(all_entries, uwp_map)
+    return all_entries
+
+
+def scan_all_apps() -> tuple[dict[str, dict], dict[str, str]]:
+    """Scan complet sans événements UI."""
+    all_entries: dict[str, dict] = {}
+    uwp_map: dict[str, str] = {}
+
+    _merge_entries(all_entries, _scan_registry())
+    _merge_entries(all_entries, _scan_start_menu())
+    uwp_apps, uwp_map = _scan_uwp()
+    _merge_entries(all_entries, uwp_apps)
+    _merge_entries(all_entries, _scan_gaming())
+    _merge_entries(all_entries, _scan_program_files())
+    return all_entries, uwp_map
 
 
 def _resolve_entry_path(entry: dict) -> str | None:
@@ -916,11 +1029,65 @@ def _search_apps_index(app_name: str) -> str | None:
     return None
 
 
+def _lnk_target_path(lnk_path: str) -> str | None:
+    """Lit la cible d'un raccourci .lnk."""
+    try:
+        import win32com.client
+
+        shell = win32com.client.Dispatch("WScript.Shell")
+        shortcut = shell.CreateShortCut(lnk_path)
+        return str(shortcut.Targetpath or "").strip() or None
+    except Exception:
+        return None
+
+
+def _is_explorer_path(path: str) -> bool:
+    """True si le chemin ouvrirait l'explorateur ou un dossier au lieu d'une app."""
+    return not _is_safe_to_launch(path)
+
+
+def _is_safe_to_launch(path: str) -> bool:
+    """
+    Vérifie qu'un chemin peut être lancé sans ouvrir l'explorateur ni un dossier.
+    Appelée avant chaque subprocess.Popen / os.startfile / ShellExecute.
+    """
+    if not path or not str(path).strip():
+        return False
+    p = str(path).strip()
+    pl = p.lower()
+    if "explorer.exe" in pl:
+        return False
+    if pl.startswith("shell:"):
+        return "appsfolder" in pl
+    if pl.endswith(":") and not pl.endswith("::"):
+        return True
+    if os.path.isdir(p):
+        return False
+    if pl.endswith(".lnk"):
+        if not os.path.isfile(p):
+            return False
+        target = _lnk_target_path(p)
+        if not target:
+            return False
+        if os.path.isdir(target):
+            return False
+        if "explorer.exe" in target.lower():
+            return False
+        return target.lower().endswith((".exe", ".msc", ".cpl", ".bat", ".cmd"))
+    if os.path.isfile(p):
+        return pl.endswith((".exe", ".msc", ".cpl", ".bat", ".cmd"))
+    if os.path.sep not in p and (not os.path.altsep or os.path.altsep not in p):
+        return pl.endswith(".exe") or bool(re.fullmatch(r"[a-z0-9._-]+", pl))
+    return False
+
+
 def _target_is_launchable(target: str) -> bool:
+    if _is_explorer_path(target):
+        return False
     if target.startswith("shell:") or target.endswith(":"):
         return True
     if target.endswith(".lnk"):
-        return os.path.exists(target)
+        return os.path.isfile(target)
     if (
         os.path.sep not in target
         and (not os.path.altsep or os.path.altsep not in target)
@@ -929,7 +1096,7 @@ def _target_is_launchable(target: str) -> bool:
         return True
     if target.endswith(".msc") or target.endswith(".cpl"):
         return True
-    return os.path.exists(target)
+    return os.path.isfile(target)
 
 
 def resolve_known(name: str) -> str | None:
@@ -999,7 +1166,7 @@ def _is_explorer_launch(exe: str) -> bool:
 def _normalize_launch_query(app_name: str) -> str:
     name = app_name.lower().strip()
     name = re.sub(
-        r"^(lance(?:-moi)?|ouvre(?:-moi)?|d[ée]marre(?:-moi)?|mets?|start|exécute|run)\s+",
+        r"^(lance(?:-moi)?|ouvre(?:-moi)?|d[ée]marre(?:-moi)?|mets?|start|exécute|run|joue à|jouer à|joue)\s+",
         "",
         name,
         flags=re.I,
@@ -1015,9 +1182,17 @@ def _normalize_launch_query(app_name: str) -> str:
         "merci",
         "maintenant",
         "vite",
+        "pour moi",
         "application",
         "logiciel",
         "programme",
+        "le",
+        "la",
+        "les",
+        "un",
+        "une",
+        "des",
+        "moi",
     ]
     for n in noise:
         name = name.replace(n, "").strip()
@@ -1033,10 +1208,8 @@ def _launch_exe_direct(exe_path: str, app_name: str) -> bool:
     if not exe_path:
         return False
     resolved = _resolve_path_candidate(exe_path) or exe_path
-    if not resolved or not os.path.exists(resolved):
-        return False
-    if _is_explorer_launch(resolved):
-        logger.warning("Bloqué: tentative d'ouvrir explorer.exe pour '%s'", app_name)
+    if not resolved or not _is_safe_to_launch(resolved):
+        logger.warning("Bloqué: chemin non sûr pour '%s' → %s", app_name, resolved)
         return False
     try:
         subprocess.Popen(
@@ -1052,7 +1225,8 @@ def _launch_exe_direct(exe_path: str, app_name: str) -> bool:
 
 
 def _launch_lnk(lnk_path: str) -> bool:
-    if not lnk_path or not os.path.exists(lnk_path):
+    if not lnk_path or not _is_safe_to_launch(lnk_path):
+        logger.warning("Bloqué: raccourci non sûr — %s", lnk_path)
         return False
     try:
         import win32api
@@ -1078,15 +1252,15 @@ def _launch_lnk(lnk_path: str) -> bool:
 
 
 def _launch_shell_apps_folder(app_id: str) -> bool:
-    """Active une app via shell:AppsFolder (UWP / menu Démarrer)."""
+    """Active une app UWP via shell:AppsFolder — sans explorer.exe."""
     if not app_id:
         return False
+    uri = f"shell:AppsFolder\\{app_id}"
+    if not _is_safe_to_launch(uri):
+        return False
     try:
-        subprocess.Popen(
-            ["explorer.exe", f"shell:AppsFolder\\{app_id}"],
-            creationflags=CREATE_NO_WINDOW,
-        )
-        logger.info("Lancé via AppUserModelId: %s", app_id)
+        os.startfile(uri)
+        logger.info("Lancé via shell:AppsFolder: %s", app_id)
         return True
     except Exception as exc:
         logger.debug("shell:AppsFolder échoué %s: %s", app_id, exc)
@@ -1232,6 +1406,8 @@ def _launch_epic_game(app_info: dict) -> bool:
     name = str(app_info.get("name") or "")
     if path and _launch_exe_direct(path, name):
         return True
+    if name and _launch_epic_by_name(name):
+        return True
     epic_exe = _find_epic_launcher()
     if epic_exe:
         try:
@@ -1239,6 +1415,59 @@ def _launch_epic_game(app_info: dict) -> bool:
             return True
         except Exception:
             pass
+    return False
+
+
+def _find_epic_game_exe(game_name: str) -> str | None:
+    """Cherche le LaunchExecutable dans les manifests Epic."""
+    import json
+
+    manifest_dir = (
+        Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData"))
+        / "Epic"
+        / "EpicGamesLauncher"
+        / "Data"
+        / "Manifests"
+    )
+    if not manifest_dir.is_dir():
+        return None
+
+    query = _normalize_match_text(game_name)
+    best: str | None = None
+    best_score = 0
+
+    for item_file in manifest_dir.glob("*.item"):
+        try:
+            data = json.loads(item_file.read_text(encoding="utf-8", errors="ignore"))
+            display = str(data.get("DisplayName") or "")
+            display_compact = _normalize_match_text(display)
+            score = 0
+            if query and display_compact:
+                if query == display_compact:
+                    score = 100
+                elif query in display_compact or display_compact in query:
+                    score = 80
+            if score <= 0:
+                continue
+            install = str(data.get("InstallLocation") or "").strip()
+            launch_exe = str(data.get("LaunchExecutable") or "").strip()
+            if not install or not launch_exe:
+                continue
+            full = os.path.join(install, launch_exe)
+            if os.path.isfile(full) and not _is_explorer_path(full):
+                if score > best_score:
+                    best_score = score
+                    best = full
+        except Exception:
+            continue
+    return best
+
+
+def _launch_epic_by_name(game_name: str) -> bool:
+    exe = _find_epic_game_exe(game_name)
+    if exe and _launch_exe_direct(exe, game_name):
+        logger.info("Lancé via manifest Epic: %s → %s", game_name, exe)
+        return True
     return False
 
 
@@ -1272,7 +1501,10 @@ def _launch_via_path_search(app_name: str) -> bool:
                     continue
                 if f.lower() == "explorer.exe":
                     continue
-                if any(kw in f.lower() for kw in ("unins", "setup", "install", "update", "crash")):
+                if any(
+                    kw in f.lower()
+                    for kw in ("unins", "setup", "install", "update", "crash", "helper", "updater")
+                ):
                     continue
                 fname = (
                     f.lower()
@@ -1330,7 +1562,7 @@ def _launch_via_start_apps(app_name: str) -> bool:
 
 
 def _launch_resolved_path(path: str, label: str) -> bool:
-    if not path:
+    if not path or not _is_safe_to_launch(path):
         return False
     if path.startswith("shell:"):
         return _launch_shell_uri(path)
@@ -1357,27 +1589,32 @@ def _launch_resolved_path(path: str, label: str) -> bool:
 
 
 def _launch_from_entry(app: dict) -> bool:
+    """Lance depuis une entrée d'index — exe → lnk → UWP."""
     name = str(app.get("name", ""))
     path = str(app.get("path") or "").strip()
     app_type = str(app.get("type") or "").lower()
 
-    if path.startswith("shell:"):
-        return _launch_shell_uri(path)
-
-    if app_type == "uwp":
-        if path and _launch_shell_uri(path):
+    if path.lower().endswith(".exe") and os.path.isfile(path):
+        if _launch_exe_direct(path, name):
             return True
-        return _launch_uwp("", name) or _launch_via_start_apps(name)
 
     if path.endswith(".lnk") or app_type in ("start_menu", "lnk"):
-        return _launch_lnk(path)
+        if path and _launch_lnk(path):
+            return True
 
-    if app_type == "gaming":
+    if app_type == "uwp" or path.startswith("shell:"):
+        if path and _launch_shell_uri(path):
+            return True
+        if _launch_via_start_apps(name):
+            return True
+        return _launch_uwp("", name)
+
+    if app_type in ("steam_game", "steam") or "steam" in app_type:
         if path and _launch_resolved_path(path, name):
             return True
         return _launch_steam_game(name)
 
-    if "epic" in name.lower() or "fortnite" in name.lower():
+    if app_type in ("epic", "gaming") or "epic" in app_type:
         if _launch_epic_game(app):
             return True
 
@@ -1386,61 +1623,100 @@ def _launch_from_entry(app: dict) -> bool:
     return False
 
 
+def _rescan_index_async(timeout: float = 35.0) -> dict[str, dict] | None:
+    """Re-scan complet en thread daemon — attend jusqu'à timeout pour le résultat."""
+    holder: dict[str, dict] = {}
+    done = threading.Event()
+
+    def _run() -> None:
+        try:
+            holder["index"] = scan_and_save_apps()
+        except Exception as exc:
+            logger.warning("Re-scan apps échoué: %s", exc)
+        finally:
+            done.set()
+
+    threading.Thread(target=_run, daemon=True, name="ARIA-AppsRescan").start()
+    done.wait(timeout=timeout)
+    return holder.get("index")
+
+
 def launch(app_name: str) -> str:
-    """Lance une application Windows — hiérarchie complète, jamais l'explorateur de fichiers."""
+    """Lance une application Windows — hiérarchie stricte, jamais l'explorateur."""
     logger.info("launch('%s')", app_name)
     query = _normalize_launch_query(app_name)
     if not query:
         return "Quelle application veux-tu lancer ?"
 
+    def _success(label: str, suffix: str = "") -> str:
+        memory.remember("context.last_app_launched", label)
+        return f"{label} lancé ✓{suffix}"
+
+    # 1 — Exe / lnk / UWP depuis l'index local
     app = find_app(query)
     if app and _launch_from_entry(app):
-        label = str(app.get("name") or query)
-        memory.remember("context.last_app_launched", label)
-        return f"{label} lancé ✓"
+        return _success(str(app.get("name") or query))
 
+    # 2 — LNK menu Démarrer (si absent de l'index)
+    start_menu = _search_start_menu(query)
+    if start_menu and _launch_lnk(start_menu):
+        return _success(query)
+
+    # 3 — UWP via Get-StartApps
+    if _launch_via_start_apps(query):
+        return _success(query)
+
+    # 4 — URI schemes
     if _launch_via_uri(query):
-        memory.remember("context.last_app_launched", query)
-        return f"{query} lancé ✓"
+        return _success(query)
 
+    # Alias connus
     known = _resolve_app(query)
     if known and _launch_resolved_path(known, query):
-        memory.remember("context.last_app_launched", query)
-        return f"{query} lancé ✓"
+        return _success(query)
 
-    if _launch_via_start_apps(query):
-        memory.remember("context.last_app_launched", query)
-        return f"{query} lancé ✓"
-
-    if _launch_via_path_search(query):
-        memory.remember("context.last_app_launched", query)
-        return f"{query} trouvé et lancé ✓"
-
+    # 5 — Steam
     if _launch_steam_game(query):
-        memory.remember("context.last_app_launched", query)
-        return f"{query} lancé via Steam ✓"
+        return _success(query, " (Steam)")
 
+    # Epic manifests
+    if _launch_epic_by_name(query):
+        return _success(query, " (Epic)")
+
+    # 6 — Recherche Program Files avec scoring
+    if _launch_via_path_search(query):
+        return _success(query, " (trouvé sur le disque)")
+
+    # 7 — PowerShell Start-Process (dernier recours)
     if _launch_via_powershell_start(query):
-        memory.remember("context.last_app_launched", query)
-        return f"{query} lancé ✓"
+        return _success(query)
 
-    logger.info("App '%s' non trouvée — relance scan complet", query)
-    new_index = scan_and_save_apps()
-    app = find_app(query, new_index)
-    if app and _launch_from_entry(app):
-        label = str(app.get("name") or query)
-        memory.remember("context.last_app_launched", label)
-        return f"{label} lancé ✓ (trouvé après re-scan)"
+    # 8 — Re-scan complet + retry une fois
+    logger.info("App '%s' non trouvée — re-scan index", query)
+    new_index = _rescan_index_async()
+    if new_index:
+        app = find_app(query, new_index)
+        if app and _launch_from_entry(app):
+            return _success(str(app.get("name") or query), " (après re-scan)")
+
+        if _launch_via_start_apps(query):
+            return _success(query, " (après re-scan)")
+
+        if _launch_via_uri(query):
+            return _success(query, " (après re-scan)")
+
+        if _launch_steam_game(query):
+            return _success(query, " (Steam, après re-scan)")
+
+        if _launch_epic_by_name(query):
+            return _success(query, " (Epic, après re-scan)")
+
+        if _launch_via_path_search(query):
+            return _success(query, " (trouvé après re-scan)")
 
     registry_path = _find_in_registry(query)
     if registry_path and _launch_exe_direct(registry_path, query):
-        memory.remember("context.last_app_launched", query)
-        return f"{query} lancé ✓"
-
-    start_menu = _search_start_menu(query)
-    if start_menu and _launch_lnk(start_menu):
-        memory.remember("context.last_app_launched", query)
-        return f"{query} lancé ✓"
+        return _success(query)
 
     return (
         f"Je n'ai pas pu lancer '{app_name}'.\n"
@@ -1838,18 +2114,6 @@ def _save_index(all_entries: dict[str, dict], uwp: dict[str, str] | None = None)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
-
-
-def scan_all_apps() -> tuple[dict[str, dict], dict[str, str]]:
-    """Scan complet sans événements UI."""
-    all_entries: dict[str, dict] = {}
-    _merge_entries(all_entries, _scan_registry())
-    _merge_entries(all_entries, _scan_start_menu())
-    uwp_apps, uwp_map = _scan_uwp()
-    _merge_entries(all_entries, uwp_apps)
-    _merge_entries(all_entries, _scan_gaming())
-    _merge_entries(all_entries, _scan_program_files())
-    return all_entries, uwp_map
 
 
 def focus(app_name: str) -> str:

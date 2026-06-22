@@ -128,9 +128,38 @@ def get_hourly(city: str | None = None) -> dict:
 def format_for_speech(data: dict) -> str:
     if "error" in data:
         return data["error"]
+    return format_natural(data)
+
+
+def format_natural(data: dict) -> str:
+    """Une phrase naturelle en français pour le chat vocal/écrit."""
+    if "error" in data:
+        return str(data["error"])
+    city = data.get("city", DEFAULT_CITY)
+    temp = float(data.get("temp", 0))
+    feels = float(data.get("feels_like", temp))
+    desc = str(data.get("description", "conditions variables")).capitalize()
+    wind = float(data.get("wind", 0))
+    humidity = int(data.get("humidity", 0))
+
+    rain_hint = ""
+    dl = desc.lower()
+    if any(w in dl for w in ("pluie", "averse", "orage", "bruine")):
+        rain_hint = " Il risque de pleuvoir."
+    elif any(w in dl for w in ("soleil", "clair", "ensoleill")):
+        rain_hint = " Pas de pluie prévue pour l'instant."
+
+    if abs(feels - temp) >= 2:
+        return (
+            f"À {city}, il fait {temp:.0f}°C (ressenti {feels:.0f}°C), {desc.lower()}. "
+            f"Vent autour de {wind:.0f} m/s, humidité {humidity}%.{rain_hint}"
+        )
     return (
-        f"À {data['city']}, il fait {data['temp']:.0f} degrés, "
-        f"ressenti {data['feels_like']:.0f} degrés. "
-        f"{data['description'].capitalize()}. "
-        f"Vent {data['wind']:.0f} mètres par seconde, humidité {data['humidity']}%."
+        f"À {city}, il fait {temp:.0f}°C, {desc.lower()}. "
+        f"Vent {wind:.0f} m/s, humidité {humidity}%.{rain_hint}"
     )
+
+
+def answer_local(city: str | None = None) -> str:
+    """Réponse météo locale en une phrase (wttr.in / OWM)."""
+    return format_natural(get_current(city))

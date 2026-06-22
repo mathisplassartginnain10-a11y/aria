@@ -211,37 +211,39 @@ def activate(key: str) -> str:
         dispo = ", ".join(merged.keys())
         return f"Mode « {key} » introuvable. Disponibles : {dispo}."
 
+    apps_index = apps.load_apps_index()
     new_open = _as_app_list(preset.get("apps_open"))
     new_open_lower = {a.lower() for a in new_open}
 
-    # Fermetures : apps_close explicites + apps ouvertes par le mode précédent
-    # qui ne font pas partie du nouveau mode (transition propre).
     to_close = _as_app_list(preset.get("apps_close"))
     for app in _opened_by_mode():
         if app.lower() not in new_open_lower and app not in to_close:
             to_close.append(app)
     for app in to_close:
         try:
-            entry = apps.find_app(app)
-            target = entry["name"] if entry else app
-            apps.close(target)
+            entry = apps.find_app(app, apps_index)
+            if not entry:
+                logger.warning("Preset close: app '%s' introuvable dans l'index", app)
+                continue
+            apps.close(str(entry.get("name") or app))
         except Exception:
             logger.debug("Fermeture %s impossible", app, exc_info=True)
 
-    # Ouvertures (avec retour sur ce qui a réellement démarré).
     opened_ok: list[str] = []
     failed: list[str] = []
     for app in new_open:
         try:
-            entry = apps.find_app(app)
+            entry = apps.find_app(app, apps_index)
             if not entry:
+                logger.warning("Preset open: app '%s' introuvable dans l'index", app)
                 failed.append(app)
                 continue
-            res = apps.launch(entry["name"])
+            label = str(entry.get("name") or app)
+            res = apps.launch(label)
         except Exception:
             res = "erreur"
+            label = app
             logger.debug("Lancement %s impossible", app, exc_info=True)
-        label = entry["name"] if entry else app
         (opened_ok if "lancé" in res.lower() else failed).append(label)
 
     if preset.get("volume") not in (None, ""):

@@ -242,17 +242,76 @@ function waitForBackend() {
 }
 
 function setupEventListeners() {
+  // Boutons micro (sans onclick HTML — évite double toggle)
+  const micBtn = document.getElementById('mic-btn');
+  if (micBtn && !micBtn._ariaMicBound) {
+    micBtn._ariaMicBound = true;
+    micBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      toggleMic();
+    });
+  } else if (!micBtn) {
+    console.warn('[ARIA] Bouton #mic-btn introuvable dans le DOM');
+  }
+
+  const micHdrBtn = document.getElementById('mic-visual-btn');
+  if (micHdrBtn && !micHdrBtn._ariaMicBound) {
+    micHdrBtn._ariaMicBound = true;
+    micHdrBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      toggleMic();
+    });
+  }
+
+  if (!document.body._ariaMicKeyBound) {
+    document.body._ariaMicKeyBound = true;
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
+        e.preventDefault();
+        toggleMic();
+      }
+    });
+  }
+
+  api.on('mic_state', (active) => {
+    console.log('[ARIA] mic_state:', active);
+    setMicState(!!active);
+  });
+
+  api.on('mic_active', (active) => {
+    console.log('[ARIA] mic_active:', active);
+    setMicState(!!active);
+  });
+
   // Résultat STT (transcription vocale)
   api.on('stt_result', (text) => {
+    console.log('[ARIA] STT résultat:', text);
     const input = document.getElementById('text-input');
     if (!input) return;
     state._injectingSTT = true;
     input.value = text;
+    input.style.color = '';
     input.dispatchEvent(new Event('input'));
     state._injectingSTT = false;
     input.focus();
     if (state.conversationMode === 'vocal') {
       startVocalCountdown(text);
+    }
+    // En mode écrit, voice_mode=auto envoie déjà côté Python (llm.ask)
+  });
+
+  api.on('show_transcription', (text) => {
+    const input = document.getElementById('text-input');
+    if (input) {
+      input.value = text;
+      input.style.color = '';
+      input.dispatchEvent(new Event('input'));
+    }
+  });
+
+  api.on('waveform_data', (data) => {
+    if (data && typeof data.rms === 'number') {
+      updateWaveform(data.rms);
     }
   });
 
@@ -345,6 +404,14 @@ function setupEventListeners() {
   api.on('error', (text) => {
     showToast(text || 'Erreur', 'error');
     setStatus('idle');
+  });
+
+  document.getElementById('messages')?.addEventListener('click', (e) => {
+    const link = e.target.closest('a.md-link');
+    if (link?.dataset?.url) {
+      e.preventDefault();
+      window.ARIA?.openExternal?.(link.dataset.url);
+    }
   });
 }
 
@@ -1105,26 +1172,54 @@ function cancelVocalCountdown() {
 
 // ── Micro ─────────────────────────────────────────────────────────────────────
 
+let _micToggling = false;
+
 async function toggleMic() {
-  if (state.micActive) {
-    state.micActive = false;
-    state.micPaused = true;
-    await api.call('stop_mic');
-    setMicState('idle');
-  } else {
-    state.micActive = true;
-    state.micPaused = false;
-    SoundFX.play('start');
-    await api.call('start_mic');
-    setMicState('listening');
+  if (_micToggling) return;
+  _micToggling = true;
+  console.log('[ARIA] toggleMic() appelé, actif=', state.micActive);
+  try {
+    const result = await api.call('toggle_mic');
+    console.log('[ARIA] toggle_mic résultat:', result);
+    if (result && result.success === false && result.error) {
+      showToast('Erreur micro: ' + result.error, 'error');
+    }
+  } catch (e) {
+    console.error('[ARIA] Erreur toggleMic:', e);
+    showToast('Erreur microphone', 'error');
+  } finally {
+    _micToggling = false;
   }
 }
 
-function setMicState(s) {
-  const btn = document.getElementById('mic-btn');
-  if (!btn) return;
-  btn.classList.remove('mic-idle', 'mic-listening', 'mic-speaking-detected');
-  btn.classList.add(`mic-${s}`);
+function setMicState(active) {
+  const isActive = !!active;
+  state.micActive = isActive;
+  state.micPaused = !isActive;
+
+  const micBtn = document.getElementById('mic-btn');
+  const micHdrBtn = document.getElementById('mic-visual-btn');
+
+  if (micBtn) {
+    micBtn.classList.remove('mic-idle', 'mic-listening', 'mic-speaking-detected');
+    micBtn.classList.add(isActive ? 'mic-listening' : 'mic-idle');
+    micBtn.title = isActive ? 'Arrêter le micro (Ctrl+Shift+A)' : 'Parler (Ctrl+Shift+A)';
+    if (!isActive) {
+      micBtn.style.transform = '';
+    }
+  }
+
+  if (micHdrBtn) {
+    micHdrBtn.classList.toggle('active', isActive);
+  }
+
+  if (isActive) {
+    setStatus('listening');
+    showToast('🎤 Micro actif — parle maintenant', 'info');
+  } else if (state._currentStatus === 'listening' || state._currentStatus === 'transcribing') {
+    setStatus('idle');
+    showToast('🔇 Micro arrêté', 'info');
+  }
 }
 
 function updateWaveform(rms) {
@@ -2129,8 +2224,8 @@ async function openPresetEditorImpl(presetId) {
       document.getElementById('preset-icon-input').value = icon;
       document.getElementById('preset-name-input').value = preset.name || preset.label || presetId;
       document.getElementById('preset-volume').value = preset.volume ?? 50;
-      document.getElementById('preset-apps-open').value = (preset.apps_open || []).join(', ');
-      document.getElementById('preset-apps-close').value = (preset.apps_close || []).join(', ');
+      setPresetAppTags('preset-apps-open-tags', preset.apps_open || []);
+      setPresetAppTags('preset-apps-close-tags', preset.apps_close || []);
       document.getElementById('preset-message').value = preset.message || '';
     }
   } else {
@@ -2138,8 +2233,8 @@ async function openPresetEditorImpl(presetId) {
     document.getElementById('preset-icon-input').value = '⚡';
     document.getElementById('preset-name-input').value = '';
     document.getElementById('preset-volume').value = 50;
-    document.getElementById('preset-apps-open').value = '';
-    document.getElementById('preset-apps-close').value = '';
+    setPresetAppTags('preset-apps-open-tags', []);
+    setPresetAppTags('preset-apps-close-tags', []);
     document.getElementById('preset-message').value = '';
   }
 
@@ -2213,21 +2308,133 @@ async function loadAppsForAutocomplete() {
   }
 }
 
-async function searchAppsLive(inputEl) {
-  if (!inputEl) return;
-  const query = inputEl.value.trim();
-  if (query.length < 2) return;
+async function searchAppsLive(input) {
+  if (!input) return;
+  const query = input.value.trim();
+  if (query.length < 2) {
+    hideAppSuggestions(input);
+    return;
+  }
+
   try {
-    const results = await api.call('search_apps', query) || [];
-    const datalist = document.getElementById('apps-datalist')
-      || document.getElementById('installed-apps-list');
-    if (!datalist) return;
-    datalist.innerHTML = results
-      .map((app) => `<option value="${esc(app.name)}" data-type="${esc(app.type || '')}"></option>`)
-      .join('');
+    const apps = await api.call('search_apps', query) || [];
+
+    let dropdown = input.nextElementSibling;
+    if (!dropdown || !dropdown.classList.contains('app-dropdown')) {
+      dropdown = document.createElement('div');
+      dropdown.className = 'app-dropdown';
+      dropdown.style.cssText = `
+        position:absolute; z-index:1000;
+        background:rgba(16,20,50,0.95);
+        border:1px solid rgba(108,142,255,0.2);
+        border-radius:10px;
+        max-height:200px; overflow-y:auto;
+        min-width:100%; backdrop-filter:blur(20px);
+        box-shadow:0 8px 32px rgba(0,0,30,0.4);
+      `;
+      input.parentElement.style.position = 'relative';
+      input.parentElement.appendChild(dropdown);
+    }
+
+    const typeIcons = {
+      registry: '🖥️',
+      win32: '🖥️',
+      uwp: '🏪',
+      lnk: '📎',
+      start_menu: '📎',
+      steam_game: '🎮',
+      gaming: '🎮',
+      epic: '⚡',
+      program_files: '📦',
+      unknown: '📦',
+    };
+
+    dropdown.innerHTML = '';
+    apps.forEach((app) => {
+      const row = document.createElement('div');
+      row.className = 'app-suggestion';
+      row.style.cssText = `
+        padding:8px 12px;cursor:pointer;display:flex;align-items:center;
+        gap:8px;font-size:12px;color:rgba(255,255,255,0.75);
+        border-bottom:1px solid rgba(255,255,255,0.04);transition:background 0.1s;
+      `;
+      row.addEventListener('mouseenter', () => { row.style.background = 'rgba(108,142,255,0.12)'; });
+      row.addEventListener('mouseleave', () => { row.style.background = 'transparent'; });
+      row.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        selectAppForPreset(input, app.name);
+      });
+      const icon = typeIcons[app.type] || '📦';
+      row.innerHTML = `
+        <span>${icon}</span>
+        <span>${esc(app.name)}</span>
+        <span style="font-size:10px;color:rgba(255,255,255,0.25);margin-left:auto">${esc(app.type || '')}</span>
+      `;
+      dropdown.appendChild(row);
+    });
+
+    dropdown.style.display = apps.length ? 'block' : 'none';
   } catch (e) {
     console.debug('searchAppsLive:', e);
   }
+}
+
+function hideAppSuggestions(input) {
+  const dropdown = input?.parentElement?.querySelector('.app-dropdown');
+  if (dropdown) dropdown.style.display = 'none';
+}
+
+function createAppTag(appName) {
+  const tag = document.createElement('div');
+  tag.className = 'app-tag';
+  tag.dataset.appName = appName;
+  tag.style.cssText = `
+    display:inline-flex;align-items:center;gap:5px;
+    padding:4px 10px;margin:3px;
+    background:rgba(108,142,255,0.15);
+    border:1px solid rgba(108,142,255,0.25);
+    border-radius:20px;font-size:11px;color:rgba(255,255,255,0.8);
+  `;
+  const label = document.createElement('span');
+  label.textContent = appName;
+  const remove = document.createElement('span');
+  remove.textContent = '✕';
+  remove.style.cssText = 'cursor:pointer;opacity:0.5;font-size:12px;margin-left:2px';
+  remove.addEventListener('click', () => tag.remove());
+  tag.appendChild(label);
+  tag.appendChild(remove);
+  return tag;
+}
+
+function setPresetAppTags(containerId, appNames) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.innerHTML = '';
+  (appNames || []).forEach((name) => {
+    if (name) container.appendChild(createAppTag(name));
+  });
+}
+
+function selectAppForPreset(input, appName) {
+  const section = input?.closest('.preset-section');
+  const container = section?.querySelector('.app-tags');
+  if (!container || !appName) return;
+
+  const existing = Array.from(container.querySelectorAll('.app-tag'))
+    .map((tag) => tag.dataset.appName);
+  if (!existing.includes(appName)) {
+    container.appendChild(createAppTag(appName));
+  }
+
+  input.value = '';
+  hideAppSuggestions(input);
+}
+
+function getSelectedApps(containerSelector) {
+  const el = document.querySelector(containerSelector);
+  return Array.from(el?.querySelectorAll('.app-tag') || [])
+    .map((tag) => tag.dataset.appName)
+    .filter(Boolean);
 }
 
 async function refreshInstalledAppsDatalist() {
@@ -2358,8 +2565,8 @@ async function savePreset() {
       || document.getElementById('preset-icon-input')?.value?.trim()
       || '⚡',
     volume: parseInt(document.getElementById('preset-volume')?.value || '50', 10),
-    apps_open: (document.getElementById('preset-apps-open')?.value || '').split(',').map(s => s.trim()).filter(Boolean),
-    apps_close: (document.getElementById('preset-apps-close')?.value || '').split(',').map(s => s.trim()).filter(Boolean),
+    apps_open: getSelectedApps('#preset-apps-open-tags'),
+    apps_close: getSelectedApps('#preset-apps-close-tags'),
     message: document.getElementById('preset-message')?.value?.trim() || `Mode ${name} activé.`,
   };
 
@@ -2947,12 +3154,31 @@ function esc(text) {
 }
 
 function renderMarkdown(text) {
-  // Markdown minimal : gras, italique, code, sauts de ligne
-  return text
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\n/g, '<br>');
+  if (!text) return '';
+
+  const links: { label: string; url: string }[] = [];
+  let processed = String(text).replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => {
+    const id = links.length;
+    links.push({ label, url });
+    return `\x00LINK${id}\x00`;
+  });
+
+  let html = esc(processed);
+  links.forEach((link, id) => {
+    const safeUrl = link.url.replace(/"/g, '&quot;');
+    html = html.replace(
+      `\x00LINK${id}\x00`,
+      `<a href="#" class="md-link" data-url="${safeUrl}">${esc(link.label)}</a>`
+    );
+  });
+
+  html = html.replace(/^## (.+)$/gm, '<h3 class="md-h2">$1</h3>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  html = html.replace(/^• (.+)$/gm, '<div class="md-bullet">• $1</div>');
+  html = html.replace(/\n/g, '<br>');
+  return html;
 }
 
 function scrollToBottom() {
@@ -3043,7 +3269,6 @@ function bindMainUiButtons() {
     'export-btn': () => window.app?.exportConversation?.(),
     'settings-btn': () => toggleSettings(),
     'settings-close-btn': () => toggleSettings(),
-    'mic-btn': () => toggleMic(),
     'send-btn': () => sendMessage(),
   };
   Object.entries(actions).forEach(([id, fn]) => {
@@ -3286,6 +3511,10 @@ function exposeGlobalApp() {
     refreshInstalledAppsDatalist,
     loadAppsForAutocomplete,
     searchAppsLive,
+    hideAppSuggestions,
+    selectAppForPreset,
+    getSelectedApps,
+    setPresetAppTags,
     registerLocalModel,
     pickAndRegisterLocalModel,
     loadGoogleStatus,
